@@ -1,0 +1,177 @@
+#:kivy 2.3.1
+
+<ServoLabel@Label>:
+    font_name: 'assets/Orbitron-Medium.ttf'
+    font_size: '24sp'
+
+<ServoButton@Button>:
+    font_name: 'assets/Orbitron-Medium.ttf'
+    font_size: '24sp'
+    background_color: (0.3, 0.3, 0.3, 1)
+    background_normal: ''
+    canvas.before:
+        Color:
+            rgba: self.background_color
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [10]
+
+<NumberPadPopup@ModalView>:
+    size_hint: (1, 1)
+    background_color: (0.1, 0.1, 0.1, 1)
+    BoxLayout:
+        orientation: 'vertical'
+        Label:
+            id: numpad_display
+            text: ''
+            font_size: '48sp'
+            size_hint_y: None
+            height: '64dp'
+        GridLayout:
+            cols: 3
+            rows: 4
+            spacing: 10
+            padding: 10
+            ServoButton:
+                text: '7'
+                on_press: root.add_digit('7')
+            ServoButton:
+                text: '8'
+                on_press: root.add_digit('8')
+            ServoButton:
+                text: '9'
+                on_press: root.add_digit('9')
+            ServoButton:
+                text: '4'
+                on_press: root.add_digit('4')
+            ServoButton:
+                text: '5'
+                on_press: root.add_digit('5')
+            ServoButton:
+                text: '6'
+                on_press: root.add_digit('6')
+            ServoButton:
+                text: '1'
+                on_press: root.add_digit('1')
+            ServoButton:
+                text: '2'
+                on_press: root.add_digit('2')
+            ServoButton:
+                text: '3'
+                on_press: root.add_digit('3')
+            ServoButton:
+                text: 'Clear'
+                on_press: root.clear_display()
+            ServoButton:
+                text: '0'
+                on_press: root.add_digit('0')
+            ServoButton:
+                text: 'Delete'
+                on_press: root.delete_digit()
+        BoxLayout:
+            size_hint_y: None
+            height: '64dp'
+            spacing: 10
+            padding: 10
+            Button:
+                text: 'X'
+                on_press: root.dismiss()
+            Button:
+                text: 'Enter'
+                on_press: root.submit_value()
+
+<ServoControl>:
+    orientation: 'vertical'
+    canvas.before:
+        Color:
+            rgba: 0.1, 0.1, 0.1, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        size_hint_y: None
+        height: '48dp'
+        ServoLabel:
+            text: 'Servo Speed'
+        ServoLabel:
+            text: 'R.P.M.'
+
+    GridLayout:
+        id: rpm_layout
+        cols: 4
+        size_hint_y: None
+        height: '150dp'
+        padding: 10
+        spacing: 10
+        ServoLabel:
+            id: rpm_digit_1
+            text: '0'
+            font_size: '100sp'
+            color: (0.2, 0.2, 0.2, 1)
+        ServoLabel:
+            id: rpm_digit_2
+            text: '0'
+            font_size: '100sp'
+            color: (0.2, 0.2, 0.2, 1)
+        ServoLabel:
+            id: rpm_digit_3
+            text: '5'
+            font_size: '100sp'
+        ServoLabel:
+            id: rpm_digit_4
+            text: '0'
+            font_size: '100sp'
+
+    GridLayout:
+        cols: 5
+        rows: 3
+        padding: 10
+        spacing: 10
+        ServoButton:
+            text: '50'
+            on_press: root.set_speed(50)
+        ServoButton:
+            text: '100'
+            on_press: root.set_speed(100)
+        ServoButton:
+            text: '200'
+            on_press: root.set_speed(200)
+        ServoButton:
+            text: '+50'
+            on_press: root.adjust_speed(50)
+        ServoButton:
+            text: '-50'
+            on_press: root.adjust_speed(-50)
+        ServoButton:
+            text: '400'
+            on_press: root.set_speed(400)
+        ServoButton:
+            text: '600'
+            on_press: root.set_speed(600)
+        ServoButton:
+            text: '800'
+            on_press: root.set_speed(800)
+        ServoButton:
+            text: 'Custom'
+            on_press: root.show_custom_numpad()
+        Widget: # Empty cell
+        ServoButton:
+            text: '1000'
+            on_press: root.set_speed(1000)
+        ServoButton:
+            text: '1500'
+            on_press: root.set_speed(1500)
+        ServoButton:
+            text: '2000'
+            on_press: root.set_speed(2000)
+        ServoButton:
+            id: fwd_button
+            text: 'FWD'
+            background_color: (0, 0.5, 1, 1)
+            on_press: root.toggle_direction('fwd')
+        ServoButton:
+            id: rev_button
+            text: 'REV'
+            on_press: root.toggle_direction('rev')
