@@ -63,7 +63,7 @@
     background_color: (100.3, 110.3, 0.3, 0)
     background_normal: ''
     background_down: ''
-    state: 'normal'
+    state: 'down'
 
 <ServoTButtonLRad@ToggleButton>: #Left Radius Toggle Button
     font_name: 'assets/Orbitron-Medium.ttf'
@@ -141,6 +141,23 @@
             ServoButton:
                 text: 'Set'
                 on_press: root.submit_value()
+
+<OfflinePopup@ModalView>:
+    size_hint: (1, 1)
+    background_color: (0.1, 0.1, 0.1, 0.8)
+    overlay_color: (0.1, 0.1, 0.1, 0)
+    BoxLayout:
+        orientation: 'vertical'
+        Label:
+            id: offline_display
+            text: 'SERVO DRIVE OFFLINE'
+            font_name: 'assets/Orbitron-Medium.ttf'
+            font_size: '48sp'
+            #size_hint_y: None
+            on_size: self.text_size = self.size
+            height: '480dp'
+            halign: 'center'
+            valign: 'middle'
 
 <ServoControl>:
     orientation: 'vertical'
@@ -321,33 +338,37 @@
                 size_hint_y: (None)
                 height: '60dp'
                 ServoButton:
-                    text: 'Custom'
+                    text: 'Custom Speed'
+                    font_size: '28sp'
                     on_press: root.show_custom_numpad()
             GridLayout:
                 size_hint_y: (None)
                 height: '60dp'
-                cols: 3
+                cols: 2
+                spacing: 5
                 ServoTButtonLRad:
                     id: fwd_button
-                    text: 'FWD'
-                    font_size: '38sp'
-                    on_press: root.toggle_direction('fwd')
+                    text: 'FORWARD'
+                    color: (0, 0.5, 1, 1) if self.state == 'normal' else (1, 1, 1, 1)
+                    font_size: '18sp'
+                    on_press: root.toggle_direction('rev') if self.text == 'FORWARD' else root.toggle_direction('fwd')
                     canvas.before:
                         Color:
-                            rgba: (0.105, 0.105, 0.105, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
+                            rgba: (0.16, 0.16, 0.16, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
                         RoundedRectangle:
                             size: self.size
                             pos: self.pos
-                            radius: [(7.0, 7.0), (0, 0), (0, 0), (7.0, 7.0)]
+                            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
                 ServoTButtonRRad:
-                    id: rev_button
-                    text: 'REV'
-                    font_size: '38sp'
-                    on_press: root.toggle_direction('rev') 
+                    id: servo_button
+                    text: 'DISABLED'
+                    color: (1, 1, 1, 1) if self.state == 'normal' else (0.313, 0.313, 0.313, 1)
+                    font_size: '18sp'
+                    on_press: root.toggle_enable('enabled') if self.text == 'DISABLED' else root.toggle_enable('disabled') 
                     canvas.before:
                         Color:
-                            rgba: (0.105, 0.105, 0.105, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
+                            rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0.105, 0.105, 0.105, 1)
                         RoundedRectangle:
                             size: self.size
                             pos: self.pos
-                            radius: [(0, 0), (7.0, 7.0), (7.0, 7.0), (0, 0)]
+                            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]

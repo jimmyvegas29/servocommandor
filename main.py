@@ -3,9 +3,15 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.properties import NumericProperty, StringProperty
 from kivy.uix.modalview import ModalView
 from kivy.clock import Clock
-from mock_servo_communication import ServoCommunicator
+from servo_communication import ServoCommunicator
 from kivy.core.window import Window
+from kivy.lang import Builder
+from gpiozero import Button
 
+Builder.load_file("Servo.kv")
+#Window.borderless = True
+#Window.fullscreen = True
+#Window.show_cursor = False
 Window.size = (800, 480)
 
 class NumberPadPopup(ModalView):
@@ -39,13 +45,19 @@ class NumberPadPopup(ModalView):
         except ValueError:
             self.ids.numpad_display.text = 'Invalid Input'
 
+class OfflinePopup(ModalView):
+    def __init__(self, **kwargs):
+        super(OfflinePopup, self).__init__(**kwargs)
 
 class ServoControl(BoxLayout):
     current_speed = NumericProperty(50)
+    command_speed = NumericProperty(0)
     direction = StringProperty('fwd')
+    servo_state = StringProperty('disabled')
 
     def set_speed(self, speed):
         self.current_speed = speed
+        self.command_speed = speed
         if self.direction == 'rev':
             App.get_running_app().servo.set_speed(-self.current_speed)
         else:
@@ -54,15 +66,16 @@ class ServoControl(BoxLayout):
 
     def adjust_speed(self, amount):
         self.current_speed += amount
-        if self.current_speed > 3000:
-            self.current_speed = 3000
-        if self.current_speed < 0:
-            self.current_speed = 0
+        self.command_speed += amount
+        if self.command_speed > 3000:
+            self.command_speed = 3000
+        if self.command_speed < 0:
+            self.command_speed = 0
         if self.direction == 'rev':
-            App.get_running_app().servo.set_speed(-self.current_speed)
+            App.get_running_app().servo.set_speed(-self.command_speed)
         else:
-            App.get_running_app().servo.set_speed(self.current_speed)
-        print(f"Adjust speed by: {amount}")
+            App.get_running_app().servo.set_speed(self.command_speed)
+        print(f"Adjust speed by: {amount}") 
 
     def show_custom_numpad(self):
         popup = NumberPadPopup()
@@ -70,13 +83,25 @@ class ServoControl(BoxLayout):
 
     def toggle_direction(self, direction):
         self.direction = direction
+
         if self.direction == 'fwd':
-            self.ids.fwd_button.state = 'down'
-            self.ids.rev_button.state = 'normal'
-        else:
-            self.ids.fwd_button.state = 'normal'
-            self.ids.rev_button.state = 'down'
+            self.ids.fwd_button.text = 'FORWARD'
+        elif self.direction == 'rev':
+            self.ids.fwd_button.text = 'REVERSE'
         print(f"Toggle direction to: {self.direction}")
+
+    def toggle_enable(self, servo_state):
+        self.servo_state = servo_state
+
+        if self.servo_state == 'enabled':
+            self.ids.servo_button.state = 'normal'
+            self.ids.servo_button.text = 'ENABLED'
+            App.get_running_app().servo.enable_servo()
+        elif self.servo_state == 'disabled':
+            self.ids.servo_button.state = 'down'
+            self.ids.servo_button.text = 'DISABLED'
+            App.get_running_app().servo.disable_servo()
+        print(f"Servo State Changed To: {self.servo_state}")
 
     def update_rpm_display(self):
         rpm_str = str(int(self.current_speed)).zfill(4)
@@ -100,22 +125,33 @@ class ServoControl(BoxLayout):
 
 
 class ServoApp(App):
+    offline_flag = False
     def build(self):
         self.servo = ServoCommunicator()
-        self.servo.connect()
+        self.offline = OfflinePopup()
         root = ServoControl()
-        Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.1)
+        Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.3)
         return root
 
-    def on_stop(self):
-        self.servo.disconnect()
-
     def update_rpm(self, root, dt):
+        get_state = self.servo.get_servo_state()
+        if get_state != root.servo_state:
+            root.toggle_enable(get_state)
         rpm = self.servo.get_rpm()
-        print(rpm)
-        if rpm is not None:
-            root.current_speed = abs(rpm)
-            root.update_rpm_display()
+        if isinstance(rpm, int):
+            if self.offline_flag:
+                self.offline.dismiss()
+                self.offline_flag = False
+            if rpm > 3000:
+                rpm = 65536 - rpm
+            if rpm is not None:
+                root.current_speed = abs(rpm)
+                root.update_rpm_display()
+        else:
+            if not self.offline_flag:
+                self.offline.open()
+                self.offline_flag = True
+                print("Servo Drive Offline")
 
 
 if __name__ == '__main__':
