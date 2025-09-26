@@ -3,7 +3,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.properties import NumericProperty, StringProperty
 from kivy.uix.modalview import ModalView
 from kivy.clock import Clock
-from servo_communication import ServoCommunicator
+from mock_servo_communication import ServoCommunicator
 from kivy.core.window import Window
 from kivy.lang import Builder
 from gpiozero import Button
@@ -82,6 +82,9 @@ class ServoControl(BoxLayout):
         popup.open()
 
     def toggle_direction(self, direction):
+        if direction != self.direction: 
+            App.get_running_app().servo.set_speed(0) #When switching directions it will bring the bring the servo speed down to 0
+
         self.direction = direction
 
         if self.direction == 'fwd':
@@ -152,7 +155,6 @@ class ServoApp(App):
                 self.offline.open()
                 self.offline_flag = True
                 print("Servo Drive Offline")
-
 
 if __name__ == '__main__':
     ServoApp().run()
