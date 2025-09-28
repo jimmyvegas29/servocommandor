@@ -44,6 +44,8 @@ class NumberPadPopup(ModalView):
     def submit_value(self):
         try:
             value = int(self.ids.numpad_display.text)
+            if int(self.ids.numpad_display.text) == 999999:
+                App.get_running_app().stop()
             if int(self.ids.numpad_display.text) > 3000:
                 self.ids.numpad_display.color = (1,0,0,1)
             else:
