@@ -6,13 +6,20 @@ from kivy.clock import Clock
 from mock_servo_communication import ServoCommunicator
 from kivy.core.window import Window
 from kivy.lang import Builder
-from gpiozero import Button
 
-Builder.load_file("Servo.kv")
-#Window.borderless = True
-#Window.fullscreen = True
-#Window.show_cursor = False
-Window.size = (800, 480)
+###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
+Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
+Window.size = (800, 480) #uncomment for use with 800x480 Screens
+####################################################
+
+###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
+#Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
+#Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
+####################################################
+
+Window.borderless = True
+Window.fullscreen = True
+Window.show_cursor = False
 
 class NumberPadPopup(ModalView):
     def __init__(self, **kwargs):
@@ -133,6 +140,7 @@ class ServoApp(App):
         self.servo = ServoCommunicator()
         self.offline = OfflinePopup()
         root = ServoControl()
+        Window.bind(on_key_down=self.on_keyboard_down)
         Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.3)
         return root
 
@@ -155,6 +163,29 @@ class ServoApp(App):
                 self.offline.open()
                 self.offline_flag = True
                 print("Servo Drive Offline")
+
+    def on_keyboard_down(self, window, keycode, scancode, text, modifiers):
+        key_name = text
+
+        if key_name == 'a':
+            self.root.toggle_enable('enabled')
+            return True
+
+        if key_name == 's':
+            self.root.toggle_enable('disabled')
+            return True
+
+        if key_name == 'd':
+            if self.root.ids.fwd_button.text != 'FORWARD':
+                self.root.toggle_direction('fwd')
+                return True
+
+        if key_name == 'f':
+            if self.root.ids.fwd_button.text != 'REVERSE':
+                self.root.toggle_direction('rev')
+                return True
+
+        return False
 
 if __name__ == '__main__':
     ServoApp().run()
