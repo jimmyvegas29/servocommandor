@@ -19,7 +19,7 @@ Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
 ####################################################
 
 Window.borderless = True
-#.fullscreen = True
+Window.fullscreen = True
 Window.show_cursor = False
 
 class NumberPadPopup(ModalView):
