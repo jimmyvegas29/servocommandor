@@ -9,11 +9,11 @@ from kivy.lang import Builder
 from decimal import Decimal
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
-#Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
-#Window.size = (800, 480) #uncomment for use with 800x480 Screens
+# Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
+# Window.size = (800, 480) #uncomment for use with 800x480 Screens
 ####################################################
 
-###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
+###### UNCOMMENT FOR USE WITH 1200x720 SCREENS ######
 Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
 Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
 ####################################################
