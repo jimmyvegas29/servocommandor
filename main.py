@@ -6,6 +6,7 @@ from kivy.clock import Clock
 from mock_servo_communication import ServoCommunicator
 from kivy.core.window import Window
 from kivy.lang import Builder
+from decimal import Decimal
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
 Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
@@ -17,9 +18,9 @@ Window.size = (800, 480) #uncomment for use with 800x480 Screens
 #Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
 ####################################################
 
-Window.borderless = True
-Window.fullscreen = True
-Window.show_cursor = False
+#Window.borderless = True
+#Window.fullscreen = True
+#Window.show_cursor = False
 
 class NumberPadPopup(ModalView):
     def __init__(self, **kwargs):
@@ -59,25 +60,50 @@ class OfflinePopup(ModalView):
         super(OfflinePopup, self).__init__(**kwargs)
 
 class ServoControl(BoxLayout):
-    current_speed = NumericProperty(50)
-    command_speed = NumericProperty(0)
-    direction = StringProperty('fwd')
-    servo_state = StringProperty('disabled')
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.current_speed = NumericProperty(50)
+        self.command_speed = NumericProperty(0)
+        self.direction = StringProperty('fwd')
+        self.servo_state = StringProperty('disabled')
+        self.cfg = dict(App.get_running_app().config.items('Settings'))
+        self.mode = self.cfg['mode']
+        self.max_rpm = int(self.cfg['servo_max_rpm'])
+        self.unit = self.cfg['unit']
+        self.ratio = float(self.cfg['ratio'])
+        self.diameter = float(self.cfg['diameter'])
+        print(self.max_rpm)
+
+
+    def rpm_convert(self, surface_speed):
+        rpm = (surface_speed * 1000)/(3.14159 * self.diameter)
+        servo_rpm = rpm * self.ratio
+        return servo_rpm
+
+    def sfm_convert(self, servo_rpm):
+        output_rpm = servo_rpm/self.ratio
+        sfm = (3.14159 * output_rpm * self.diameter)/1000
+        return sfm
 
     def set_speed(self, speed):
-        self.current_speed = speed
-        self.command_speed = speed
+        if self.mode == 'rpm':
+            self.command_speed = round(speed*self.ratio)
+        elif self.mode == 'surface_speed':
+            self.command_speed = round(self.rpm_convert(speed))
+
         if self.direction == 'rev':
-            App.get_running_app().servo.set_speed(-self.current_speed)
+            App.get_running_app().servo.set_speed(-self.command_speed)
         else:
-            App.get_running_app().servo.set_speed(self.current_speed)
-        print(f"Set speed to: {self.current_speed}")
+            App.get_running_app().servo.set_speed(self.command_speed)
+        print(f"Set speed to: {self.command_speed}")
 
     def adjust_speed(self, amount):
-        self.current_speed += amount
-        self.command_speed += amount
-        if self.command_speed > 3000:
-            self.command_speed = 3000
+        if self.mode == 'rpm':
+            self.command_speed += round(amount*self.ratio)
+        elif self.mode == 'surface_speed':
+            self.command_speed += round(self.rpm_convert(amount))
+        if self.command_speed > self.max_rpm:
+            self.command_speed = self.max_rpm
         if self.command_speed < 0:
             self.command_speed = 0
         if self.direction == 'rev':
@@ -116,7 +142,11 @@ class ServoControl(BoxLayout):
         print(f"Servo State Changed To: {self.servo_state}")
 
     def update_rpm_display(self):
-        rpm_str = str(int(self.current_speed)).zfill(4)
+        if self.mode == 'rpm':
+            self.display_speed = round(self.current_speed/self.ratio)
+        elif self.mode == 'surface_speed':
+            self.display_speed = round(self.sfm_convert(self.current_speed))
+        rpm_str = str(int(self.display_speed)).zfill(4)
         self.ids.rpm_digit_1.text = rpm_str[0]
         self.ids.rpm_digit_2.text = rpm_str[1]
         self.ids.rpm_digit_3.text = rpm_str[2]
@@ -138,13 +168,34 @@ class ServoControl(BoxLayout):
 
 class ServoApp(App):
     offline_flag = False
+
+    def get_application_config(self):
+        return super(ServoApp, self).get_application_config('servo.ini')
+
+    def build_config(self, config):
+        # This ensures [General] and 'max_rpm' exist if the file is new/missing.
+        config.setdefaults('General', {'max_rpm': '3000'})
+
     def build(self):
         self.servo = ServoCommunicator()
         self.offline = OfflinePopup()
         root = ServoControl()
         Window.bind(on_key_down=self.on_keyboard_down)
         Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.3)
+        Clock.schedule_once(lambda dt: self.set_config(root, dt))
         return root
+
+    def set_config(self, root, dt):
+        settings = dict(App.get_running_app().config.items('Settings'))
+        sp_btn = dict(App.get_running_app().config.items(settings['mode']))
+        ids_dict = self.root.ids
+        for k, v in sp_btn.items():
+            getattr(ids_dict, k).text = v
+        if settings['mode'] == 'surface_speed':
+            if settings['unit'] == 'inch':
+                self.root.ids.servo_mode.text = 'S.F.M.'
+            elif settings['unit'] == 'metric':
+                self.root.ids.servo_mode.text = 'S.M.M.'
 
     def update_rpm(self, root, dt):
         get_state = self.servo.get_servo_state()

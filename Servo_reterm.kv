@@ -213,6 +213,7 @@
                 valign: 'middle'
                 padding: [10,0,0,5]
             ServoLabel:
+                id: servo_mode
                 text: 'R.P.M.'
                 text_size: self.size
                 font_size: '34dp'
@@ -283,12 +284,15 @@
                 cols: 3
                 spacing: 5
                 ServoButtonLRad:
+                    id: sp_btn1
                     text: '50'
                     on_press: root.set_speed(50)
                 ServoButtonNRad:
+                    id: sp_btn2
                     text: '100'
                     on_press: root.set_speed(100)
                 ServoButtonRRad:
+                    id: sp_btn3
                     text: '200'
                     on_press: root.set_speed(200)
             GridLayout:
@@ -297,12 +301,15 @@
                 cols: 3
                 spacing: 5
                 ServoButtonLRad:
+                    id: sp_btn4
                     text: '400'
                     on_press: root.set_speed(400)
                 ServoButtonNRad:
+                    id: sp_btn5
                     text: '600'
                     on_press: root.set_speed(600)
                 ServoButtonRRad:
+                    id: sp_btn6
                     text: '800'
                     on_press: root.set_speed(800)
             GridLayout:
@@ -311,12 +318,15 @@
                 cols: 3
                 spacing: 5
                 ServoButtonLRad:
+                    id: sp_btn7
                     text: '1000'
                     on_press: root.set_speed(1000)
                 ServoButtonNRad:
+                    id: sp_btn8
                     text: '1500'
                     on_press: root.set_speed(1500)
                 ServoButtonRRad:
+                    id: sp_btn9
                     text: '2000'
                     on_press: root.set_speed(2000)
         BoxLayout:
@@ -330,6 +340,7 @@
                 cols: 2
                 spacing: 5
                 ServoButtonLRad:
+                    id: inc_btnp
                     text: '+50'
                     on_press: root.adjust_speed(50)
                     canvas.before:
@@ -340,6 +351,7 @@
                             pos: self.pos
                             radius: [(7.0, 7.0), (0, 0), (0, 0), (7.0, 7.0)]
                 ServoButtonRRad:
+                    id: inc_btnn
                     text: '-50'
                     on_press: root.adjust_speed(-50)
                     canvas.before:
