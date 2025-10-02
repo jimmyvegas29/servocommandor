@@ -9,18 +9,18 @@ from kivy.lang import Builder
 from decimal import Decimal
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
-Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
-Window.size = (800, 480) #uncomment for use with 800x480 Screens
+#Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
+#Window.size = (800, 480) #uncomment for use with 800x480 Screens
 ####################################################
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
-#Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
-#Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
+Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
+Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
 ####################################################
 
-#Window.borderless = True
-#Window.fullscreen = True
-#Window.show_cursor = False
+Window.borderless = True
+#.fullscreen = True
+Window.show_cursor = False
 
 class NumberPadPopup(ModalView):
     def __init__(self, **kwargs):
@@ -173,8 +173,8 @@ class ServoApp(App):
         return super(ServoApp, self).get_application_config('servo.ini')
 
     def build_config(self, config):
-        # This ensures [General] and 'max_rpm' exist if the file is new/missing.
-        config.setdefaults('General', {'max_rpm': '3000'})
+        # This function is necessary to load custom ini file. 
+        config.setdefaults('settings', {'general': True})
 
     def build(self):
         self.servo = ServoCommunicator()
