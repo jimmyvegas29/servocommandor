@@ -6,7 +6,8 @@ from kivy.clock import Clock
 from mock_servo_communication import ServoCommunicator
 from kivy.core.window import Window
 from kivy.lang import Builder
-from decimal import Decimal
+import subprocess
+import os
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
 # Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
@@ -45,8 +46,9 @@ class NumberPadPopup(ModalView):
     def submit_value(self):
         try:
             value = int(self.ids.numpad_display.text)
-            if int(self.ids.numpad_display.text) == 999999:
-                App.get_running_app().stop()
+            print(len(str(value)))
+            if str(value)[0:3] == '999' and len(str(value)) == 6:
+                self.the_backdoor(value)
             if int(self.ids.numpad_display.text) > 3000:
                 self.ids.numpad_display.color = (1,0,0,1)
             else:
@@ -54,6 +56,14 @@ class NumberPadPopup(ModalView):
                 self.dismiss()
         except ValueError:
             self.ids.numpad_display.text = 'Invalid Input'
+
+    def the_backdoor(self, value):
+        if int(value) == 999999:
+            App.get_running_app().stop()
+        if int(value) == 999123:
+            shutdown_path = os.path.expanduser("~/servocommandor/shutdown_root.sh")
+            subprocess.call(["sudo", shutdown_path])
+
 
 class OfflinePopup(ModalView):
     def __init__(self, **kwargs):
@@ -168,9 +178,8 @@ class ServoControl(BoxLayout):
 
 class ServoApp(App):
     offline_flag = False
-
     def get_application_config(self):
-        return super(ServoApp, self).get_application_config('servo.ini')
+        return super(ServoApp, self).get_application_config('~/servocommandor/%(appname)s.ini')
 
     def build_config(self, config):
         # This function is necessary to load custom ini file. 
