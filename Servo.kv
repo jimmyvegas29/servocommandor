@@ -327,7 +327,7 @@
                 ServoButtonLRad:
                     id: inc_btnp
                     text: '+50'
-                    on_press: root.adjust_speed(50)
+                    on_press: root.adjust_speed(int(self.text))
                     canvas.before:
                         Color:
                             rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
@@ -338,7 +338,7 @@
                 ServoButtonRRad:
                     id: inc_btnn
                     text: '-50'
-                    on_press: root.adjust_speed(-50)
+                    on_press: root.adjust_speed(int(self.text))
                     canvas.before:
                         Color:
                             rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0, 0.5, 1, 1)

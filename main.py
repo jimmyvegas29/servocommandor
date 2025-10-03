@@ -10,18 +10,15 @@ import subprocess
 import os
 
 ###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
-# Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
-# Window.size = (800, 480) #uncomment for use with 800x480 Screens
+#Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
+#Window.size = (800, 480) #uncomment for use with 800x480 Screens
 ####################################################
 
 ###### UNCOMMENT FOR USE WITH 1200x720 SCREENS ######
-Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
-Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
+# Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
+# Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
 ####################################################
 
-Window.borderless = True
-Window.fullscreen = True
-Window.show_cursor = False
 
 class NumberPadPopup(ModalView):
     def __init__(self, **kwargs):
@@ -46,7 +43,6 @@ class NumberPadPopup(ModalView):
     def submit_value(self):
         try:
             value = int(self.ids.numpad_display.text)
-            print(len(str(value)))
             if str(value)[0:3] == '999' and len(str(value)) == 6:
                 self.the_backdoor(value)
             if int(self.ids.numpad_display.text) > 3000:
@@ -70,10 +66,11 @@ class OfflinePopup(ModalView):
         super(OfflinePopup, self).__init__(**kwargs)
 
 class ServoControl(BoxLayout):
+    current_speed = NumericProperty(50)
+    command_speed = NumericProperty(0)
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_speed = NumericProperty(50)
-        self.command_speed = NumericProperty(0)
+        unit_conversion = {'inch': 12, 'metric': 1000}
         self.direction = StringProperty('fwd')
         self.servo_state = StringProperty('disabled')
         self.cfg = dict(App.get_running_app().config.items('Settings'))
@@ -82,18 +79,18 @@ class ServoControl(BoxLayout):
         self.unit = self.cfg['unit']
         self.ratio = float(self.cfg['ratio'])
         self.diameter = float(self.cfg['diameter'])
-        print(self.max_rpm)
+        self.unit_div = unit_conversion[self.unit]
 
 
     def rpm_convert(self, surface_speed):
-        rpm = (surface_speed * 1000)/(3.14159 * self.diameter)
+        rpm = (surface_speed * self.unit_div)/(3.14159 * self.diameter)
         servo_rpm = rpm * self.ratio
         return servo_rpm
 
-    def sfm_convert(self, servo_rpm):
+    def ss_convert(self, servo_rpm):
         output_rpm = servo_rpm/self.ratio
-        sfm = (3.14159 * output_rpm * self.diameter)/1000
-        return sfm
+        ss = (3.14159 * output_rpm * self.diameter)/self.unit_div
+        return ss
 
     def set_speed(self, speed):
         if self.mode == 'rpm':
@@ -155,7 +152,7 @@ class ServoControl(BoxLayout):
         if self.mode == 'rpm':
             self.display_speed = round(self.current_speed/self.ratio)
         elif self.mode == 'surface_speed':
-            self.display_speed = round(self.sfm_convert(self.current_speed))
+            self.display_speed = round(self.ss_convert(self.current_speed))
         rpm_str = str(int(self.display_speed)).zfill(4)
         self.ids.rpm_digit_1.text = rpm_str[0]
         self.ids.rpm_digit_2.text = rpm_str[1]
@@ -186,17 +183,22 @@ class ServoApp(App):
         config.setdefaults('settings', {'general': True})
 
     def build(self):
+        Builder.load_file("Servo.kv")
         self.servo = ServoCommunicator()
         self.offline = OfflinePopup()
         root = ServoControl()
-        Window.bind(on_key_down=self.on_keyboard_down)
         Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.3)
         Clock.schedule_once(lambda dt: self.set_config(root, dt))
         return root
 
     def set_config(self, root, dt):
-        settings = dict(App.get_running_app().config.items('Settings'))
-        sp_btn = dict(App.get_running_app().config.items(settings['mode']))
+        Window.borderless = self.config.getboolean('GUI', 'borderless')
+        Window.fullscreen = self.config.getboolean('GUI', 'fullscreen')
+        Window.show_cursor = self.config.getboolean('GUI', 'cursor')
+        Window.size = (800, 480)
+        Window.bind(on_key_down=self.on_keyboard_down)
+        settings = dict(self.config.items('Settings'))
+        sp_btn = dict(self.config.items(settings['mode']))
         ids_dict = self.root.ids
         for k, v in sp_btn.items():
             getattr(ids_dict, k).text = v

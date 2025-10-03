@@ -286,15 +286,15 @@
                 ServoButtonLRad:
                     id: sp_btn1
                     text: '50'
-                    on_press: root.set_speed(50)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonNRad:
                     id: sp_btn2
                     text: '100'
-                    on_press: root.set_speed(100)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonRRad:
                     id: sp_btn3
                     text: '200'
-                    on_press: root.set_speed(200)
+                    on_press: root.set_speed(int(self.text))
             GridLayout:
                 size_hint_y: (None)
                 height: '93.173dp'
@@ -303,15 +303,15 @@
                 ServoButtonLRad:
                     id: sp_btn4
                     text: '400'
-                    on_press: root.set_speed(400)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonNRad:
                     id: sp_btn5
                     text: '600'
-                    on_press: root.set_speed(600)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonRRad:
                     id: sp_btn6
                     text: '800'
-                    on_press: root.set_speed(800)
+                    on_press: root.set_speed(int(self.text))
             GridLayout:
                 size_hint_y: (None)
                 height: '93.173dp'
@@ -320,15 +320,15 @@
                 ServoButtonLRad:
                     id: sp_btn7
                     text: '1000'
-                    on_press: root.set_speed(1000)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonNRad:
                     id: sp_btn8
                     text: '1500'
-                    on_press: root.set_speed(1500)
+                    on_press: root.set_speed(int(self.text))
                 ServoButtonRRad:
                     id: sp_btn9
                     text: '2000'
-                    on_press: root.set_speed(2000)
+                    on_press: root.set_speed(int(self.text))
         BoxLayout:
             orientation: "vertical"
             size_hint_x: (.3275)
@@ -342,7 +342,7 @@
                 ServoButtonLRad:
                     id: inc_btnp
                     text: '+50'
-                    on_press: root.adjust_speed(50)
+                    on_press: root.adjust_speed(self.text)
                     canvas.before:
                         Color:
                             rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
@@ -353,7 +353,7 @@
                 ServoButtonRRad:
                     id: inc_btnn
                     text: '-50'
-                    on_press: root.adjust_speed(-50)
+                    on_press: root.adjust_speed(self.text)
                     canvas.before:
                         Color:
                             rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
