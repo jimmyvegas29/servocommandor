@@ -9,16 +9,6 @@ from kivy.lang import Builder
 import subprocess
 import os
 
-###### UNCOMMENT FOR USE WITH 800x480 SCREENS ######
-#Builder.load_file("Servo.kv") #uncomment for use with 800x480 Screens
-#Window.size = (800, 480) #uncomment for use with 800x480 Screens
-####################################################
-
-###### UNCOMMENT FOR USE WITH 1200x720 SCREENS ######
-# Builder.load_file('Servo_reterm.kv') #uncomment for use with Seedd reTerminal 1280x720
-# Window.size = (1280, 720) #uncomment for use with Seedd reTerminal 1280x720
-####################################################
-
 
 class NumberPadPopup(ModalView):
     def __init__(self, **kwargs):
@@ -179,11 +169,11 @@ class ServoApp(App):
         return super(ServoApp, self).get_application_config('~/servocommandor/%(appname)s.ini')
 
     def build_config(self, config):
-        # This function is necessary to load custom ini file. 
+        # This function is necessary to load custom ini file. but it does do anything
         config.setdefaults('settings', {'general': True})
 
     def build(self):
-        Builder.load_file("Servo.kv")
+        Builder.load_file(f"{self.config.get('GUI', 'kvfile')}.kv")
         self.servo = ServoCommunicator()
         self.offline = OfflinePopup()
         root = ServoControl()
@@ -197,6 +187,8 @@ class ServoApp(App):
         Window.show_cursor = self.config.getboolean('GUI', 'cursor')
         Window.size = (800, 480)
         Window.bind(on_key_down=self.on_keyboard_down)
+        reverse = self.config.getboolean('GUI', 'no_reverse')
+        kv_file = self.config.get('GUI', 'kvfile')
         settings = dict(self.config.items('Settings'))
         sp_btn = dict(self.config.items(settings['mode']))
         ids_dict = self.root.ids
@@ -207,6 +199,15 @@ class ServoApp(App):
                 self.root.ids.servo_mode.text = 'S.F.M.'
             elif settings['unit'] == 'metric':
                 self.root.ids.servo_mode.text = 'S.M.M.'
+        if reverse == True:
+            self.root.ids.lb_layout.cols = 1
+            btn_font_size = self.root.ids.servo_button.font_size
+            self.root.ids.servo_button.font_size = btn_font_size * 2
+            fwd_btn = self.root.ids.fwd_button
+            fwd_btn.parent.remove_widget(fwd_btn)
+        if kv_file == 'Servo_reterm':
+            Window.size = (1280, 720)
+
 
     def update_rpm(self, root, dt):
         get_state = self.servo.get_servo_state()
@@ -239,15 +240,16 @@ class ServoApp(App):
             self.root.toggle_enable('disabled')
             return True
 
-        if key_name == 'd':
-            if self.root.ids.fwd_button.text != 'FORWARD':
-                self.root.toggle_direction('fwd')
-                return True
+        if self.config.getboolean('GUI', 'no_reverse') == False:
+            if key_name == 'd':
+                if self.root.ids.fwd_button.text != 'FORWARD':
+                    self.root.toggle_direction('fwd')
+                    return True
 
-        if key_name == 'f':
-            if self.root.ids.fwd_button.text != 'REVERSE':
-                self.root.toggle_direction('rev')
-                return True
+            if key_name == 'f':
+                if self.root.ids.fwd_button.text != 'REVERSE':
+                    self.root.toggle_direction('rev')
+                    return True
 
         return False
 

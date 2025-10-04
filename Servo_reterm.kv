@@ -369,6 +369,7 @@
                     font_size: '43.4sp'
                     on_press: root.show_custom_numpad()
             GridLayout:
+                id: lb_layout
                 size_hint_y: (None)
                 height: '93.173dp'
                 cols: 2
@@ -394,7 +395,7 @@
                     on_press: root.toggle_enable('enabled') if self.text == 'DISABLED' else root.toggle_enable('disabled') 
                     canvas.before:
                         Color:
-                            rgba: (0.313, 0.313, 0.313, 1) if self.state == 'normal' else (0.105, 0.105, 0.105, 1)
+                            rgba: (0, 0.5, 1, 1) if self.state == 'normal' else (0.105, 0.105, 0.105, 1)
                         RoundedRectangle:
                             size: self.size
                             pos: self.pos
