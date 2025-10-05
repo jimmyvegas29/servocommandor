@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# Executes the shutdown command immediately.
-# Note: We use 'systemctl poweroff' as it's the modern Linux standard.
-# The -i flag will be ignored since the script is executed by the system.
-/usr/bin/systemctl poweroff
+# $1 refers to the first command-line argument: 'poweroff' or 'reboot'
+
+if [ -z "$1" ]; then
+    COMMAND="poweroff" # Default action if nothing is passed
+else
+    COMMAND="$1"
+fi
+
+# ? EXECUTE COMMAND DIRECTLY (as script is already running as root from Python)
+/usr/bin/systemctl "$COMMAND"

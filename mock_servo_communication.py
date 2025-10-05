@@ -37,3 +37,6 @@ class ServoCommunicator:
 
     def get_rpm(self):
         return self.rpm
+
+    def get_torque(self):
+        return 0

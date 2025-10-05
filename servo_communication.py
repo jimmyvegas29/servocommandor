@@ -15,7 +15,7 @@ class ServoCommunicator:
             parity='N',
             stopbits=1,
             timeout=1,
-            retries=0
+            retries=0,
         )
         self.slave_id = slave_id
         self.servostate = 'disabled'
@@ -67,6 +67,15 @@ class ServoCommunicator:
             response = self.client.read_input_registers(0x0000, count=1, device_id=self.slave_id)
         except ModbusException as exc:
             print(exc)
+            return(exec)
+        if not response.isError():
+            return response.registers[0]
+        return None
+
+    def get_torque(self):
+        try:
+            response = self.client.read_input_registers(0x0009, count=1, device_id=self.slave_id)
+        except ModbusException as exc:
             return(exec)
         if not response.isError():
             return response.registers[0]
