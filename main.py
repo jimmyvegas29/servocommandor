@@ -67,16 +67,25 @@ class OfflinePopup(ModalView):
     def __init__(self, **kwargs):
         super(OfflinePopup, self).__init__(**kwargs)
 
+    def full_shutdown(self):
+        shutdown_path = os.path.expanduser("~/servocommandor/shutdown_root.sh")
+        subprocess.call(["sudo", shutdown_path, "poweroff"])
+    def sys_restart(self):
+        shutdown_path = os.path.expanduser("~/servocommandor/shutdown_root.sh")
+        subprocess.call(["sudo", shutdown_path, "reboot"])
+    def app_close(self):
+        App.get_running_app().stop()
+
 class ServoControl(BoxLayout):
+    servo_state = StringProperty('disabled')
     current_torque = NumericProperty(0)
     current_speed = NumericProperty(0)
     command_speed = NumericProperty(0)
-    temp_plot = ObjectProperty(LinePlot(color=[0, 0.5, 1, 1], line_width=1.5))
+    torque_plot = ObjectProperty(LinePlot(color=[0, 0.5, 1, 1], line_width=1.5))
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         unit_conversion = {'inch': 12, 'metric': 1000}
         self.direction = StringProperty('fwd')
-        self.servo_state = StringProperty('disabled')
         self.cfg = dict(App.get_running_app().config.items('Settings'))
         self.mode = self.cfg['mode']
         self.max_rpm = int(self.cfg['servo_max_rpm'])
@@ -209,8 +218,8 @@ class ServoControl(BoxLayout):
         if len(self.data_list) > 40:
             self.data_list = self.data_list[-40:]
         #Update the Plot and Axes
-        self.temp_plot.points = self.data_list
-        self.ids.torque_graph.add_plot(self.temp_plot)
+        self.torque_plot.points = self.data_list
+        self.ids.torque_graph.add_plot(self.torque_plot)
         self.ids.torque_graph.xmin = self.data_list[0][0]
         self.ids.torque_graph.xmax = self.data_list[-1][0] + 1
         self.data_time += 0.3

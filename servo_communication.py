@@ -23,7 +23,7 @@ class ServoCommunicator:
         ###### COMMENT OUT THIS SECTION IF NOT USING PHYSICAL BUTTONS #####
         self.enablebutton = Button(21, bounce_time=.1)
         self.enablebutton.when_pressed = self.enable_servo
-        self.disablebutton = Button(13, bounce_time=.1)
+        self.disablebutton = Button(12, bounce_time=.1)
         self.disablebutton.when_pressed = self.disable_servo
         ###################################################################
 

@@ -166,16 +166,97 @@
     overlay_color: (0.1, 0.1, 0.1, 0)
     BoxLayout:
         orientation: 'vertical'
-        Label:
-            id: offline_display
-            text: 'SERVO DRIVE OFFLINE'
-            font_name: 'assets/Orbitron-Medium.ttf'
-            font_size: '48sp'
-            #size_hint_y: None
-            on_size: self.text_size = self.size
-            height: '480dp'
-            halign: 'center'
-            valign: 'middle'
+        size_hint: (0.6, 0.3)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        canvas:
+            Color: 
+                rgb: 0.16, 0.16, 0.16
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7.0, 7.0), (7.0, 7.0), (0, 0), (0, 0)]
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: (0.35)
+            canvas:
+                Color: 
+                    rgb: 0.16, 0.16, 0.16
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+            Label:
+                id: offline_display
+                text: 'DRIVE OFFLINE'
+                font_name: 'assets/Orbitron-Medium.ttf'
+                font_size: '48sp'
+                on_size: self.text_size = self.size
+                halign: 'center'
+                valign: 'middle'
+        BoxLayout:
+            size_hint_y: (0.25)
+            orientation: 'vertical'
+            canvas:
+                Color: 
+                    rgb: 0.16, 0.16, 0.16
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+            Label:
+                id: offline_display
+                text: 'Check connection or power'
+                font_name: 'assets/Orbitron-Medium.ttf'
+                font_size: '20sp'
+                on_size: self.text_size = self.size
+                halign: 'center'
+                valign: 'top'
+        BoxLayout:
+            size_hint_y: (0.40)
+            GridLayout:
+                cols: 3
+                spacing: 5
+                ServoButton:
+                    text: 'System Shutdown'
+                    text_size: self.size
+                    font_size: '20sp'
+                    halign: 'center'
+                    valign: 'middle'
+                    on_press: root.full_shutdown()
+                    canvas.before:
+                        Color:
+                            rgba: (0.105, 0.105, 0.105, 1)
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
+                ServoButton:
+                    text: 'System Restart'
+                    text_size: self.size
+                    font_size: '20sp'
+                    halign: 'center'
+                    valign: 'middle'
+                    on_press: root.sys_restart()
+                    canvas.before:
+                        Color:
+                            rgba: (0.105, 0.105, 0.105, 1)
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
+                ServoButton:
+                    text: 'App Shutdown'
+                    text_size: self.size
+                    font_size: '20sp'
+                    halign: 'center'
+                    valign: 'middle'
+                    on_press: root.app_close()
+                    canvas.before:
+                        Color:
+                            rgba: (0.105, 0.105, 0.105, 1)
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
 
 <ServoControl>:
     size: (1280.0,720.0)
