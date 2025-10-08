@@ -10,6 +10,7 @@ from kivy.properties import ObjectProperty
 from kivy_garden.graph import MeshLinePlot, LinePlot, SmoothLinePlot
 import subprocess
 import os
+import re
 
 
 class NumberPadPopup(ModalView):
@@ -95,6 +96,9 @@ class ServoControl(BoxLayout):
         self.unit_div = unit_conversion[self.unit]
         self.data_time = 0.0
         self.data_list = []
+
+    def text_integer(self, text):
+        return text.isdigit()
 
     def rpm_convert(self, surface_speed):
         rpm = (surface_speed * self.unit_div)/(3.14159 * self.diameter)
@@ -255,7 +259,27 @@ class ServoApp(App):
         sp_btn = dict(self.config.items(settings['mode']))
         ids_dict = self.root.ids
         for k, v in sp_btn.items():
-            getattr(ids_dict, k).text = v
+            spd_btn = getattr(ids_dict, k)
+            match_custom = re.compile(r"\((\w+)\s*,\s*(\d{1,4})\)")
+            match_num = re.compile(r"\b[+-]?\d{4}\b")
+            if match_custom.findall(v) and k.startswith('sp_btn'):
+                clean_str = v[1:-1]
+                custom_list = [s.strip() for s in clean_str.split(',', 1)]
+                custom_str = custom_list[0]
+                custom_int = int(custom_list[1])
+                if len(custom_str) > 5:
+                    x_factor = 1 - ((len(custom_str)-5)*0.15)
+                    if x_factor < 0.5:
+                        x_factor = 0.5
+                    cur_fnt_size = spd_btn.font_size
+                    spd_btn.font_size = cur_fnt_size * x_factor
+                    print(x_factor)
+                if len(custom_str) > 10:
+                    custom_str = custom_str[:10]
+                spd_btn.text = custom_str.upper()
+                spd_btn.bind(on_press=lambda instance, s=custom_int: root.set_speed(s))
+            elif match_num.findall(v):
+                spd_btn.text = v
         if settings['mode'] == 'surface_speed':
             if settings['unit'] == 'inch':
                 self.root.ids.servo_mode.text = 'S.F.M.'
