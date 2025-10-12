@@ -1,6 +1,7 @@
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
-from kivy.properties import NumericProperty, StringProperty
+from kivy.uix.button import Button
+from kivy.properties import NumericProperty, StringProperty, BooleanProperty, partial
 from kivy.uix.modalview import ModalView
 from kivy.clock import Clock
 from mock_servo_communication import ServoCommunicator
@@ -76,6 +77,52 @@ class OfflinePopup(ModalView):
         subprocess.call(["sudo", shutdown_path, "reboot"])
     def app_close(self):
         App.get_running_app().stop()
+
+class LongPressButton(Button):
+    long_press_time = NumericProperty(1.0)
+    _long_press_triggered = BooleanProperty(False)
+    _touch_id = None 
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._scheduled_event = None
+
+    def on_press(self):
+        pass
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            if self._touch_id is not None:
+                return True
+                
+            self._long_press_triggered = False
+            self._touch_id = touch.uid
+            self.state = 'down' 
+            self._scheduled_event = Clock.schedule_once(self._long_press_callback, self.long_press_time)
+            return True 
+        
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.uid == self._touch_id:
+            # 1. Cancel timer and reset ID
+            if self._scheduled_event:
+                self._scheduled_event.cancel()
+                self._scheduled_event = None
+            self._touch_id = None 
+            self.state = 'normal' 
+            suppress_on_release = (self._long_press_triggered and self.text == "DISABLED")
+            if not suppress_on_release:
+                self.dispatch('on_release') 
+            return True
+        
+        return super().on_touch_up(touch)
+
+    def _long_press_callback(self, dt):
+        self._long_press_triggered = True
+        App.get_running_app().root.set_speed(0)
+
+
 
 class ServoControl(BoxLayout):
     servo_state = StringProperty('disabled')
@@ -157,20 +204,24 @@ class ServoControl(BoxLayout):
         self.servo_state = servo_state
 
         if self.servo_state == 'enabled':
-            self.ids.servo_button.state = 'normal'
+            #self.ids.servo_button.state = 'normal'
             self.ids.servo_button.text = 'ENABLED'
             App.get_running_app().servo.enable_servo()
         elif self.servo_state == 'disabled':
-            self.ids.servo_button.state = 'down'
+            #self.ids.servo_button.state = 'down'
             self.ids.servo_button.text = 'DISABLED'
             App.get_running_app().servo.disable_servo()
         print(f"Servo State Changed To: {self.servo_state}")
 
     def update_rpm_display(self):
+        if self.servo_state == 'disabled':
+            speed = self.command_speed
+        elif self.servo_state == 'enabled':
+            speed = self.current_speed
         if self.mode == 'rpm':
-            self.display_speed = round(self.current_speed/self.ratio)
+            self.display_speed = round(speed/self.ratio)
         elif self.mode == 'surface_speed':
-            self.display_speed = round(self.ss_convert(self.current_speed))
+            self.display_speed = round(self.ss_convert(speed))
         rpm_str = str(int(self.display_speed)).zfill(4)
         self.ids.rpm_digit_1.text = rpm_str[0]
         self.ids.rpm_digit_2.text = rpm_str[1]
@@ -180,16 +231,28 @@ class ServoControl(BoxLayout):
         if self.display_speed < 1000:
             self.ids.rpm_digit_1.color = (0.13, 0.13, 0.13, 1)
         else:
-            print(self.current_speed)
-            self.ids.rpm_digit_1.color = (1, 1, 1, 1)
+            if self.servo_state == 'enabled':
+                self.ids.rpm_digit_1.color = (1, 1, 1, 1)
+            elif self.servo_state == 'disabled':
+                self.ids.rpm_digit_1.color = (0.313, 0.313, 0.313, 1)
         if self.display_speed < 100:
             self.ids.rpm_digit_2.color = (0.13, 0.13, 0.13, 1)
         else:
-            self.ids.rpm_digit_2.color = (1, 1, 1, 1)
+            if self.servo_state == 'enabled':
+                self.ids.rpm_digit_2.color = (1, 1, 1, 1)
+            elif self.servo_state == 'disabled':
+                self.ids.rpm_digit_2.color = (0.313, 0.313, 0.313, 1)
         if self.display_speed < 10:
             self.ids.rpm_digit_3.color = (0.13, 0.13, 0.13, 1)
         else:
-            self.ids.rpm_digit_3.color = (1, 1, 1, 1)
+            if self.servo_state == 'enabled':
+                self.ids.rpm_digit_3.color = (1, 1, 1, 1)
+            elif self.servo_state == 'disabled':
+                self.ids.rpm_digit_3.color = (0.313, 0.313, 0.313, 1)
+        if self.servo_state == 'enabled':
+            self.ids.rpm_digit_4.color = (1, 1, 1, 1)
+        elif self.servo_state == 'disabled':
+            self.ids.rpm_digit_4.color = (0.313, 0.313, 0.313, 1)
 
     def update_torque_display(self):
         #import random
@@ -236,6 +299,10 @@ class ServoApp(App):
     def build_config(self, config):
         # This function is necessary to load custom ini file. but it does do anything
         config.setdefaults('settings', {'general': True})
+
+    def get_file_path(self, filename):
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(app_dir, filename)
 
     def build(self):
         Builder.load_file(f"{self.config.get('GUI', 'kvfile')}.kv")

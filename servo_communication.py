@@ -48,7 +48,7 @@ class ServoCommunicator:
 
     def disable_servo(self):
         # 0x0089, set speed to 0
-        self.client.write_register(0x0089, 0, device_id=self.slave_id)
+        #self.client.write_register(0x0089, 0, device_id=self.slave_id)
         # 0x0062, value for disable = 0
         self.client.write_register(0x0062, 0, device_id=self.slave_id)
         self.servostate = 'disabled'

@@ -1,12 +1,26 @@
 #:kivy 2.3.1
 #:import Graph kivy_garden.graph.Graph
 #:import MeshLinePlot kivy_garden.graph.MeshLinePlot
+#:import LongPressButton main.LongPressButton
 
 <ServoLabel@Label>:
     font_name: 'assets/Orbitron-Medium.ttf'
     font_size: '24sp'
 
 <ServoButton@Button>:
+    font_name: 'assets/Orbitron-Medium.ttf'
+    font_size: '44sp'
+    background_color: (100.3, 110.3, 0.3, 0)
+    background_normal: ''
+    canvas.before:
+        Color:
+            rgba: (0.16, 0.16, 0.16, 1) if self.state == 'normal' else (0, 0.5, 1, 1)
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
+
+<EnableButton@LongPressButton>:
     font_name: 'assets/Orbitron-Medium.ttf'
     font_size: '44sp'
     background_color: (100.3, 110.3, 0.3, 0)
@@ -545,10 +559,30 @@
             BoxLayout:
                 size_hint_y: (None)
                 height: '78.33dp'
+                spacing: 5
                 ServoButton:
-                    text: 'Custom Speed'
-                    font_size: '28sp'
+                    size_hint_x: (0.5)
+                    text: 'Custom\nSpeed'
+                    font_size: '22sp'
+                    halign: 'center'
+                    valign: 'middle'
                     on_press: root.show_custom_numpad()
+                ServoButton:
+                    size_hint_x: (0.5)
+                    #text: 'C'
+                    #font_size: '28sp'
+                    #halign: 'center'
+                    #valign: 'middle'
+                    on_press: root.show_custom_numpad()
+                    BoxLayout:
+                        size: self.parent.size
+                        pos: self.parent.pos
+                        orientation: 'horizontal'
+                        padding: 5
+                        spacing: 5
+                        Image:
+                            source: app.get_file_path('assets/icon_calc_white.png')
+                            allow_stretch: True
             GridLayout:
                 id: lb_layout
                 size_hint_y: (None)
@@ -568,15 +602,15 @@
                             size: self.size
                             pos: self.pos
                             radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
-                ServoTButtonRRad:
+                EnableButton:
                     id: servo_button
                     text: 'DISABLED'
                     color: (1, 1, 1, 1) if self.state == 'normal' else (0.313, 0.313, 0.313, 1)
                     font_size: '18sp'
-                    on_press: root.toggle_enable('enabled') if self.text == 'DISABLED' else root.toggle_enable('disabled') 
+                    on_release: root.toggle_enable('enabled') if self.text == 'DISABLED' else root.toggle_enable('disabled') 
                     canvas.before:
                         Color:
-                            rgba: (0, 0.5, 1, 1) if self.state == 'normal' else (0.105, 0.105, 0.105, 1)
+                            rgba: (0, 0.5, 1, 1) if self.text == 'ENABLED' else (0.105, 0.105, 0.105, 1)
                         RoundedRectangle:
                             size: self.size
                             pos: self.pos
