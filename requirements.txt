@@ -1,6 +1,5 @@
-kivy
+kivy[full]
 pymodbus
 pyserial
-
-kivy-deps.sdl2
-kivy-deps.angle
+rpi-lgpio
+gpiozero
