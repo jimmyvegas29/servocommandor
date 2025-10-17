@@ -5,6 +5,7 @@ from gpiozero import Button
 class ServoCommunicator:
     def __init__(self, port='COM3', baudrate=9600, slave_id=1):
         self.rpm = 0
+        self.alarmcode = 0
         self.servostate = 'disabled'
         ###### UNCOMMENT IF YOU WANT TO TEST PHYSICAL BUTTONS ######
         # self.enablebutton = Button(21, bounce_time=.1)
@@ -36,7 +37,13 @@ class ServoCommunicator:
         print(f"Mock servo speed set to {speed}")
 
     def get_rpm(self):
-        return self.rpm
+        return [self.alarmcode, self.rpm]
 
     def get_torque(self):
         return 0
+
+    def get_alarm(self):
+        return self.alarmcode
+
+    def clear_alarm(self):
+        self.alarmcode = 0

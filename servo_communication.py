@@ -1,11 +1,24 @@
 from pymodbus.client import ModbusSerialClient
 from pymodbus.exceptions import ModbusException
+from pymodbus.pdu import ModbusPDU
 from time import sleep
 
 ###### COMMENT THIS OUT IF NOT USING PHYSICAL BUTTONS #####
 from gpiozero import Button
 ###########################################################
 
+class ClearAlarmRequest(ModbusPDU):
+    """ Custom request for Modbus function 0x43 (Clear Alarm). """
+    function_code = 0x43
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def encode(self):
+        return b''
+
+    def decode(self, data):
+        pass
 
 class ServoCommunicator:
     def __init__(self, port='/dev/ttyS0', baudrate=9600, slave_id=1):
@@ -64,12 +77,12 @@ class ServoCommunicator:
         # Using 04H
         # To use 03H use self.client.read_holding_registers
         try:
-            response = self.client.read_input_registers(0x0000, count=1, device_id=self.slave_id)
+            response = self.client.read_input_registers(0x001A, count=2, device_id=self.slave_id)
         except ModbusException as exc:
             print(exc)
             return(exec)
         if not response.isError():
-            return response.registers[0]
+            return response.registers
         return None
 
     def get_torque(self):
@@ -80,4 +93,24 @@ class ServoCommunicator:
         if not response.isError():
             return response.registers[0]
         return None
+
+    def get_alarm(self):
+        try:
+            response = self.client.read_input_registers(0x001A, count=1, device_id=self.slave_id)
+        except ModbusException as exc:
+            return(exec)
+        if not response.isError():
+            return response.registers[0]
+        return None
+
+    def clear_alarm(self):
+        #Sends a custom Modbus command 0x43 to clear alarms on the servo drive.
+        request = ClearAlarmRequest(dev_id=self.slave_id)
+        try:
+            response = self.client.execute(True, request)
+            return True
+        except ModbusException as exc:
+            pass
+            print(f"A Modbus exception occurred: {exc}")
+            return False
 

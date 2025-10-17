@@ -1,15 +1,18 @@
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.label import Label
 from kivy.properties import NumericProperty, StringProperty, BooleanProperty, partial
 from kivy.uix.modalview import ModalView
 from kivy.clock import Clock
-from mock_servo_communication import ServoCommunicator
+from servo_communication import ServoCommunicator
 from kivy.core.window import Window
 from kivy.lang import Builder
 from kivy.properties import ObjectProperty
 from kivy_garden.graph import MeshLinePlot, LinePlot, SmoothLinePlot
+from time import sleep
 import subprocess
+import operator
 import os
 import re
 
@@ -78,6 +81,52 @@ class OfflinePopup(ModalView):
     def app_close(self):
         App.get_running_app().stop()
 
+class AlarmPopup(ModalView):
+    alarm_codes = {1: {'clearable': True, 'name': 'Overspeed', 'content': 'Motor speed exceeds max value'},
+                   2: {'clearable': False, 'name': 'Power main overvoltage', 'content': 'Main voltage exceeds specified value, check break resistor'},
+                   3: {'clearable': False, 'name': 'Power main undervoltage', 'content': 'Main voltage is lower than specified value'},
+                   4: {'clearable': True, 'name': 'Position overshoot', 'content': 'Position tracking deviation exceeds set value'},
+                   5: {'clearable': True, 'name': 'Position command overclocked', 'content': 'The position instruction frequency exceeds the max frequency allowed'},
+                   6: {'clearable': True, 'name': 'Motor stalling', 'content': 'Motor power line connection error, pole number P-201 error'},
+                   7: {'clearable': True, 'name': 'Drive inhibit exception', 'content': 'The CCWL and CWL drive travel limit switch is abnormal'},
+                   9: {'clearable': True, 'name': 'Incremental encoder ABZ signal is faulty', 'content': 'Encoder ABZ signal is interfered or disconnected'},
+                   10: {'clearable': True, 'name': 'Incremental encoder UVW signal is faulty', 'content': 'Encoder UVW signal is interfered or disconnected'},
+                   11: {'clearable': False, 'name': 'IPM Module is faulty', 'content': 'Main power loop IPM inverter module is faulty'},
+                   12: {'clearable': True, 'name': 'Overcurrent', 'content': 'Instantaneous current of the servo drive is to large'},
+                   13: {'clearable': True, 'name': 'Excess Load', 'content': 'Average load motor current is to large'},
+                   14: {'clearable': True, 'name': 'Break peak power overload', 'content': 'Short break time load is too large, check value or check brake resistor'},
+                   20: {'clearable': False, 'name': 'EEPROM error', 'content': 'EEPROM read/write error occured'},
+                   21: {'clearable': False, 'name': 'Logic circuit error', 'content': 'Peripheral logic circuit of the processor is faulty'},
+                   23: {'clearable': False, 'name': 'AD reference voltage conversion incorrect', 'content': 'AD sampling circuit voltage non-standard value'},
+                   24: {'clearable': False, 'name': 'AD conversion asymmtetrical or zero-drift large', 'content': 'AD sampling amplifier conditioning circuit is abnormal'},
+                   29: {'clearable': True, 'name': 'Torque overload', 'content': 'Motor load exceeds max value, check max value and duration value'},
+                   30: {'clearable': False, 'name': 'Encoder Z signal is lost', 'content': 'Encoder Z signal does not appear'},
+                   31: {'clearable': False, 'name': 'Encoder Z signal abnormal', 'content': 'Interference or instability in encoder Z signal'},
+                   32: {'clearable': False, 'name': 'Encoder UVW signal is illegally encoded', 'content': 'Encoder UVW signal disconnected'},
+                   33: {'clearable': False, 'name': 'Dart encoder signal error', 'content': 'No high resistance state in the power-on sequence'},
+                   }
+    def __init__(self, **kwargs):
+        super(AlarmPopup, self).__init__(**kwargs)
+
+    def set_alarm_code(self, code: int):
+        alarm_code = operator.getitem(self.alarm_codes, code)
+        self.ids.alarm_main_text.text = f"Error.{code}"
+        self.ids.alarm_sub_text.text = f"{alarm_code['name']}\n{alarm_code['content']}"
+        if not alarm_code['clearable']:
+            label = Label(text='Alarm not clearable\npower cycle drive to clear alarm',color=(1, 0, 0, 1), font_size='20sp', font_name='assets/Orbitron-Medium.ttf', halign='center', valign=
+                'top')
+            alarm_btn = self.ids.alarm_clear_btn
+            alarm_btn.parent.remove_widget(alarm_btn)
+            self.ids.alarm_box_lower.add_widget(label)
+
+    def alarm_clear(self):
+        app = App.get_running_app()
+        app.servo.disable_servo()
+        app.servo.clear_alarm()
+        sleep(2)
+        if app.servo.get_alarm() == 0:
+            self.dismiss()
+
 class LongPressButton(Button):
     long_press_time = NumericProperty(1.0)
     _long_press_triggered = BooleanProperty(False)
@@ -126,6 +175,7 @@ class LongPressButton(Button):
 
 class ServoControl(BoxLayout):
     servo_state = StringProperty('disabled')
+    direction = StringProperty('fwd')
     current_torque = NumericProperty(0)
     current_speed = NumericProperty(0)
     command_speed = NumericProperty(0)
@@ -133,7 +183,6 @@ class ServoControl(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         unit_conversion = {'inch': 12, 'metric': 1000}
-        self.direction = StringProperty('fwd')
         self.cfg = dict(App.get_running_app().config.items('Settings'))
         self.mode = self.cfg['mode']
         self.max_rpm = int(self.cfg['servo_max_rpm'])
@@ -190,7 +239,8 @@ class ServoControl(BoxLayout):
 
     def toggle_direction(self, direction):
         if direction != self.direction: 
-            App.get_running_app().servo.set_speed(0) #When switching directions it will bring the bring the servo speed down to 0
+            App.get_running_app().servo.set_speed(0)
+            self.command_speed = 0 #When switching directions it will bring the bring the servo speed down to 0
 
         self.direction = direction
 
@@ -293,6 +343,7 @@ class ServoControl(BoxLayout):
 
 class ServoApp(App):
     offline_flag = False
+    alarm_flag = False
     def get_application_config(self):
         return super(ServoApp, self).get_application_config('~/servocommandor/%(appname)s.ini')
 
@@ -308,9 +359,10 @@ class ServoApp(App):
         Builder.load_file(f"{self.config.get('GUI', 'kvfile')}.kv")
         self.servo = ServoCommunicator()
         self.offline = OfflinePopup()
+        self.alarm = AlarmPopup()
         root = ServoControl()
         Clock.schedule_interval(lambda dt: self.update_rpm(root, dt), 0.3)
-        Clock.schedule_interval(lambda dt: self.update_torque(root, dt), 0.3)
+        Clock.schedule_interval(lambda dt: self.update_torque(root, dt), 0.4)
         Clock.schedule_once(lambda dt: self.set_config(root, dt))
         return root
 
@@ -366,15 +418,27 @@ class ServoApp(App):
         if get_state != root.servo_state:
             root.toggle_enable(get_state)
         rpm = self.servo.get_rpm()
+        alarm_status = rpm[0]
+        rpm = rpm[1]
         if isinstance(rpm, int):
             if self.offline_flag:
                 self.offline.dismiss()
                 self.offline_flag = False
-            if rpm > 3000:
-                rpm = 65536 - rpm
-            if rpm is not None:
-                root.current_speed = abs(rpm)
-                root.update_rpm_display()
+            if alarm_status == 0:
+                if self.alarm_flag:
+                    self.alarm_flag = False
+                if rpm > 35000:
+                    rpm = 65536 - rpm
+                if rpm is not None:
+                    rpm = round(rpm/10)
+                    root.current_speed = abs(rpm)
+                    root.update_rpm_display()
+            else:
+                if not self.alarm_flag:
+                    self.alarm.set_alarm_code(alarm_status)
+                    self.alarm.open()
+                    self.alarm_flag = True
+                    print("Servo Drive Alarm")
         else:
             if not self.offline_flag:
                 self.offline.open()
@@ -386,7 +450,10 @@ class ServoApp(App):
             torque = self.servo.get_torque()
             if isinstance(torque, int):
                 if torque > 3000:
-                    torque = torque - 65536
+                    if root.direction == 'fwd':
+                        torque = torque - 65536
+                    if root.direction == 'rev':
+                        torque = 65536 - torque
                     print(torque)
                 root.current_torque = torque
                 root.update_torque_display()

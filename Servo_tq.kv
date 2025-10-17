@@ -256,6 +256,81 @@
                             pos: self.pos
                             radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
 
+<AlarmPopup@ModalView>:
+    size_hint: (1, 1)
+    background_color: (0.1, 0.1, 0.1, 0.8)
+    overlay_color: (0.1, 0.1, 0.1, 0)
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (0.7, 0.5)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        #padding: 10
+        canvas:
+            Color: 
+                rgba: (0.1, 0.1, 0.1, 1)
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: (0.25)
+            canvas:
+                Color: 
+                    rgba: (0.16, 0.16, 0.16, 1)
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7.0, 7.0), (7.0, 7.0), (0.0, 0.0), (0.0, 0.0)]
+            Label:
+                id: alarm_main_text
+                text: 'DRIVE ALARM'
+                font_name: 'assets/Orbitron-Medium.ttf'
+                font_size: '48sp'
+                on_size: self.text_size = self.size
+                halign: 'center'
+                valign: 'middle'
+        BoxLayout:
+            size_hint_y: (0.45)
+            orientation: 'vertical'
+            padding: [10, 0, 10, 0]
+            canvas:
+                Color: 
+                    rgba: (0.1, 0.1, 0.1, 1)
+                Rectangle:
+                    size: self.size
+                    pos: self.pos
+            Label:
+                id: alarm_sub_text
+                text: 'Check connection or power'
+                font_name: 'assets/Orbitron-Medium.ttf'
+                font_size: '16sp'
+                on_size: self.text_size = self.size
+                halign: 'center'
+                valign: 'middle'
+        BoxLayout:
+            id: alarm_box_lower
+            orientation: 'vertical'
+            size_hint_y: (0.30)
+            padding: [0,0,0,10]
+            ServoButton:
+                size_hint_x: (0.35)
+                pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+                id: alarm_clear_btn
+                text: 'CLEAR'
+                text_size: self.size
+                font_size: '32sp'
+                halign: 'center'
+                valign: 'middle'
+                on_release: root.alarm_clear()
+                canvas.before:
+                    Color:
+                        rgba: (0, 0.5, 1, 1) if self.state == 'normal' else (0.313, 0.313, 0.313, 1)
+                    RoundedRectangle:
+                        size: self.size
+                        pos: self.pos
+                        radius: [(7.0, 7.0), (7.0, 7.0), (7.0, 7.0), (7.0, 7.0)]
+
 <ServoControl>:
     orientation: 'vertical'
     canvas:
@@ -558,31 +633,12 @@
                             radius: [(0, 0), (7.0, 7.0), (7.0, 7.0), (0, 0)]
             BoxLayout:
                 size_hint_y: (None)
-                height: '78.33dp'
-                spacing: 5
+                height: '60dp'
                 ServoButton:
-                    size_hint_x: (0.5)
-                    text: 'Custom\nSpeed'
-                    font_size: '22sp'
-                    halign: 'center'
-                    valign: 'middle'
+                    text: 'Custom Speed'
+                    font_size: '28sp'
                     on_press: root.show_custom_numpad()
-                ServoButton:
-                    size_hint_x: (0.5)
-                    #text: 'C'
-                    #font_size: '28sp'
-                    #halign: 'center'
-                    #valign: 'middle'
-                    on_press: root.show_custom_numpad()
-                    BoxLayout:
-                        size: self.parent.size
-                        pos: self.parent.pos
-                        orientation: 'horizontal'
-                        padding: 5
-                        spacing: 5
-                        Image:
-                            source: app.get_file_path('assets/icon_calc_white.png')
-                            allow_stretch: True
+
             GridLayout:
                 id: lb_layout
                 size_hint_y: (None)
