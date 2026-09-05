@@ -12,7 +12,6 @@ from kivy.properties import ObjectProperty
 from kivy_garden.graph import MeshLinePlot, LinePlot, SmoothLinePlot
 from time import sleep
 import subprocess
-import operator
 import os
 import re
 
@@ -109,7 +108,13 @@ class AlarmPopup(ModalView):
         super(AlarmPopup, self).__init__(**kwargs)
 
     def set_alarm_code(self, code: int):
-        alarm_code = operator.getitem(self.alarm_codes, code)
+        # Fallback for values outside the XP200's documented alarm table
+        # (the drive's numbering skips 8, 15-19, 22, 25-28) so an unknown
+        # code shows a popup instead of crashing the update loop.
+        alarm_code = self.alarm_codes.get(code, {
+            'clearable': False,
+            'name': f'Unknown alarm (code {code})',
+            'content': 'Not in the XP200 alarm table - consult drive manual'})
         self.ids.alarm_main_text.text = f"Error.{code}"
         self.ids.alarm_sub_text.text = f"{alarm_code['name']}\n{alarm_code['content']}"
         if not alarm_code['clearable']:
