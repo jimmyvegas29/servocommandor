@@ -220,6 +220,11 @@ class ServoControl(BoxLayout):
             self.command_speed = round(speed*self.ratio)
         elif self.mode == 'surface_speed':
             self.command_speed = round(self.rpm_convert(speed))
+        # clamp to motor rating (presets/numpad previously bypassed the limit)
+        if self.command_speed > self.max_rpm:
+            log.warning('set_speed clamped: %s -> %s (servo_max_rpm)',
+                        self.command_speed, self.max_rpm)
+            self.command_speed = self.max_rpm
 
         if self.direction == 'rev':
             App.get_running_app().servo.set_speed(-self.command_speed)
