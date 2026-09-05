@@ -1,3 +1,4 @@
+from applog import log
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -51,6 +52,7 @@ class NumberPadPopup(ModalView):
 
     def the_backdoor(self, value):
         app = App.get_running_app()
+        log.info('Backdoor code entered: %s', value)
         if int(value) == 999999: #disabled the servo and shuts down just the application
             if hasattr(app, 'servo') and app.servo:
                 app.servo.disable_servo()
@@ -111,6 +113,8 @@ class AlarmPopup(ModalView):
         # Fallback for values outside the XP200's documented alarm table
         # (the drive's numbering skips 8, 15-19, 22, 25-28) so an unknown
         # code shows a popup instead of crashing the update loop.
+        if code not in self.alarm_codes:
+            log.error('Alarm code %s is not in the XP200 alarm table', code)
         alarm_code = self.alarm_codes.get(code, {
             'clearable': False,
             'name': f'Unknown alarm (code {code})',
@@ -221,7 +225,7 @@ class ServoControl(BoxLayout):
             App.get_running_app().servo.set_speed(-self.command_speed)
         else:
             App.get_running_app().servo.set_speed(self.command_speed)
-        print(f"Set speed to: {self.command_speed}")
+        log.info('GUI set_speed: %s (direction=%s)', self.command_speed, self.direction)
 
     def adjust_speed(self, amount):
         if self.mode == 'rpm':
@@ -236,7 +240,8 @@ class ServoControl(BoxLayout):
             App.get_running_app().servo.set_speed(-self.command_speed)
         else:
             App.get_running_app().servo.set_speed(self.command_speed)
-        print(f"Adjust speed by: {amount}") 
+        log.info('GUI adjust_speed: %+d -> %s (direction=%s)',
+                 amount, self.command_speed, self.direction)
 
     def show_custom_numpad(self):
         popup = NumberPadPopup()
@@ -253,7 +258,7 @@ class ServoControl(BoxLayout):
             self.ids.fwd_button.text = 'FORWARD'
         elif self.direction == 'rev':
             self.ids.fwd_button.text = 'REVERSE'
-        print(f"Toggle direction to: {self.direction}")
+        log.info('GUI toggle_direction: %s (speed zeroed)', self.direction)
 
     def sync_direction(self, direction):
         # Direction change came from the physical FWD/OFF/REV switch: update
@@ -265,7 +270,7 @@ class ServoControl(BoxLayout):
                 self.ids.fwd_button.text = 'FORWARD'
             elif direction == 'rev':
                 self.ids.fwd_button.text = 'REVERSE'
-        print(f"Direction synced from switch: {direction}")
+        log.info('GUI direction synced from switch: %s', direction)
 
     def toggle_enable(self, servo_state):
         self.servo_state = servo_state
@@ -278,7 +283,7 @@ class ServoControl(BoxLayout):
             #self.ids.servo_button.state = 'down'
             self.ids.servo_button.text = 'DISABLED'
             App.get_running_app().servo.disable_servo()
-        print(f"Servo State Changed To: {self.servo_state}")
+        log.info('GUI servo state: %s', self.servo_state)
 
     def update_rpm_display(self):
         if self.servo_state == 'disabled':
@@ -374,8 +379,11 @@ class ServoApp(App):
         return os.path.join(app_dir, filename)
 
     def build(self):
-        Builder.load_file(f"{self.config.get('GUI', 'kvfile')}.kv")
+        kvfile = self.config.get('GUI', 'kvfile')
         invert = self.config.getboolean('Hardware', 'invert_direction')
+        log.info('App build: kvfile=%s mode=%s invert_direction=%s',
+                 kvfile, self.config.get('Settings', 'mode'), invert)
+        Builder.load_file(f"{kvfile}.kv")
         self.servo = ServoCommunicator(invert_direction=invert)
         self.servo.start_polling()
         self.offline = OfflinePopup()
@@ -412,7 +420,7 @@ class ServoApp(App):
                         x_factor = 0.5
                     cur_fnt_size = spd_btn.font_size
                     spd_btn.font_size = cur_fnt_size * x_factor
-                    print(x_factor)
+                    log.debug('Custom button font scale: %s', x_factor)
                 if len(custom_str) > 10:
                     custom_str = custom_str[:10]
                 spd_btn.text = custom_str.upper()
@@ -445,7 +453,7 @@ class ServoApp(App):
             if not self.offline_flag:
                 self.offline.open()
                 self.offline_flag = True
-                print("Servo Drive Offline")
+                log.warning('Offline popup shown')
             return
         alarm_status, rpm = result
         if self.offline_flag:
@@ -464,7 +472,7 @@ class ServoApp(App):
                 self.alarm.set_alarm_code(alarm_status)
                 self.alarm.open()
                 self.alarm_flag = True
-                print("Servo Drive Alarm")
+                log.error('Drive ALARM raised: code %s', alarm_status)
 
     def update_torque(self, root, dt):
         if self.config.get('GUI', 'kvfile').startswith('Servo_tq'):

@@ -1,3 +1,4 @@
 __pycache__/
 kivy_venv
 my_app_settings.ini
+logs/
