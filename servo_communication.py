@@ -57,16 +57,20 @@ class ServoCommunicator:
         ###### COMMENT OUT THIS SECTION IF NOT USING THE PHYSICAL SWITCH #####
         # FWD or REV position -> set direction, apply speed, enable.
         # Neutral (center off) -> disable.
+        # The switch is POLLED as a state machine (20Hz, two matching samples
+        # before acting) instead of using gpiozero edge callbacks - the
+        # lgpio debounce on Bookworm can swallow release edges, which made
+        # neutral/direction changes unreliable. Polling reads the live pin
+        # level every cycle so no edge can ever be missed.
         # Safety interlock: if the switch is already in FWD/REV at boot it is
         # ignored until it passes through neutral once, so powering the system
         # up with the switch left engaged cannot start the motor.
-        self.fwdswitch = Button(FWD_GPIO, bounce_time=.05)
-        self.revswitch = Button(REV_GPIO, bounce_time=.05)
-        self._switch_armed = not (self.fwdswitch.is_pressed or self.revswitch.is_pressed)
-        self.fwdswitch.when_pressed = self._switch_update
-        self.fwdswitch.when_released = self._switch_update
-        self.revswitch.when_pressed = self._switch_update
-        self.revswitch.when_released = self._switch_update
+        self.fwdswitch = Button(FWD_GPIO)
+        self.revswitch = Button(REV_GPIO)
+        self._switch_armed = self._read_switch() == 'neutral'
+        self._switch_state = 'neutral'
+        self._switch_thread = threading.Thread(target=self._switch_loop, daemon=True)
+        self._switch_thread.start()
         ######################################################################
 
     def neg_speed(self, negativespeed):
@@ -183,22 +187,40 @@ class ServoCommunicator:
         magnitude = abs(self._last_speed)
         self.set_speed(-magnitude if self.hw_direction == 'rev' else magnitude)
 
-    def _switch_update(self):
+    def _read_switch(self):
         fwd = self.fwdswitch.is_pressed
         rev = self.revswitch.is_pressed
-        if not self._switch_armed:
-            # boot interlock: wait for one pass through neutral
-            if not fwd and not rev:
-                self._switch_armed = True
-            return
         if fwd and not rev:
-            self.hw_direction = 'fwd'
-            self._apply_switch_speed()
-            self.enable_servo()
-        elif rev and not fwd:
-            self.hw_direction = 'rev'
-            self._apply_switch_speed()
-            self.enable_servo()
-        else:
-            # neutral (or both contacts closed, which shouldn't happen)
-            self.disable_servo()
+            return 'fwd'
+        if rev and not fwd:
+            return 'rev'
+        # neutral (or both contacts closed, which shouldn't happen)
+        return 'neutral'
+
+    def _switch_loop(self):
+        last_read = self._read_switch()
+        while not self._poll_stop.is_set():
+            current = self._read_switch()
+            # act only on a position that held for two consecutive samples
+            if current == last_read:
+                if not self._switch_armed:
+                    # boot interlock: wait for one pass through neutral
+                    if current == 'neutral':
+                        self._switch_armed = True
+                        self._switch_state = 'neutral'
+                        print("Switch interlock armed (passed through neutral)")
+                elif current != self._switch_state:
+                    self._switch_state = current
+                    print(f"Switch position: {current}")
+                    if current == 'fwd':
+                        self.hw_direction = 'fwd'
+                        self._apply_switch_speed()
+                        self.enable_servo()
+                    elif current == 'rev':
+                        self.hw_direction = 'rev'
+                        self._apply_switch_speed()
+                        self.enable_servo()
+                    else:
+                        self.disable_servo()
+            last_read = current
+            self._poll_stop.wait(0.05)
