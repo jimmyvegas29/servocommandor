@@ -9,13 +9,13 @@ from gpiozero import Button
 
 # Physical FWD/OFF/REV rotary switch wiring - one 3-pin dupont block on
 # consecutive header pins:
-#   physical pin 35 = GPIO19 -> FWD contact
-#   physical pin 37 = GPIO26 -> REV contact
-#   physical pin 39 = GND    -> switch common
+#   physical pin 14 = GND    -> switch common
+#   physical pin 16 = GPIO23 -> FWD contact
+#   physical pin 18 = GPIO24 -> REV contact
 # The switch is maintained (rotary), not momentary: FWD/REV positions hold
 # their contact closed to GND until the switch is moved.
-FWD_GPIO = 19
-REV_GPIO = 26
+FWD_GPIO = 23
+REV_GPIO = 24
 
 
 class ClearAlarmRequest(ModbusPDU):
