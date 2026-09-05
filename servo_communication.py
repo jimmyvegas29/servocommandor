@@ -10,14 +10,16 @@ from gpiozero import Button
 ##########################################################################
 
 # Physical FWD/OFF/REV rotary switch wiring - one 3-pin dupont block on
-# consecutive header pins:
+# consecutive header pins (as actually wired on the lathe):
 #   physical pin 14 = GND    -> switch common
-#   physical pin 16 = GPIO23 -> FWD contact
-#   physical pin 18 = GPIO24 -> REV contact
+#   physical pin 16 = GPIO23 -> REV contact
+#   physical pin 18 = GPIO24 -> FWD contact
 # The switch is maintained (rotary), not momentary: FWD/REV positions hold
 # their contact closed to GND until the switch is moved.
-FWD_GPIO = 23
-REV_GPIO = 24
+# Note: works together with [Hardware] invert_direction=true in servo.ini -
+# the drive's negative speed direction is the lathe's forward.
+FWD_GPIO = 24
+REV_GPIO = 23
 
 
 class ClearAlarmRequest(ModbusPDU):
