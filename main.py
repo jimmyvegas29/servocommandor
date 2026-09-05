@@ -250,6 +250,18 @@ class ServoControl(BoxLayout):
             self.ids.fwd_button.text = 'REVERSE'
         print(f"Toggle direction to: {self.direction}")
 
+    def sync_direction(self, direction):
+        # Direction change came from the physical FWD/OFF/REV switch: update
+        # the GUI to match without zeroing the commanded speed (the switch
+        # handler already re-applied the speed with the correct sign).
+        self.direction = direction
+        if 'fwd_button' in self.ids:
+            if direction == 'fwd':
+                self.ids.fwd_button.text = 'FORWARD'
+            elif direction == 'rev':
+                self.ids.fwd_button.text = 'REVERSE'
+        print(f"Direction synced from switch: {direction}")
+
     def toggle_enable(self, servo_state):
         self.servo_state = servo_state
 
@@ -350,6 +362,7 @@ class ServoApp(App):
     def build_config(self, config):
         # This function is necessary to load custom ini file. but it does do anything
         config.setdefaults('settings', {'general': True})
+        config.setdefaults('Hardware', {'invert_direction': False})
 
     def get_file_path(self, filename):
         app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -357,7 +370,9 @@ class ServoApp(App):
 
     def build(self):
         Builder.load_file(f"{self.config.get('GUI', 'kvfile')}.kv")
-        self.servo = ServoCommunicator()
+        invert = self.config.getboolean('Hardware', 'invert_direction')
+        self.servo = ServoCommunicator(invert_direction=invert)
+        self.servo.start_polling()
         self.offline = OfflinePopup()
         self.alarm = AlarmPopup()
         root = ServoControl()
@@ -417,33 +432,34 @@ class ServoApp(App):
         get_state = self.servo.get_servo_state()
         if get_state != root.servo_state:
             root.toggle_enable(get_state)
-        rpm = self.servo.get_rpm()
-        alarm_status = rpm[0]
-        rpm = rpm[1]
-        if isinstance(rpm, int):
-            if self.offline_flag:
-                self.offline.dismiss()
-                self.offline_flag = False
-            if alarm_status == 0:
-                if self.alarm_flag:
-                    self.alarm_flag = False
-                if rpm > 35000:
-                    rpm = 65536 - rpm
-                if rpm is not None:
-                    rpm = round(rpm/10)
-                    root.current_speed = abs(rpm)
-                    root.update_rpm_display()
-            else:
-                if not self.alarm_flag:
-                    self.alarm.set_alarm_code(alarm_status)
-                    self.alarm.open()
-                    self.alarm_flag = True
-                    print("Servo Drive Alarm")
-        else:
+        hw_dir = self.servo.get_hw_direction()
+        if hw_dir is not None and hw_dir != root.direction:
+            root.sync_direction(hw_dir)
+        result = self.servo.get_rpm()
+        if result is None:
             if not self.offline_flag:
                 self.offline.open()
                 self.offline_flag = True
                 print("Servo Drive Offline")
+            return
+        alarm_status, rpm = result
+        if self.offline_flag:
+            self.offline.dismiss()
+            self.offline_flag = False
+        if alarm_status == 0:
+            if self.alarm_flag:
+                self.alarm_flag = False
+            if rpm > 35000:
+                rpm = 65536 - rpm
+            rpm = round(rpm/10)
+            root.current_speed = abs(rpm)
+            root.update_rpm_display()
+        else:
+            if not self.alarm_flag:
+                self.alarm.set_alarm_code(alarm_status)
+                self.alarm.open()
+                self.alarm_flag = True
+                print("Servo Drive Alarm")
 
     def update_torque(self, root, dt):
         if self.config.get('GUI', 'kvfile').startswith('Servo_tq'):

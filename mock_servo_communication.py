@@ -3,10 +3,11 @@ from gpiozero import Button
 ############################################################
 
 class ServoCommunicator:
-    def __init__(self, port='COM3', baudrate=9600, slave_id=1):
+    def __init__(self, port='COM3', baudrate=9600, slave_id=1, invert_direction=False):
         self.rpm = 0
         self.alarmcode = 0
         self.servostate = 'disabled'
+        self.invert_direction = invert_direction
         ###### UNCOMMENT IF YOU WANT TO TEST PHYSICAL BUTTONS ######
         # self.enablebutton = Button(21, bounce_time=.1)
         # self.enablebutton.when_pressed = self.enable_servo
@@ -16,6 +17,12 @@ class ServoCommunicator:
 
     def get_servo_state(self):
         return self.servostate
+
+    def start_polling(self, interval=0.25):
+        print("Mock polling started")
+
+    def get_hw_direction(self):
+        return None
 
     def connect(self):
         print("Mock servo connected")
