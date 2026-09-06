@@ -10,6 +10,7 @@ Environment hooks (all optional):
   SERVOCOM_ROTATE=0      override [GUI] rotate (0 = windowed 480x800)
   SERVOCOM_SHOT=<png>    render one frame to a file and exit
 """
+import json
 import os
 import re
 import subprocess
@@ -21,6 +22,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
 from applog import log
 from kivy.app import App
+from kivy.factory import Factory
 from kivy.lang import Builder
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -35,6 +37,10 @@ from portrait_ui import (LoadGraph, FitLabel, SetOverlay, ModeOverlay,   # noqa:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
+# user-changeable settings live here (not in servo.ini, whose comments a
+# ConfigParser rewrite would throw away)
+SETTINGS_PATH = os.environ.get('SERVOCOM_SETTINGS') or os.path.join(HERE, 'settings.json')
+SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm'}
 if USE_MOCK:
     from mock_servo_communication import ServoCommunicator
 else:
@@ -71,7 +77,37 @@ ALARM_CODES = {
 
 
 class Root(BoxLayout):
-    pass
+    """Portrait layout (480x800)."""
+
+
+class RootLandscape(BoxLayout):
+    """Landscape layout (800x480) - same cards, no DRO."""
+
+
+class SettingsOverlay(FloatLayout):
+    """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
+    PAGES = [('display', 'Display', 'DisplayPage'),
+             ('system', 'System', 'SystemPage')]
+    page = StringProperty('')
+
+    def build_menu(self):
+        menu = self.ids.menu
+        menu.clear_widgets()
+        self._buttons = {}
+        for key, title, _cls in self.PAGES:
+            btn = Factory.MenuButton(text=title)
+            btn.bind(on_press=lambda b, k=key: self.select(k))
+            menu.add_widget(btn)
+            self._buttons[key] = btn
+
+    def select(self, key):
+        self.page = key
+        for k, btn in self._buttons.items():
+            btn.active = (k == key)
+        content = self.ids.content
+        content.clear_widgets()
+        cls = dict((k, c) for k, _t, c in self.PAGES)[key]
+        content.add_widget(getattr(Factory, cls)())
 
 
 class EnableButton(Button):
@@ -177,10 +213,6 @@ class AlarmOverlay(FloatLayout):
         self.clearable = info['clearable']
 
 
-class SystemOverlay(FloatLayout):
-    info_text = StringProperty('')
-
-
 class ServoCommanderApp(App):
     font = FONT
     fa = FA
@@ -214,8 +246,15 @@ class ServoCommanderApp(App):
     direction = StringProperty('fwd')
     dir_text = StringProperty('FWD')
 
+    # ---- user settings (settings.json) ----------------------------------
+    orientation = StringProperty('portrait')
+    show_dro = BooleanProperty(True)
+    system_info = StringProperty('')
+
     def __init__(self, **kw):
         super().__init__(**kw)
+        self.settings = dict(SETTINGS_DEFAULTS)
+        self._settings_overlay = None
         self.offs = {ax: {'INC': 0.0, 'SDM': [0.0] * self.SDM_COUNT}
                      for ax in ('X', 'Z')}
         self._unzero = {}
@@ -230,7 +269,6 @@ class ServoCommanderApp(App):
         self._numpad = None
         self._offline = None
         self._alarm = None
-        self._system = None
 
     # ---- config ----------------------------------------------------------
     def get_application_config(self):
@@ -259,41 +297,22 @@ class ServoCommanderApp(App):
         if self.mode == 'surface_speed':
             self.speed_mode_text = 'S.F.M.' if self.unit == 'inch' else 'S.M.M.'
             self.speed_unit_short = 'sfm' if self.unit == 'inch' else 'smm'
-        log.info('App build (portrait): mode=%s ratio=%s max_rpm=%s invert=%s rotate=%s mock=%s',
-                 self.mode, self.ratio, self.max_rpm, invert, self.rotate, USE_MOCK)
+        # SERVOCOM_ROTATE=0 -> windowed desk mode (no fullscreen, no scatter)
+        self.windowed = os.environ.get('SERVOCOM_ROTATE') == '0'
+        self._load_settings()
+        log.info('App build: orientation=%s show_dro=%s mode=%s ratio=%s max_rpm=%s invert=%s rotate=%s mock=%s',
+                 self.orientation, self.show_dro, self.mode, self.ratio,
+                 self.max_rpm, invert, self.rotate, USE_MOCK)
+        self.system_info = 'mode %s   ratio %s   max %d rpm\n%s' % (
+            self.mode, self.ratio, self.max_rpm,
+            'MOCK DRIVE' if USE_MOCK else 'XP200 via RS-485 (%s)' % cfg.get('GUI', 'rotate'))
 
-        Builder.load_file(os.path.join(HERE, 'portrait.kv'))
+        Builder.load_file(os.path.join(HERE, 'ui.kv'))
         self.servo = ServoCommunicator(invert_direction=invert)
         self.servo.start_polling()
 
-        root = Root()
-        self.root_layout = root
-        self.graph = root.ids.graph
-        self.stage = FloatLayout()
-        self.stage.add_widget(root)
-        self._apply_presets(root)
-        self.refresh_axes()
-        self.update_rpm_display()
-
-        if self.rotate:
-            from kivy.uix.scatter import Scatter
-            self.stage.size_hint = (None, None)
-            self.stage.size = (480, 800)
-            scat = Scatter(size_hint=(None, None), size=(480, 800),
-                           do_rotation=False, do_scale=False,
-                           do_translation=False, rotation=self.rotate)
-            scat.add_widget(self.stage)
-            base = FloatLayout()
-            base.add_widget(scat)
-            self._scatter = scat
-
-            def center(*a):
-                scat.center = (Window.width / 2.0, Window.height / 2.0)
-            Window.bind(on_resize=center)
-            Clock.schedule_once(center, 0)
-            display_root = base
-        else:
-            display_root = self.stage
+        self.base = FloatLayout()
+        self._build_stage()
 
         Clock.schedule_once(self._set_window, 0)
         Clock.schedule_interval(self._poll_ui, DT)
@@ -302,29 +321,129 @@ class ServoCommanderApp(App):
         shot = os.environ.get('SERVOCOM_SHOT')
         if shot:
             Clock.schedule_once(lambda dt: self._cap(shot), 1.0)
-        return display_root
+        return self.base
+
+    def _stage_size(self):
+        return (480, 800) if self.orientation == 'portrait' else (800, 480)
+
+    def _build_stage(self):
+        """(Re)create the root layout for the current orientation inside
+        self.base.  Portrait spins the stage by [GUI] rotate degrees on a
+        Scatter so it fills the landscape-mounted panel; landscape is drawn
+        straight.  Load history carries over."""
+        hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
+        for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
+                     '_offline', '_alarm', '_settings_overlay'):
+            setattr(self, attr, None)
+        self.offline_flag = False
+        self.alarm_flag = False
+        self.base.clear_widgets()
+
+        root = Root() if self.orientation == 'portrait' else RootLandscape()
+        self.root_layout = root
+        self.graph = root.ids.load_card.ids.graph
+        self.graph.hist = hist
+        w, h = self._stage_size()
+        self.stage = FloatLayout(size_hint=(None, None), size=(w, h), pos=(0, 0))
+        self.stage.add_widget(root)
+        self._apply_presets(root)
+        self.refresh_axes()
+        self.update_rpm_display()
+
+        rotation = 0 if (self.windowed or self.orientation == 'landscape') else self.rotate
+        if rotation:
+            from kivy.uix.scatter import Scatter
+            scat = Scatter(size_hint=(None, None), size=(w, h),
+                           do_rotation=False, do_scale=False,
+                           do_translation=False, rotation=rotation)
+            scat.add_widget(self.stage)
+            self.base.add_widget(scat)
+            self._scatter = scat
+
+            def center(*a):
+                scat.center = (Window.width / 2.0, Window.height / 2.0)
+            Window.unbind(on_resize=getattr(self, '_recenter', lambda *a: None))
+            self._recenter = center
+            Window.bind(on_resize=center)
+            Clock.schedule_once(center, 0)
+        else:
+            self._scatter = None
+            self.base.add_widget(self.stage)
+        if self.windowed:
+            Window.size = (w, h)
+        self.graph.redraw()
 
     def _set_window(self, dt):
         cfg = self.config
-        fullscreen = cfg.getboolean('GUI', 'fullscreen')
-        if os.environ.get('SERVOCOM_ROTATE') == '0':
-            fullscreen = False       # desk testing: plain 480x800 window
         Window.show_cursor = cfg.getboolean('GUI', 'cursor')
-        if fullscreen:
+        if cfg.getboolean('GUI', 'fullscreen') and not self.windowed:
             Window.borderless = True
             Window.fullscreen = 'auto'
         else:
             Window.fullscreen = False
-            Window.size = (800, 480) if self.rotate else (480, 800)
+            Window.size = self._stage_size()
         Window.bind(on_key_down=self.on_keyboard_down)
+
+    # ---- settings.json ---------------------------------------------------
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_PATH, encoding='utf-8') as fh:
+                data = json.load(fh)
+            self.settings.update({k: v for k, v in data.items() if k in SETTINGS_DEFAULTS})
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            log.error('settings.json unreadable, using defaults: %s', exc)
+        if self.settings['orientation'] not in ('portrait', 'landscape'):
+            self.settings['orientation'] = 'portrait'
+        self.orientation = self.settings['orientation']
+        self.show_dro = bool(self.settings['show_dro'])
+        self.units = 'in' if self.settings['units'] == 'in' else 'mm'
+
+    def _save_settings(self):
+        self.settings.update({'orientation': self.orientation,
+                              'show_dro': bool(self.show_dro),
+                              'units': self.units})
+        try:
+            tmp = SETTINGS_PATH + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as fh:
+                json.dump(self.settings, fh, indent=2)
+            os.replace(tmp, SETTINGS_PATH)
+        except Exception as exc:
+            log.error('settings.json write failed: %s', exc)
+
+    def set_orientation(self, orientation):
+        if orientation == self.orientation:
+            return
+        page = self._settings_overlay.page if self._settings_overlay else None
+        self.orientation = orientation
+        self._save_settings()
+        log.info('Orientation -> %s', orientation)
+        self._build_stage()
+        if page:
+            self.open_settings(page)
+
+    def set_show_dro(self, shown):
+        self.show_dro = bool(shown)
+        self._save_settings()
+        log.info('Show DRO -> %s', self.show_dro)
+
+    def open_settings(self, page='display'):
+        ov = self._show('_settings_overlay', SettingsOverlay())
+        ov.build_menu()
+        ov.select(page)
+
+    def close_settings(self):
+        self._hide('_settings_overlay')
 
     def _apply_presets(self, root):
         # [rpm] / [surface_speed] sections: sp_btn1..9 and inc_btnp/inc_btnn.
         # A preset can be a plain number or (Name, value) for a labelled speed.
         sp_btn = dict(self.config.items(self.mode))
         match_custom = re.compile(r"\((\w+)\s*,\s*(\d{1,4})\)")
+        controls = root.ids.controls.ids
         for key, val in sp_btn.items():
-            btn = root.ids.get(key)
+            btn = controls.get(key)
             if btn is None:
                 continue
             m = match_custom.match(val.strip())
@@ -378,6 +497,7 @@ class ServoCommanderApp(App):
     def toggle_units(self):
         self.units = 'in' if self.units == 'mm' else 'mm'
         self.refresh_axes()
+        self._save_settings()
 
     def on_mode_index(self, *args):
         self.mode_text = self.MODES[int(self.mode_index)]
@@ -443,15 +563,6 @@ class ServoCommanderApp(App):
 
     def close_numpad(self):
         self._hide('_numpad')
-
-    def open_system(self):
-        ov = self._show('_system', SystemOverlay())
-        ov.info_text = ('mode %s   ratio %s   max %d rpm\n%s' % (
-            self.mode, self.ratio, self.max_rpm,
-            'MOCK DRIVE' if USE_MOCK else 'XP200 via RS-485'))
-
-    def close_system(self):
-        self._hide('_system')
 
     # ---- speed / direction / enable -------------------------------------
     def display_max(self):

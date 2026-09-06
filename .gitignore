@@ -4,3 +4,5 @@ my_app_settings.ini
 logs/
 tests/*.png
 tests/shots/
+settings.json
+tests/*.json

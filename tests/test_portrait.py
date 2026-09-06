@@ -7,6 +7,7 @@ Exercises presets from servo.ini, speed/direction/enable, the four-digit
 rpm readout, the custom numpad, offline and alarm overlays, the DRO datum
 model and the calculator hand-off.  Exports tests/portrait_main.png.
 """
+import json
 import os
 import sys
 
@@ -17,6 +18,10 @@ os.environ['SERVOCOM_SHOT'] = ''
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
+SETTINGS = os.path.join(ROOT, 'tests', 'settings_test.json')
+os.environ['SERVOCOM_SETTINGS'] = SETTINGS
+if os.path.exists(SETTINGS):
+    os.remove(SETTINGS)
 
 import main as m                      # noqa: E402
 from kivy.clock import Clock          # noqa: E402
@@ -33,7 +38,7 @@ def check(label, got, want):
 
 
 def run(dt):
-    ids = app.root_layout.ids
+    ids = app.root_layout.ids.controls.ids
     servo = app.servo
     # presets come from [rpm] in servo.ini
     check('preset 8 from ini', ids.sp_btn8.text, '1250')
@@ -89,7 +94,7 @@ def after_disable(n):
     check('readout back to command when disabled', app.rpm_str, '0600')
 
     # long-press on EN commands speed 0
-    ids = app.root_layout.ids
+    ids = app.root_layout.ids.controls.ids
     ids.servo_button._fire_long(0)
     check('long press -> speed 0', (app.command_speed, app.rpm_str), (0, '0000'))
 
@@ -172,10 +177,59 @@ def after_alarm(dt):
     check('calc SET Z', app.z_val, '+50.800')
     check('calc closed', app._calc_overlay, None)
 
-    # system overlay
-    app.open_system()
-    check('system overlay', app._system is not None, True)
-    app.close_system()
+    # settings: menu / pages
+    app.open_settings()
+    ov = app._settings_overlay
+    check('settings opens on display page', ov.page, 'display')
+    check('menu has pages', sorted(ov._buttons), ['display', 'system'])
+    ov.select('system')
+    check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
+    check('display button inactive', ov._buttons['display'].active, False)
+    app.close_settings()
+    check('settings closed', app._settings_overlay, None)
+
+    # show DRO off: block collapses, load/rpm cards grow
+    ids = app.root_layout.ids
+    check('dro block visible', ids.dro.height, 240)
+    app.set_show_dro(False)
+    check('dro hidden', (ids.dro.height, ids.dro.opacity, ids.dro.disabled), (0, 0, True))
+    check('load card grows', ids.load_card.height, 290)
+    check('rpm card grows', (ids.rpm_card.height, ids.rpm_card.digit_font), (170, 120))
+    with open(SETTINGS, encoding='utf-8') as fh:
+        saved = json.load(fh)
+    check('settings saved', saved['show_dro'], False)
+    app.set_show_dro(True)
+    check('dro back', ids.dro.height, 240)
+
+    # orientation: landscape rebuilds the stage, keeps state
+    hist_len = len(app.graph.hist)
+    app.set_speed(800)
+    app.open_settings()
+    app.set_orientation('landscape')
+    check('landscape root', type(app.root_layout).__name__, 'RootLandscape')
+    check('stage 800x480', tuple(app.stage.size), (800, 480))
+    check('history carried over', len(app.graph.hist), hist_len)
+    check('presets re-applied', app.root_layout.ids.controls.ids.sp_btn8.text, '1250')
+    check('rpm readout kept', app.rpm_str, '0800')
+    check('settings reopened after rebuild', app._settings_overlay is not None, True)
+    check('landscape has no dro id', 'dro' in app.root_layout.ids, False)
+    with open(SETTINGS, encoding='utf-8') as fh:
+        saved = json.load(fh)
+    check('orientation saved', saved['orientation'], 'landscape')
+    app.stage.export_to_png(os.path.join(ROOT, 'tests', 'landscape_settings.png'))
+    app.close_settings()
+    app.stage.export_to_png(os.path.join(ROOT, 'tests', 'landscape_main.png'))
+    app.set_orientation('portrait')
+    check('back to portrait', (type(app.root_layout).__name__, tuple(app.stage.size)),
+          ('Root', (480, 800)))
+    check('same orientation is a no-op', app.set_orientation('portrait'), None)
+
+    # units persist
+    app.toggle_units()
+    with open(SETTINGS, encoding='utf-8') as fh:
+        saved = json.load(fh)
+    check('units saved', saved['units'], 'in')
+    app.toggle_units()
 
     app.stage.export_to_png(os.path.join(ROOT, 'tests', 'portrait_main.png'))
     print('RESULT:', 'ALL PASS' if not fails else fails)

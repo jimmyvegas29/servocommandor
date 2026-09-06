@@ -10,6 +10,10 @@ os.environ['SERVOCOM_SHOT'] = ''
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
+SETTINGS = os.path.join(ROOT, 'tests', 'settings_shots.json')
+os.environ['SERVOCOM_SETTINGS'] = SETTINGS
+if os.path.exists(SETTINGS):
+    os.remove(SETTINGS)
 OUT = os.path.join(ROOT, 'tests', 'shots')
 os.makedirs(OUT, exist_ok=True)
 
@@ -29,7 +33,7 @@ def later(delay, fn):
 
 
 def s_running():
-    ids = app.root_layout.ids
+    ids = app.root_layout.ids.controls.ids
     app.preset_press(ids.sp_btn7)          # 1000
     app.toggle_enable()
 
@@ -64,14 +68,33 @@ def s_offline():
     app._poll_ui(0)
 
 
-def s_system():
+def s_settings():
     app.servo.offline = False
     app._poll_ui(0)
-    app.open_system()
+    app.open_settings()
+
+
+def s_settings_system():
+    app._settings_overlay.select('system')
+
+
+def s_nodro():
+    app.close_settings()
+    app.set_show_dro(False)
+
+
+def s_landscape():
+    app.set_show_dro(True)
+    app.set_orientation('landscape')
+
+
+def s_landscape_settings():
+    app.open_settings()
 
 
 def s_done():
-    app.close_system()
+    app.close_settings()
+    app.set_orientation('portrait')
     app.stop()
 
 
@@ -82,7 +105,11 @@ plan = [
     (0.2, s_alarm), (0.4, lambda: cap('alarm')),
     (0.2, s_alarm_nc), (0.4, lambda: cap('alarm_nc')),
     (0.2, s_offline), (0.4, lambda: cap('offline')),
-    (0.2, s_system), (0.4, lambda: cap('system')),
+    (0.2, s_settings), (0.4, lambda: cap('settings_display')),
+    (0.2, s_settings_system), (0.4, lambda: cap('settings_system')),
+    (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
+    (0.2, s_landscape), (1.0, lambda: cap('landscape')),
+    (0.2, s_landscape_settings), (0.6, lambda: cap('landscape_settings')),
     (0.2, s_done),
 ]
 t = 0.0
