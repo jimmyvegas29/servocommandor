@@ -1069,18 +1069,11 @@
             height: 40
             color: (0.7, 0.7, 0.7, 1)
         Widget:
-        SetKey:
-            text: 'DISMISS  -  use the DRO, speed controls stay locked'
-            font_size: '13sp'
-            size_hint_y: None
-            height: 54
-            color: ACCENT
-            on_press: app.dismiss_offline()
         GridLayout:
             cols: 3
             spacing: 6
             size_hint_y: None
-            height: 54
+            height: 64
             SetKey:
                 text: 'Shutdown'
                 font_size: '15sp'
@@ -1090,9 +1083,10 @@
                 font_size: '15sp'
                 on_press: app.sys_reboot()
             SetKey:
-                text: 'Quit app'
+                text: 'Dismiss'
                 font_size: '15sp'
-                on_press: app.stop()
+                color: ACCENT
+                on_press: app.dismiss_offline()
 
 <AlarmOverlay>:
     canvas.before:
