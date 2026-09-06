@@ -238,10 +238,22 @@ def after_alarm(dt):
     check('landscape root', type(app.root_layout).__name__, 'RootLandscape')
     check('stage 800x480', tuple(app.stage.size), (800, 480))
     check('history carried over', len(app.graph.hist), hist_len)
-    check('presets re-applied', app.root_layout.ids.controls.ids.sp_btn8.text, '1250')
+    check('presets re-applied', app.control_ids().sp_btn8.text, '1250')
     check('rpm readout kept', app.rpm_str, '0800')
     check('settings reopened after rebuild', app._settings_overlay is not None, True)
     check('landscape has no dro id', 'dro' in app.root_layout.ids, False)
+    check('landscape direction label', app.control_ids().fwd_button.text, 'FORWARD')
+    check('landscape enable label', app.control_ids().servo_button.text, 'DISABLED')
+    check('landscape torque digits', (app.load_digits, len(app.load_colors)), ('000', 3))
+    # parked card-style landscape still builds
+    app.settings['landscape_style'] = 'cards'
+    app._build_stage()
+    check('cards landscape root', type(app.root_layout).__name__, 'RootLandscapeCards')
+    check('cards presets', app.control_ids().sp_btn8.text, '1250')
+    app.settings['landscape_style'] = 'classic'
+    app._build_stage()
+    check('classic landscape again', type(app.root_layout).__name__, 'RootLandscape')
+    app.open_settings()
     with open(SETTINGS, encoding='utf-8') as fh:
         saved = json.load(fh)
     check('orientation saved', saved['orientation'], 'landscape')

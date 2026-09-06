@@ -40,7 +40,10 @@ USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
 # user-changeable settings live here (not in servo.ini, whose comments a
 # ConfigParser rewrite would throw away)
 SETTINGS_PATH = os.environ.get('SERVOCOM_SETTINGS') or os.path.join(HERE, 'settings.json')
-SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm'}
+SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
+                     # 'classic' = the original Servo_tq layout; 'cards' = the
+                     # portrait cards rearranged (parked, not in the UI)
+                     'landscape_style': 'classic'}
 if USE_MOCK:
     from mock_servo_communication import ServoCommunicator
 else:
@@ -81,7 +84,11 @@ class Root(BoxLayout):
 
 
 class RootLandscape(BoxLayout):
-    """Landscape layout (800x480) - same cards, no DRO."""
+    """Landscape layout (800x480): the original Servo_tq layout plus a gear."""
+
+
+class RootLandscapeCards(BoxLayout):
+    """Alternative landscape built from the portrait cards (parked)."""
 
 
 class SystemPage(BoxLayout):
@@ -309,6 +316,13 @@ class ServoCommanderApp(App):
     servo_state = StringProperty('disabled')
     direction = StringProperty('fwd')
     dir_text = StringProperty('FWD')
+    dir_text_long = StringProperty('FORWARD')
+    # landscape torque digits (3 chars, ghosted leading zeros, red if negative)
+    load_digits = StringProperty('000')
+    load_colors = ListProperty([GHOST, GHOST, WHITE])
+    # non-square panel pixels: icons are pre-squashed by these factors
+    icon_sx = NumericProperty(1.0)
+    icon_sy = NumericProperty(1.0)
 
     # ---- user settings (settings.json) ----------------------------------
     orientation = StringProperty('portrait')
@@ -340,7 +354,8 @@ class ServoCommanderApp(App):
 
     def build_config(self, config):
         config.setdefaults('GUI', {'fullscreen': True, 'cursor': False,
-                                   'rotate': 90, 'no_reverse': False})
+                                   'rotate': 90, 'no_reverse': False,
+                                   'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
                                         'ratio': 1.0, 'diameter': 100,
@@ -401,10 +416,16 @@ class ServoCommanderApp(App):
         self.alarm_flag = False
         self.base.clear_widgets()
 
-        root = Root() if self.orientation == 'portrait' else RootLandscape()
+        if self.orientation == 'portrait':
+            root = Root()
+        elif self.settings.get('landscape_style') == 'cards':
+            root = RootLandscapeCards()
+        else:
+            root = RootLandscape()
         self.root_layout = root
-        self.graph = root.ids.load_card.ids.graph
+        self.graph = self._find(root, 'graph')
         self.graph.hist = hist
+        self._update_icon_scale()
         w, h = self._stage_size()
         self.stage = FloatLayout(size_hint=(None, None), size=(w, h), pos=(0, 0))
         self.stage.add_widget(root)
@@ -434,6 +455,31 @@ class ServoCommanderApp(App):
         if self.windowed:
             Window.size = (w, h)
         self.graph.redraw()
+
+    def _find(self, root, wid):
+        """Look an id up on the root, or inside a card that carries it."""
+        if wid in root.ids:
+            return root.ids[wid]
+        for card in ('load_card', 'controls'):
+            if card in root.ids and wid in root.ids[card].ids:
+                return root.ids[card].ids[wid]
+        raise KeyError(wid)
+
+    def control_ids(self):
+        """The dict holding sp_btn*/inc_btn*/fwd_button/servo_button."""
+        root = self.root_layout
+        return root.ids.controls.ids if 'controls' in root.ids else root.ids
+
+    def _update_icon_scale(self):
+        # the official 7" panel has pixels ~8% wider than tall; squash round
+        # icons along the physical-horizontal axis so they look round
+        aspect = self.config.getfloat('GUI', 'pixel_aspect')
+        if self.windowed or aspect <= 0:
+            aspect = 1.0
+        if self.orientation == 'portrait' and self.rotate:
+            self.icon_sx, self.icon_sy = 1.0, aspect     # logical y = physical x
+        else:
+            self.icon_sx, self.icon_sy = aspect, 1.0
 
     def _set_window(self, dt):
         cfg = self.config
@@ -594,7 +640,7 @@ class ServoCommanderApp(App):
         # A preset can be a plain number or (Name, value) for a labelled speed.
         sp_btn = dict(self.config.items(self.mode))
         match_custom = re.compile(r"\((\w+)\s*,\s*(\d{1,4})\)")
-        controls = root.ids.controls.ids
+        controls = root.ids.controls.ids if 'controls' in root.ids else root.ids
         for key, val in sp_btn.items():
             btn = controls.get(key)
             if btn is None:
@@ -794,6 +840,7 @@ class ServoCommanderApp(App):
     def _set_direction(self, direction):
         self.direction = direction
         self.dir_text = 'FWD' if direction == 'fwd' else 'REV'
+        self.dir_text_long = 'FORWARD' if direction == 'fwd' else 'REVERSE'
 
     def toggle_direction(self):
         if self.config.getboolean('GUI', 'no_reverse') or not self._drive_ready():
@@ -891,6 +938,12 @@ class ServoCommanderApp(App):
             over = load > 100
             self.load_color = [0.95, 0.25, 0.2, 1] if over else [1, 1, 1, 1]
             self.load_color_dim = [0.95, 0.35, 0.3, 0.8] if over else [0.7, 0.7, 0.7, 1]
+            # landscape 3-digit torque readout (original Servo_tq behaviour)
+            digits = str(min(load, 999)).zfill(3)
+            lit = [1, 0, 0, 1] if torque < 0 else WHITE
+            self.load_digits = digits
+            self.load_colors = [GHOST if load < 100 else lit,
+                                GHOST if load < 10 else lit, lit]
             # the graph only records while the servo is enabled
             if self.servo_state == 'enabled':
                 self.graph.add_sample(load)

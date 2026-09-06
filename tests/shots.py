@@ -108,8 +108,20 @@ def s_landscape_settings():
     app.open_settings()
 
 
-def s_done():
+def s_landscape_running():
     app.close_settings()
+    app.set_speed(1000)
+    app.set_enabled(True)
+
+
+def s_landscape_cards():
+    app.settings['landscape_style'] = 'cards'
+    app._build_stage()
+
+
+def s_done():
+    app.settings['landscape_style'] = 'classic'
+    app.set_enabled(False)
     app.set_orientation('portrait')
     app.stop()
 
@@ -127,6 +139,8 @@ plan = [
     (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
     (0.2, s_landscape), (1.0, lambda: cap('landscape')),
     (0.2, s_landscape_settings), (0.6, lambda: cap('landscape_settings')),
+    (0.2, s_landscape_running), (2.5, lambda: cap('landscape_running')),
+    (0.2, s_landscape_cards), (1.0, lambda: cap('landscape_cards')),
     (0.2, s_done),
 ]
 t = 0.0
