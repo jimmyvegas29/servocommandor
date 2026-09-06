@@ -126,13 +126,42 @@ def after_disable(n):
     app._poll_ui(0)
     check('switch neutral synced', (app.servo_state, app.direction), ('disabled', 'fwd'))
 
-    # offline overlay
+    # offline overlay: dismissable, speed section locked, DRO usable
     servo.offline = True
     app._poll_ui(0)
     check('offline overlay shown', app._offline is not None, True)
+    app.dismiss_offline()
+    check('offline dismissed', (app._offline, app.offline_dismissed), (None, True))
+    app._poll_ui(0)
+    check('stays dismissed while offline', app._offline, None)
+    before = (app.command_speed, servo.rpm, app.direction, app.servo_state)
+    app.set_speed(1500)
+    check('set_speed offline re-shows popup', app._offline is not None, True)
+    app.dismiss_offline()
+    app.adjust_speed(50)
+    check('adjust offline re-shows popup', app._offline is not None, True)
+    app.dismiss_offline()
+    app.toggle_direction()
+    app.dismiss_offline()
+    app.toggle_enable()
+    check('enable offline re-shows popup', app._offline is not None, True)
+    app.dismiss_offline()
+    app.open_numpad()
+    check('numpad offline blocked', (app._numpad, app._offline is not None), (None, True))
+    check('nothing commanded while offline',
+          (app.command_speed, servo.rpm, app.direction, app.servo_state), before)
+    app.dismiss_offline()
+    app.apply_set('X', 3.0)
+    app.zero_axis('X')
+    check('DRO works while offline', app.x_val, '+0.000')
+    app.zero_axis('X')
+    check('DRO un-zero while offline', app.x_val, '+3.000')
+    app.apply_set('X', 0.0)
     servo.offline = False
     app._poll_ui(0)
-    check('offline overlay cleared', app._offline, None)
+    check('offline overlay cleared', (app._offline, app.offline_dismissed), (None, False))
+    app.set_speed(600)
+    check('speed works again online', app.rpm_str, '0600')
 
     # alarm overlay
     servo.alarmcode = 13

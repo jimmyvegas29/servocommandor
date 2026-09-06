@@ -262,6 +262,7 @@ class ServoCommanderApp(App):
         self.current_speed = 0      # motor rpm reported by the drive
         self.current_torque = 0
         self.offline_flag = False
+        self.offline_dismissed = False
         self.alarm_flag = False
         self._set_overlay = None
         self._mode_overlay = None
@@ -559,12 +560,31 @@ class ServoCommanderApp(App):
         self._hide('_calc_overlay')
 
     def open_numpad(self):
+        if not self._drive_ready():
+            return
         self._show('_numpad', NumpadOverlay())
 
     def close_numpad(self):
         self._hide('_numpad')
 
     # ---- speed / direction / enable -------------------------------------
+    def _drive_ready(self):
+        """Speed-section guard: while the drive is offline every speed
+        control just brings the offline popup back (the DRO keeps working
+        after DISMISS)."""
+        if not self.offline_flag:
+            return True
+        if self._offline is None:
+            self.offline_dismissed = False
+            self._show('_offline', OfflineOverlay())
+            log.info('Speed control while offline - popup re-shown')
+        return False
+
+    def dismiss_offline(self):
+        self.offline_dismissed = True
+        self._hide('_offline')
+        log.info('Offline popup dismissed (speed controls locked)')
+
     def display_max(self):
         """Largest value the numpad accepts, in display units."""
         if self.mode == 'rpm':
@@ -590,6 +610,8 @@ class ServoCommanderApp(App):
         self.update_rpm_display()
 
     def set_speed(self, speed):
+        if not self._drive_ready():
+            return
         self.command_speed = self._to_motor(speed)
         if self.command_speed > self.max_rpm:
             log.warning('set_speed clamped: %s -> %s (servo_max_rpm)',
@@ -601,6 +623,8 @@ class ServoCommanderApp(App):
         log.info('GUI set_speed: %s (direction=%s)', self.command_speed, self.direction)
 
     def adjust_speed(self, amount):
+        if not self._drive_ready():
+            return
         self.command_speed += self._to_motor(amount)
         self.command_speed = max(0, min(self.max_rpm, self.command_speed))
         self._send_speed()
@@ -620,7 +644,7 @@ class ServoCommanderApp(App):
         self.dir_text = 'FWD' if direction == 'fwd' else 'REV'
 
     def toggle_direction(self):
-        if self.config.getboolean('GUI', 'no_reverse'):
+        if self.config.getboolean('GUI', 'no_reverse') or not self._drive_ready():
             return
         new = 'rev' if self.direction == 'fwd' else 'fwd'
         # switching direction brings the speed to 0 first
@@ -640,6 +664,8 @@ class ServoCommanderApp(App):
         self.set_enabled(self.servo_state != 'enabled', source='GUI')
 
     def set_enabled(self, enabled, source='GUI'):
+        if source == 'GUI' and not self._drive_ready():
+            return
         if enabled:
             if source == 'GUI':
                 self.servo.enable_servo()
@@ -678,13 +704,16 @@ class ServoCommanderApp(App):
         result = self.servo.get_rpm()
         if result is None:
             if not self.offline_flag:
-                self._show('_offline', OfflineOverlay())
                 self.offline_flag = True
+                self.offline_dismissed = False
+                self._show('_offline', OfflineOverlay())
                 log.warning('Offline overlay shown')
             return
         if self.offline_flag:
             self._hide('_offline')
             self.offline_flag = False
+            self.offline_dismissed = False
+            log.info('Drive back online - overlay cleared')
         alarm_status, rpm = result
         if alarm_status == 0:
             self.alarm_flag = False

@@ -449,10 +449,10 @@
                 id: servo_button
                 text: 'EN'
                 font_size: '18sp'
-                color: (1, 1, 1, 1) if app.servo_state == 'enabled' else (0.313, 0.313, 0.313, 1)
+                color: (0.313, 0.313, 0.313, 1) if self.state == 'down' else (1, 1, 1, 1)
                 canvas.before:
                     Color:
-                        rgba: (0.1, 0.7, 0.3, 1) if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1)
+                        rgba: ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1)
                     RoundedRectangle:
                         size: self.size
                         pos: self.pos
@@ -1062,7 +1062,6 @@
             font_size: '34sp'
             size_hint_y: None
             height: 70
-            color: (0.95, 0.25, 0.2, 1)
         SLabel:
             text: 'Check drive power and the RS-485 link'
             font_size: '15sp'
@@ -1070,11 +1069,18 @@
             height: 40
             color: (0.7, 0.7, 0.7, 1)
         Widget:
+        SetKey:
+            text: 'DISMISS  -  use the DRO, speed controls stay locked'
+            font_size: '13sp'
+            size_hint_y: None
+            height: 54
+            color: ACCENT
+            on_press: app.dismiss_offline()
         GridLayout:
             cols: 3
             spacing: 6
             size_hint_y: None
-            height: 64
+            height: 54
             SetKey:
                 text: 'Shutdown'
                 font_size: '15sp'
@@ -1114,7 +1120,6 @@
             font_size: '30sp'
             size_hint_y: None
             height: 54
-            color: (0.95, 0.25, 0.2, 1)
         SLabel:
             text: root.code_text
             font_size: '40sp'
