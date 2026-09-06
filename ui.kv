@@ -1544,7 +1544,7 @@
     color: (1, 1, 1, 1) if self.active else (0.7, 0.7, 0.7, 1)
     canvas.before:
         Color:
-            rgba: ((0.1, 0.7, 0.3, 1) if self.active else PANEL) if not self.disabled else (0.12, 0.12, 0.12, 1)
+            rgba: (ACCENT if self.active else PANEL) if not self.disabled else (0.12, 0.12, 0.12, 1)
         RoundedRectangle:
             size: self.size
             pos: self.pos
@@ -1858,11 +1858,13 @@
             size: self.size
     BoxLayout:
         orientation: 'vertical'
-        padding: 8
+        # same padding / bar height as the main layout so the title bar
+        # does not move or resize when settings opens
+        padding: 4 if app.orientation == 'portrait' else 10
         spacing: 8
         BoxLayout:
             size_hint_y: None
-            height: 44
+            height: 38 if app.orientation == 'portrait' else 53.21
             canvas.before:
                 Color:
                     rgba: PANEL
@@ -1872,7 +1874,7 @@
                     radius: [(7, 7)] * 4
             SLabel:
                 text: 'Settings'
-                font_size: '20sp'
+                font_size: '20sp' if app.orientation == 'portrait' else '34dp'
                 text_size: self.size
                 halign: 'left'
                 valign: 'middle'
