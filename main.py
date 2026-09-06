@@ -575,8 +575,52 @@ class ServoCommanderApp(App):
                  ('Orientation', '%s%s' % (self.orientation,
                                           ' / %s' % cfg.get('GUI', 'rotate')
                                           if self.orientation == 'portrait' else '')),
+                 ('CPU temp', self._cpu_temp()),
+                 ('Throttling', self._throttle_state()),
                  ('Build', self.build_id)]
         return rows
+
+    @staticmethod
+    def _cpu_temp():
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp') as fh:
+                return '%.0f C' % (int(fh.read().strip()) / 1000.0)
+        except Exception:
+            return 'n/a'
+
+    @staticmethod
+    def _throttle_state():
+        """Decode vcgencmd get_throttled: current state plus anything that
+        happened since boot, so a heat or power problem is visible later."""
+        try:
+            out = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True,
+                                 text=True, timeout=2).stdout
+            flags = int(out.split('=')[1], 16)
+        except Exception:
+            return 'n/a'
+        now = []
+        if flags & 0x1:
+            now.append('under-voltage')
+        if flags & 0x2:
+            now.append('freq capped')
+        if flags & 0x4:
+            now.append('throttled')
+        if flags & 0x8:
+            now.append('soft temp limit')
+        since = []
+        if flags & 0x10000:
+            since.append('under-voltage')
+        if flags & 0x20000:
+            since.append('freq capped')
+        if flags & 0x40000:
+            since.append('throttled')
+        if flags & 0x80000:
+            since.append('soft temp limit')
+        if now:
+            return 'NOW: ' + ', '.join(now)
+        if since:
+            return 'since boot: ' + ', '.join(since)
+        return 'none since boot'
 
     def open_ratio_cal(self):
         ov = self._show('_ratio_cal', RatioCalOverlay())
