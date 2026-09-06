@@ -1,0 +1,1162 @@
+#:kivy 2.3.1
+#:set ACCENT (0, 0.5, 1, 1)
+#:set PANEL (0.16, 0.16, 0.16, 1)
+#:set PANEL_DK (0.11, 0.11, 0.11, 1)
+#:set BTN_GRAY (0.313, 0.313, 0.313, 1)
+#:set GHOST (0.13, 0.13, 0.13, 1)
+
+<SLabel@Label>:
+    font_name: app.font
+    font_size: '20sp'
+
+<SButton@Button>:
+    font_name: app.font
+    font_size: '26sp'
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+    canvas.before:
+        Color:
+            rgba: PANEL if self.state == 'normal' else ACCENT
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+
+<SButtonL@SButton>:
+    canvas.before:
+        Color:
+            rgba: PANEL if self.state == 'normal' else ACCENT
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7), (0, 0), (0, 0), (7, 7)]
+
+<SButtonN@SButton>:
+    canvas.before:
+        Color:
+            rgba: PANEL if self.state == 'normal' else ACCENT
+        Rectangle:
+            size: self.size
+            pos: self.pos
+
+<SButtonR@SButton>:
+    canvas.before:
+        Color:
+            rgba: PANEL if self.state == 'normal' else ACCENT
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
+
+<AxisCard@BoxLayout>:
+    axis: 'X'
+    value: '+0.000'
+    spacing: 6
+    canvas.before:
+        Color:
+            rgba: PANEL_DK
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+    SLabel:
+        text: root.axis
+        font_size: '46sp'
+        color: ACCENT
+        size_hint_x: None
+        width: 52
+    FitLabel:
+        font_name: app.font
+        text: root.value
+        max_font: 84
+        fit_text: '+888.888' if app.units == 'mm' else '+88.8888'
+        text_size: self.size
+        halign: 'right'
+        valign: 'middle'
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: None
+        width: 92
+        padding: [0, 6, 6, 6]
+        spacing: 5
+        SButton:
+            text: 'ZERO'
+            font_size: '18sp'
+            on_press: app.zero_axis(root.axis)
+            canvas.before:
+                Color:
+                    rgba: PANEL if self.state == 'normal' else ACCENT
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(4, 4)] * 4
+        SButton:
+            text: 'SET'
+            font_size: '18sp'
+            on_press: app.open_set(root.axis)
+            canvas.before:
+                Color:
+                    rgba: BTN_GRAY if self.state == 'normal' else ACCENT
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(4, 4)] * 4
+
+<HeaderBar@BoxLayout>:
+    size_hint_y: None
+    height: 30
+    ltext: ''
+    rtext: ''
+    canvas.before:
+        Color:
+            rgba: PANEL
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7), (7, 7), (0, 0), (0, 0)]
+    SLabel:
+        text: root.ltext
+        font_size: '17sp'
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        padding: [8, 0]
+    SLabel:
+        text: root.rtext
+        font_size: '17sp'
+        text_size: self.size
+        halign: 'right'
+        valign: 'middle'
+        padding: [8, 0]
+
+<GhostDigit@SLabel>:
+    text: '0'
+    text_size: self.size
+    halign: 'center'
+    valign: 'middle'
+    color: GHOST
+
+<Root>:
+    orientation: 'vertical'
+    padding: 4
+    spacing: 8
+    canvas.before:
+        Color:
+            rgb: 0.01, 0.01, 0.01
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        size_hint_y: None
+        height: 38
+        canvas.before:
+            Color:
+                rgba: PANEL
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        SLabel:
+            text: 'Servo Commander'
+            font_size: '20sp'
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+            padding: [10, 0]
+        Button:
+            text: '\uf013'
+            font_name: app.fa
+            font_size: '22sp'
+            color: (0.65, 0.65, 0.65, 1)
+            background_color: (0, 0, 0, 0)
+            background_normal: ''
+            size_hint_x: None
+            width: 46
+            on_press: app.open_system()
+
+    AxisCard:
+        size_hint_y: None
+        height: 96
+        axis: 'X'
+        value: app.x_val
+    AxisCard:
+        size_hint_y: None
+        height: 96
+        axis: 'Z'
+        value: app.z_val
+
+    BoxLayout:
+        size_hint_y: None
+        height: 32
+        spacing: 6
+        SButton:
+            text: 'CALC'
+            font_size: '15sp'
+            size_hint_x: None
+            width: 84
+            on_press: app.open_calc()
+            canvas.before:
+                Color:
+                    rgba: PANEL if self.state == 'normal' else ACCENT
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(4, 4)] * 4
+        Widget:
+        BoxLayout:
+            size_hint_x: None
+            width: 164
+            spacing: 0
+            SButton:
+                text: '\uf053'
+                font_name: app.fa
+                font_size: '15sp'
+                size_hint_x: None
+                width: 40
+                on_press: app.mode_step(-1)
+                canvas.before:
+                    Color:
+                        rgba: PANEL if self.state == 'normal' else ACCENT
+                    RoundedRectangle:
+                        size: self.size
+                        pos: self.pos
+                        radius: [(4, 4), (0, 0), (0, 0), (4, 4)]
+            SButton:
+                text: app.mode_text
+                font_size: '15sp'
+                color: ACCENT
+                on_press: app.open_mode_list()
+                canvas.before:
+                    Color:
+                        rgba: PANEL if self.state == 'normal' else ACCENT
+                    Rectangle:
+                        size: self.size
+                        pos: self.pos
+            SButton:
+                text: '\uf054'
+                font_name: app.fa
+                font_size: '15sp'
+                size_hint_x: None
+                width: 40
+                on_press: app.mode_step(1)
+                canvas.before:
+                    Color:
+                        rgba: PANEL if self.state == 'normal' else ACCENT
+                    RoundedRectangle:
+                        size: self.size
+                        pos: self.pos
+                        radius: [(0, 0), (4, 4), (4, 4), (0, 0)]
+        SButton:
+            text: 'MM' if app.units == 'mm' else 'INCH'
+            font_size: '15sp'
+            size_hint_x: None
+            width: 84
+            on_press: app.toggle_units()
+            canvas.before:
+                Color:
+                    rgba: PANEL if self.state == 'normal' else ACCENT
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(4, 4)] * 4
+
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_y: None
+        height: 168
+        BoxLayout:
+            size_hint_y: None
+            height: 30
+            canvas.before:
+                Color:
+                    rgba: PANEL
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7), (7, 7), (0, 0), (0, 0)]
+            SLabel:
+                text: 'Load'
+                font_size: '17sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                padding: [8, 0]
+            Button:
+                markup: True
+                text: 'LIVE [font=' + app.fa + '][size=13]\uf054[/size][/font]'
+                font_name: app.font
+                font_size: '15sp'
+                color: ACCENT
+                background_color: (0, 0, 0, 0)
+                background_normal: ''
+                size_hint_x: None
+                width: 86
+                opacity: 1 if graph.view_offset else 0
+                disabled: graph.view_offset == 0
+                on_press: graph.go_live()
+        BoxLayout:
+            padding: [8, 6, 8, 6]
+            canvas.before:
+                Color:
+                    rgba: PANEL_DK
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(0, 0), (0, 0), (7, 7), (7, 7)]
+            FloatLayout:
+                LoadGraph:
+                    id: graph
+                    size_hint: (1, 1)
+                    pos_hint: {'x': 0, 'y': 0}
+                SLabel:
+                    id: loadnum
+                    text: app.load_str
+                    font_size: '42sp'
+                    color: app.load_color
+                    size_hint: (None, None)
+                    size: self.texture_size
+                    pos_hint: {'x': 0.015, 'top': 1.04}
+                SLabel:
+                    text: '%'
+                    font_size: '17sp'
+                    color: app.load_color_dim
+                    size_hint: (None, None)
+                    size: self.texture_size
+                    pos: (loadnum.right + 3, loadnum.top - self.height - 8)
+
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_y: None
+        height: 124
+        HeaderBar:
+            ltext: 'Servo speed'
+            rtext: app.speed_mode_text
+        BoxLayout:
+            padding: [10, 0, 10, 4]
+            canvas.before:
+                Color:
+                    rgba: PANEL_DK
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(0, 0), (0, 0), (7, 7), (7, 7)]
+            GhostDigit:
+                text: app.rpm_str[0]
+                font_size: '86sp'
+                color: app.rpm_colors[0]
+            GhostDigit:
+                text: app.rpm_str[1]
+                font_size: '86sp'
+                color: app.rpm_colors[1]
+            GhostDigit:
+                text: app.rpm_str[2]
+                font_size: '86sp'
+                color: app.rpm_colors[2]
+            GhostDigit:
+                text: app.rpm_str[3]
+                font_size: '86sp'
+                color: app.rpm_colors[3]
+
+    BoxLayout:
+        spacing: 8
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_x: 0.64
+            spacing: 5
+            BoxLayout:
+                spacing: 5
+                SButtonL:
+                    id: sp_btn1
+                    text: '50'
+                    on_press: app.preset_press(self)
+                SButtonN:
+                    id: sp_btn2
+                    text: '100'
+                    on_press: app.preset_press(self)
+                SButtonR:
+                    id: sp_btn3
+                    text: '200'
+                    on_press: app.preset_press(self)
+            BoxLayout:
+                spacing: 5
+                SButtonL:
+                    id: sp_btn4
+                    text: '400'
+                    on_press: app.preset_press(self)
+                SButtonN:
+                    id: sp_btn5
+                    text: '600'
+                    on_press: app.preset_press(self)
+                SButtonR:
+                    id: sp_btn6
+                    text: '800'
+                    on_press: app.preset_press(self)
+            BoxLayout:
+                spacing: 5
+                SButtonL:
+                    id: sp_btn7
+                    text: '1000'
+                    on_press: app.preset_press(self)
+                SButtonN:
+                    id: sp_btn8
+                    text: '1250'
+                    on_press: app.preset_press(self)
+                SButtonR:
+                    id: sp_btn9
+                    text: '1500'
+                    on_press: app.preset_press(self)
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_x: 0.36
+            spacing: 5
+            BoxLayout:
+                spacing: 5
+                SButtonL:
+                    id: inc_btnp
+                    text: '+50'
+                    font_size: '20sp'
+                    on_press: app.adjust_speed(int(self.text))
+                    canvas.before:
+                        Color:
+                            rgba: BTN_GRAY if self.state == 'normal' else ACCENT
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(7, 7), (0, 0), (0, 0), (7, 7)]
+                SButtonR:
+                    id: inc_btnn
+                    text: '-50'
+                    font_size: '20sp'
+                    on_press: app.adjust_speed(int(self.text))
+                    canvas.before:
+                        Color:
+                            rgba: BTN_GRAY if self.state == 'normal' else ACCENT
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
+            SButton:
+                text: 'CUSTOM'
+                font_size: '20sp'
+                on_press: app.open_numpad()
+            BoxLayout:
+                spacing: 5
+                SButtonL:
+                    id: fwd_button
+                    text: app.dir_text
+                    font_size: '18sp'
+                    color: (1, 1, 1, 1)
+                    on_press: app.toggle_direction()
+                    canvas.before:
+                        Color:
+                            rgba: (ACCENT if app.direction == 'fwd' else (0.85, 0.45, 0.1, 1)) if self.state == 'normal' else BTN_GRAY
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(7, 7), (0, 0), (0, 0), (7, 7)]
+                EnableButton:
+                    id: servo_button
+                    text: 'EN'
+                    font_size: '18sp'
+                    color: (1, 1, 1, 1) if app.servo_state == 'enabled' else (0.313, 0.313, 0.313, 1)
+                    canvas.before:
+                        Color:
+                            rgba: (0.1, 0.7, 0.3, 1) if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1)
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
+
+<SetKey@Button>:
+    font_name: app.font
+    font_size: '38sp'
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+    canvas.before:
+        Color:
+            rgba: PANEL if self.state == 'normal' else ACCENT
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+
+<SetOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.96)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (1, 1)
+        padding: 10
+        spacing: 8
+        BoxLayout:
+            size_hint_y: None
+            height: 44
+            canvas.before:
+                Color:
+                    rgba: PANEL
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: 'Set ' + root.axis + ' position'
+                font_size: '20sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                padding: [10, 0]
+            SLabel:
+                text: root.axis
+                font_size: '26sp'
+                color: ACCENT
+                size_hint_x: None
+                width: 44
+        BoxLayout:
+            size_hint_y: None
+            height: 76
+            padding: [12, 0]
+            canvas.before:
+                Color:
+                    rgba: PANEL_DK
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: root.entry if root.entry else '+0.000'
+                font_size: root.font_px
+                color: (1, 1, 1, 1) if root.entry else (0.35, 0.35, 0.35, 1)
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
+            SLabel:
+                text: app.units
+                font_size: '16sp'
+                color: (0.55, 0.55, 0.55, 1)
+                size_hint_x: None
+                width: 36
+                text_size: self.size
+                halign: 'left'
+                valign: 'bottom'
+                padding: [4, 0, 0, 13]
+        GridLayout:
+            cols: 3
+            spacing: 6
+            SetKey:
+                text: '7'
+                on_press: root.add_char('7')
+            SetKey:
+                text: '8'
+                on_press: root.add_char('8')
+            SetKey:
+                text: '9'
+                on_press: root.add_char('9')
+            SetKey:
+                text: '4'
+                on_press: root.add_char('4')
+            SetKey:
+                text: '5'
+                on_press: root.add_char('5')
+            SetKey:
+                text: '6'
+                on_press: root.add_char('6')
+            SetKey:
+                text: '1'
+                on_press: root.add_char('1')
+            SetKey:
+                text: '2'
+                on_press: root.add_char('2')
+            SetKey:
+                text: '3'
+                on_press: root.add_char('3')
+            SetKey:
+                text: '+/-'
+                font_size: '30sp'
+                on_press: root.toggle_sign()
+            SetKey:
+                text: '0'
+                on_press: root.add_char('0')
+            SetKey:
+                text: '.'
+                on_press: root.add_char('.')
+        BoxLayout:
+            size_hint_y: None
+            height: 64
+            spacing: 6
+            SetKey:
+                text: 'CANCEL'
+                font_size: '20sp'
+                on_press: app.close_set()
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=15]\uf00c[/size][/font]  SET'
+                font_size: '20sp'
+                color: (0.4, 0.85, 0.5, 1)
+                on_press: root.submit()
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=15]\uf55a[/size][/font]'
+                font_size: '20sp'
+                size_hint_x: 0.4
+                on_press: root.backspace()
+
+<CalcKey@SetKey>:
+    font_size: '34sp'
+
+<CalcOp@SetKey>:
+    font_size: '42sp'
+    color: ACCENT
+
+<CalcOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 1)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (1, 1)
+        padding: 10
+        spacing: 8
+        BoxLayout:
+            size_hint_y: None
+            height: 44
+            canvas.before:
+                Color:
+                    rgba: PANEL
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: 'Calculator'
+                font_size: '20sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                padding: [10, 0]
+            Button:
+                text: ''
+                font_name: app.fa
+                font_size: '22sp'
+                color: (0.65, 0.65, 0.65, 1)
+                background_color: (0, 0, 0, 0)
+                background_normal: ''
+                size_hint_x: None
+                width: 52
+                on_press: root.toggle_history()
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: None
+            height: 112
+            padding: [12, 6]
+            canvas.before:
+                Color:
+                    rgba: PANEL_DK
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: root.hist
+                font_size: '17sp'
+                color: (0.55, 0.55, 0.55, 1)
+                size_hint_y: None
+                height: 24
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
+            SLabel:
+                text: root.entry if root.entry else '0'
+                font_size: root.font_px
+                color: (1, 1, 1, 1) if root.entry else (0.35, 0.35, 0.35, 1)
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
+        BoxLayout:
+            spacing: 6
+            GridLayout:
+                cols: 3
+                spacing: 6
+                CalcKey:
+                    text: 'C'
+                    on_press: root.clear()
+                CalcKey:
+                    markup: True
+                    text: '[font=' + app.fa + '][size=26][/size][/font]'
+                    on_press: root.backspace()
+                CalcOp:
+                    text: '÷'
+                    on_press: root.add_op('÷')
+                CalcKey:
+                    text: '7'
+                    on_press: root.add_digit('7')
+                CalcKey:
+                    text: '8'
+                    on_press: root.add_digit('8')
+                CalcKey:
+                    text: '9'
+                    on_press: root.add_digit('9')
+                CalcKey:
+                    text: '4'
+                    on_press: root.add_digit('4')
+                CalcKey:
+                    text: '5'
+                    on_press: root.add_digit('5')
+                CalcKey:
+                    text: '6'
+                    on_press: root.add_digit('6')
+                CalcKey:
+                    text: '1'
+                    on_press: root.add_digit('1')
+                CalcKey:
+                    text: '2'
+                    on_press: root.add_digit('2')
+                CalcKey:
+                    text: '3'
+                    on_press: root.add_digit('3')
+                CalcKey:
+                    text: '+/-'
+                    font_size: '26sp'
+                    on_press: root.toggle_sign()
+                CalcKey:
+                    text: '0'
+                    on_press: root.add_digit('0')
+                CalcKey:
+                    text: '.'
+                    on_press: root.add_dot()
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
+                width: 108
+                spacing: 6
+                CalcOp:
+                    text: '×'
+                    on_press: root.add_op('×')
+                CalcOp:
+                    text: '−'
+                    on_press: root.add_op('−')
+                CalcOp:
+                    text: '+'
+                    on_press: root.add_op('+')
+                CalcOp:
+                    text: '='
+                    size_hint_y: 2
+                    color: (0.4, 0.85, 0.5, 1)
+                    on_press: root.equals()
+        BoxLayout:
+            size_hint_y: None
+            height: 64
+            spacing: 6
+            SetKey:
+                text: 'CLOSE'
+                font_size: '20sp'
+                on_press: app.close_calc()
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=15][/size][/font]  SET X'
+                font_size: '20sp'
+                color: (0.4, 0.85, 0.5, 1)
+                on_press: root.send_to('X')
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=15][/size][/font]  SET Z'
+                font_size: '20sp'
+                color: (0.4, 0.85, 0.5, 1)
+                on_press: root.send_to('Z')
+
+<CalcHistory>:
+    orientation: 'vertical'
+    size_hint: (None, None)
+    padding: 8
+    spacing: 8
+    canvas.before:
+        Color:
+            rgba: PANEL_DK
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+    SLabel:
+        text: 'History'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 30
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        padding: [6, 0]
+    ScrollView:
+        id: hist_scroll
+        bar_width: 0
+        do_scroll_x: False
+        scroll_type: ['content']
+        GridLayout:
+            id: hist_grid
+            cols: 1
+            size_hint_y: None
+            height: self.minimum_height
+            spacing: 4
+    BoxLayout:
+        size_hint_y: None
+        height: 64
+        spacing: 6
+        SetKey:
+            markup: True
+            text: '[font=' + app.fa + '][size=15][/size][/font]  BACK'
+            font_size: '20sp'
+            on_press: root.close()
+        SetKey:
+            markup: True
+            text: '[font=' + app.fa + '][size=18][/size][/font]'
+            font_size: '20sp'
+            size_hint_x: 0.4
+            color: (0.9, 0.45, 0.45, 1)
+            on_press: root.clear_all()
+
+<ModeOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.9)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (300, 640)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 8
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        SLabel:
+            text: 'Select mode'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 34
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+            padding: [6, 0]
+        ScrollView:
+            id: mode_scroll
+            bar_width: 0
+            do_scroll_x: False
+            scroll_type: ['content']
+            GridLayout:
+                id: mode_grid
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: 4
+        SetKey:
+            text: 'CANCEL'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 52
+            on_press: app.close_mode_list()
+
+<EnableButton>:
+    font_name: app.font
+    font_size: '26sp'
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+
+<OverlayTitle@BoxLayout>:
+    text: ''
+    size_hint_y: None
+    height: 44
+    canvas.before:
+        Color:
+            rgba: PANEL
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+    SLabel:
+        text: root.text
+        font_size: '20sp'
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        padding: [10, 0]
+
+<NumpadOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 1)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (1, 1)
+        padding: 10
+        spacing: 8
+        OverlayTitle:
+            text: 'Custom speed'
+        BoxLayout:
+            size_hint_y: None
+            height: 76
+            padding: [12, 0]
+            canvas.before:
+                Color:
+                    rgba: PANEL_DK
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: root.entry if root.entry else '0'
+                font_size: '64sp'
+                color: ((0.95, 0.25, 0.2, 1) if root.over else (1, 1, 1, 1)) if root.entry else (0.35, 0.35, 0.35, 1)
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
+            SLabel:
+                text: app.speed_unit_short
+                font_size: '16sp'
+                color: (0.55, 0.55, 0.55, 1)
+                size_hint_x: None
+                width: 48
+                text_size: self.size
+                halign: 'left'
+                valign: 'bottom'
+                padding: [4, 0, 0, 13]
+        GridLayout:
+            cols: 3
+            spacing: 6
+            SetKey:
+                text: '7'
+                on_press: root.add_digit('7')
+            SetKey:
+                text: '8'
+                on_press: root.add_digit('8')
+            SetKey:
+                text: '9'
+                on_press: root.add_digit('9')
+            SetKey:
+                text: '4'
+                on_press: root.add_digit('4')
+            SetKey:
+                text: '5'
+                on_press: root.add_digit('5')
+            SetKey:
+                text: '6'
+                on_press: root.add_digit('6')
+            SetKey:
+                text: '1'
+                on_press: root.add_digit('1')
+            SetKey:
+                text: '2'
+                on_press: root.add_digit('2')
+            SetKey:
+                text: '3'
+                on_press: root.add_digit('3')
+            SetKey:
+                text: 'C'
+                on_press: root.clear()
+            SetKey:
+                text: '0'
+                on_press: root.add_digit('0')
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=26][/size][/font]'
+                on_press: root.backspace()
+        BoxLayout:
+            size_hint_y: None
+            height: 64
+            spacing: 6
+            SetKey:
+                text: 'CANCEL'
+                font_size: '20sp'
+                on_press: app.close_numpad()
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=15][/size][/font]  SET'
+                font_size: '20sp'
+                color: (0.4, 0.85, 0.5, 1)
+                on_press: root.submit()
+
+<OfflineOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.92)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (420, 300)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 10
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        SLabel:
+            text: 'DRIVE OFFLINE'
+            font_size: '34sp'
+            size_hint_y: None
+            height: 70
+            color: (0.95, 0.25, 0.2, 1)
+        SLabel:
+            text: 'Check drive power and the RS-485 link'
+            font_size: '15sp'
+            size_hint_y: None
+            height: 40
+            color: (0.7, 0.7, 0.7, 1)
+        Widget:
+        GridLayout:
+            cols: 3
+            spacing: 6
+            size_hint_y: None
+            height: 64
+            SetKey:
+                text: 'Shutdown'
+                font_size: '15sp'
+                on_press: app.sys_poweroff()
+            SetKey:
+                text: 'Reboot'
+                font_size: '15sp'
+                on_press: app.sys_reboot()
+            SetKey:
+                text: 'Quit app'
+                font_size: '15sp'
+                on_press: app.stop()
+
+<AlarmOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.92)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (440, 420)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 10
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        SLabel:
+            text: 'DRIVE ALARM'
+            font_size: '30sp'
+            size_hint_y: None
+            height: 54
+            color: (0.95, 0.25, 0.2, 1)
+        SLabel:
+            text: root.code_text
+            font_size: '40sp'
+            size_hint_y: None
+            height: 60
+        SLabel:
+            text: root.name_text
+            font_size: '18sp'
+            size_hint_y: None
+            height: 50
+            text_size: self.size
+            halign: 'center'
+            valign: 'middle'
+        SLabel:
+            text: root.body_text
+            font_size: '14sp'
+            color: (0.7, 0.7, 0.7, 1)
+            text_size: self.size
+            halign: 'center'
+            valign: 'top'
+        SetKey:
+            text: 'CLEAR' if root.clearable else 'NOT CLEARABLE - POWER CYCLE DRIVE'
+            font_size: '18sp' if root.clearable else '13sp'
+            size_hint_y: None
+            height: 60
+            disabled: not root.clearable
+            color: (1, 1, 1, 1) if root.clearable else (0.95, 0.25, 0.2, 1)
+            on_press: app.alarm_clear()
+
+<SystemOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.92)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (360, 420)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        SLabel:
+            text: 'System'
+            font_size: '20sp'
+            size_hint_y: None
+            height: 40
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+            padding: [6, 0]
+        SLabel:
+            text: root.info_text
+            font_size: '13sp'
+            color: (0.6, 0.6, 0.6, 1)
+            text_size: self.size
+            halign: 'left'
+            valign: 'top'
+            padding: [6, 0]
+        SetKey:
+            text: 'Shutdown Pi'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 56
+            on_press: app.sys_poweroff()
+        SetKey:
+            text: 'Reboot Pi'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 56
+            on_press: app.sys_reboot()
+        SetKey:
+            text: 'Quit app'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 56
+            on_press: app.stop()
+        SetKey:
+            text: 'CLOSE'
+            font_size: '18sp'
+            size_hint_y: None
+            height: 56
+            on_press: app.close_system()
