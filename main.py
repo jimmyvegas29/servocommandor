@@ -84,6 +84,70 @@ class RootLandscape(BoxLayout):
     """Landscape layout (800x480) - same cards, no DRO."""
 
 
+class SystemPage(BoxLayout):
+    """Read-only summary of the running configuration."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        rows = self.ids.rows
+        for label, value in App.get_running_app().system_rows():
+            row = Factory.InfoRow()      # kv-declared props exist only after init
+            row.label = label
+            row.value = value
+            rows.add_widget(row)
+
+
+class RatioCalOverlay(FloatLayout):
+    """Drive-ratio calibration: run the spindle at a preset, read the real
+    spindle rpm with a tach, type it in.  new ratio = motor rpm / measured."""
+    entry = StringProperty('')
+    motor_rpm = NumericProperty(0)
+    shown_rpm = NumericProperty(0)
+    new_ratio = NumericProperty(0.0)
+    new_ratio_text = StringProperty('-')
+    hint = StringProperty('')
+
+    def refresh(self):
+        app = App.get_running_app()
+        live = app.servo_state == 'enabled' and app.current_speed > 0
+        self.motor_rpm = int(app.current_speed if live else 0)
+        self.shown_rpm = int(round(self.motor_rpm / app.ratio)) if live else 0
+        self.hint = ('Spindle running - read the tach and enter the rpm'
+                     if live else 'Enable the servo and run a preset first, then enter the tach reading')
+        self._compute()
+
+    def _compute(self):
+        try:
+            measured = int(self.entry)
+        except ValueError:
+            measured = 0
+        if measured > 0 and self.motor_rpm > 0:
+            self.new_ratio = round(self.motor_rpm / float(measured), 3)
+            self.new_ratio_text = '%.3f' % self.new_ratio
+        else:
+            self.new_ratio = 0.0
+            self.new_ratio_text = '-'
+
+    def add_digit(self, d):
+        if len(self.entry) >= 5:
+            return
+        self.entry = d if self.entry == '0' else self.entry + d
+        self._compute()
+
+    def backspace(self):
+        self.entry = self.entry[:-1]
+        self._compute()
+
+    def clear(self):
+        self.entry = ''
+        self._compute()
+
+    def accept(self):
+        if self.new_ratio <= 0:
+            return
+        App.get_running_app().apply_ratio(self.new_ratio)
+
+
 class SettingsOverlay(FloatLayout):
     """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
     PAGES = [('display', 'Display', 'DisplayPage'),
@@ -249,8 +313,6 @@ class ServoCommanderApp(App):
     # ---- user settings (settings.json) ----------------------------------
     orientation = StringProperty('portrait')
     show_dro = BooleanProperty(True)
-    system_info = StringProperty('')
-
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -270,6 +332,7 @@ class ServoCommanderApp(App):
         self._numpad = None
         self._offline = None
         self._alarm = None
+        self._ratio_cal = None
 
     # ---- config ----------------------------------------------------------
     def get_application_config(self):
@@ -304,9 +367,7 @@ class ServoCommanderApp(App):
         log.info('App build: orientation=%s show_dro=%s mode=%s ratio=%s max_rpm=%s invert=%s rotate=%s mock=%s',
                  self.orientation, self.show_dro, self.mode, self.ratio,
                  self.max_rpm, invert, self.rotate, USE_MOCK)
-        self.system_info = 'mode %s   ratio %s   max %d rpm\n%s' % (
-            self.mode, self.ratio, self.max_rpm,
-            'MOCK DRIVE' if USE_MOCK else 'XP200 via RS-485 (%s)' % cfg.get('GUI', 'rotate'))
+        self.build_id = self._git_short()
 
         Builder.load_file(os.path.join(HERE, 'ui.kv'))
         self.servo = ServoCommunicator(invert_direction=invert)
@@ -334,7 +395,7 @@ class ServoCommanderApp(App):
         straight.  Load history carries over."""
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
-                     '_offline', '_alarm', '_settings_overlay'):
+                     '_offline', '_alarm', '_settings_overlay', '_ratio_cal'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -433,6 +494,97 @@ class ServoCommanderApp(App):
         ov = self._show('_settings_overlay', SettingsOverlay())
         ov.build_menu()
         ov.select(page)
+
+    # ---- system page / ratio calibration --------------------------------
+    @staticmethod
+    def _git_short():
+        try:
+            head = open(os.path.join(HERE, '.git', 'HEAD'), encoding='utf-8').read().strip()
+            if head.startswith('ref: '):
+                ref = head[5:]
+                ref_path = os.path.join(HERE, '.git', *ref.split('/'))
+                sha = ''
+                if os.path.exists(ref_path):
+                    sha = open(ref_path, encoding='utf-8').read().strip()
+                else:
+                    for line in open(os.path.join(HERE, '.git', 'packed-refs'), encoding='utf-8'):
+                        if line.strip().endswith(' ' + ref):
+                            sha = line.split()[0]
+                            break
+                return '%s %s' % (ref.rsplit('/', 1)[-1], sha[:7] or '?')
+            return head[:7]
+        except Exception:
+            return 'unknown'
+
+    def system_rows(self):
+        cfg = self.config
+        rows = [('Speed mode', 'RPM' if self.mode == 'rpm' else 'Surface speed'),
+                ('Ratio', '%.3f' % self.ratio),
+                ('Max motor rpm', '%d' % self.max_rpm),
+                ('Max spindle rpm', '%d' % round(self.max_rpm / self.ratio))]
+        if self.mode == 'surface_speed':
+            rows.append(('Diameter', '%g %s' % (self.diameter, 'in' if self.unit == 'inch' else 'mm')))
+        rows += [('Drive', 'MOCK' if USE_MOCK else 'XP200 ttyS0 9600'),
+                 ('Invert direction', 'ON' if cfg.getboolean('Hardware', 'invert_direction') else 'OFF'),
+                 ('Orientation', '%s%s' % (self.orientation,
+                                          ' / %s' % cfg.get('GUI', 'rotate')
+                                          if self.orientation == 'portrait' else '')),
+                 ('Build', self.build_id)]
+        return rows
+
+    def open_ratio_cal(self):
+        ov = self._show('_ratio_cal', RatioCalOverlay())
+        ov.refresh()
+        # keep the motor rpm reading live while the popup is open
+        self._ratio_cal_evt = Clock.schedule_interval(lambda dt: ov.refresh(), 0.5)
+
+    def close_ratio_cal(self):
+        evt = getattr(self, '_ratio_cal_evt', None)
+        if evt is not None:
+            evt.cancel()
+            self._ratio_cal_evt = None
+        self._hide('_ratio_cal')
+
+    @staticmethod
+    def fmt_ratio(ratio):
+        return ('%.3f' % ratio).rstrip('0').rstrip('.')
+
+    def apply_ratio(self, ratio):
+        old = self.ratio
+        self.ratio = float(ratio)
+        self.config.set('Settings', 'ratio', self.fmt_ratio(self.ratio))
+        self._write_ini_value('Settings', 'ratio', self.fmt_ratio(self.ratio))
+        log.info('Ratio calibrated: %.3f -> %.3f', old, self.ratio)
+        self.update_rpm_display()
+        self.close_ratio_cal()
+        if self._settings_overlay is not None:
+            self.open_settings('system')
+
+    @staticmethod
+    def _write_ini_value(section, key, value):
+        """Edit one key=value line in servo.ini in place so the comments
+        survive (Kivy's ConfigParser.write() would drop them)."""
+        path = os.path.join(HERE, 'servo.ini')
+        with open(path, encoding='utf-8', newline='') as fh:   # keep CRLF/LF as-is
+            lines = fh.read().splitlines(keepends=True)
+        in_section = False
+        done = False
+        for i, line in enumerate(lines):
+            s = line.strip()
+            if s.startswith('[') and s.endswith(']'):
+                in_section = (s[1:-1].strip().lower() == section.lower())
+                continue
+            if in_section and re.match(r'^\s*%s\s*=' % re.escape(key), line, re.I):
+                nl = '\r\n' if line.endswith('\r\n') else '\n'
+                lines[i] = '%s=%s%s' % (key, value, nl)
+                done = True
+                break
+        if not done:
+            raise ValueError('%s.%s not found in servo.ini' % (section, key))
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='') as fh:
+            fh.write(''.join(lines))
+        os.replace(tmp, path)
 
     def close_settings(self):
         self._hide('_settings_overlay')

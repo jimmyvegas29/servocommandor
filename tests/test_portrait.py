@@ -253,6 +253,47 @@ def after_alarm(dt):
           ('Root', (480, 800)))
     check('same orientation is a no-op', app.set_orientation('portrait'), None)
 
+    # system page rows + ratio calibration (servo.ini edited in place)
+    app.open_settings('system')
+    page = app._settings_overlay.ids.content.children[0]
+    labels = [r.label for r in page.ids.rows.children]
+    check('system rows present', all(l in labels for l in
+          ('Speed mode', 'Ratio', 'Max motor rpm', 'Build')), True)
+    ini_path = os.path.join(ROOT, 'servo.ini')
+    ini_before = open(ini_path, encoding='utf-8').read()
+    old_ratio = app.ratio
+    app.open_ratio_cal()
+    cal = app._ratio_cal
+    check('cal needs running spindle', (cal.motor_rpm, cal.new_ratio), (0, 0.0))
+    app.set_speed(600)
+    app.toggle_enable()
+    Clock.schedule_once(lambda dt: after_ratio(ini_path, ini_before, old_ratio), 1.5)
+
+
+def after_ratio(ini_path, ini_before, old_ratio):
+    cal = app._ratio_cal
+    cal.refresh()
+    motor = round(600 * old_ratio)
+    check('cal reads motor rpm', cal.motor_rpm, motor)
+    check('cal shows spindle rpm', cal.shown_rpm, 600)
+    for ch in '580':                      # tach says 580 instead of 600
+        cal.add_digit(ch)
+    want = round(motor / 580.0, 3)
+    check('new ratio computed', cal.new_ratio, want)
+    cal.accept()
+    check('ratio applied', app.ratio, want)
+    check('readout uses new ratio', app.rpm_str, str(round(app.current_speed / want)).zfill(4))
+    check('cal closed, system page reopened',
+          (app._ratio_cal, app._settings_overlay.page), (None, 'system'))
+    ini_after = open(ini_path, encoding='utf-8').read()
+    check('ini ratio line rewritten', 'ratio=%s\n' % app.fmt_ratio(want) in ini_after.replace('\r\n', '\n'), True)
+    check('ini comments intact', ini_after.count('#'), ini_before.count('#'))
+    # restore the original ratio in the file and the app
+    app.apply_ratio(old_ratio)
+    check('ratio restored', open(ini_path, encoding='utf-8').read() == ini_before, True)
+    app.toggle_enable()
+    app.close_settings()
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:
