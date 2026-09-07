@@ -354,7 +354,7 @@ class ServoCommanderApp(App):
 
     def build_config(self, config):
         config.setdefaults('GUI', {'fullscreen': True, 'cursor': False,
-                                   'rotate': 90, 'no_reverse': False,
+                                   'rotate': 90, 'flip': False, 'no_reverse': False,
                                    'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
@@ -433,7 +433,14 @@ class ServoCommanderApp(App):
         self.refresh_axes()
         self.update_rpm_display()
 
-        rotation = 0 if (self.windowed or self.orientation == 'landscape') else self.rotate
+        # [GUI] rotate spins portrait onto the landscape panel; [GUI] flip adds
+        # 180 degrees in either orientation for a panel mounted upside down
+        if self.windowed:
+            rotation = 0
+        else:
+            rotation = self.rotate if self.orientation == 'portrait' else 0
+            if self.config.getboolean('GUI', 'flip'):
+                rotation = (rotation + 180) % 360
         if rotation:
             from kivy.uix.scatter import Scatter
             scat = Scatter(size_hint=(None, None), size=(w, h),
@@ -1058,7 +1065,9 @@ class ServoCommanderApp(App):
         if os.name != 'nt' and os.path.exists(trigger):
             try:
                 os.remove(trigger)
-                self.stage.export_to_png('/tmp/mockshot.png')
+                # export the window root so the capture shows the real
+                # on-panel orientation, not the unrotated stage
+                self.base.export_to_png('/tmp/mockshot.png')
             except Exception:
                 pass
 
