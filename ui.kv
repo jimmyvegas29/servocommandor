@@ -1613,6 +1613,15 @@
                 on_press: app.set_orientation('landscape')
     SettingCard:
         SettingHead:
+            label: 'Flip display'
+            hint: 'Turn the picture 180 degrees for an upside-down mount'
+        BoxLayout:
+            ToggleSwitch:
+                active: app.flip
+                on_press: app.set_flip(not app.flip)
+            Widget:
+    SettingCard:
+        SettingHead:
             label: 'Show DRO'
             hint: 'Portrait only' if app.orientation == 'landscape' else 'X / Z axis cards, datums, calculator'
         BoxLayout:

@@ -33,7 +33,8 @@ from kivy.properties import (NumericProperty, StringProperty, ListProperty,
                              BooleanProperty)
 
 from portrait_ui import (LoadGraph, FitLabel, SetOverlay, ModeOverlay,   # noqa: F401
-                         CalcOverlay, HistRow, CalcHistory, FONT, FA, DT)
+                         CalcOverlay, HistRow, CalcHistory, ModalTouch,
+                         FONT, FA, DT)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -41,6 +42,7 @@ USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
 # ConfigParser rewrite would throw away)
 SETTINGS_PATH = os.environ.get('SERVOCOM_SETTINGS') or os.path.join(HERE, 'settings.json')
 SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
+                     'flip': False,
                      # 'classic' = the original Servo_tq layout; 'cards' = the
                      # portrait cards rearranged (parked, not in the UI)
                      'landscape_style': 'classic'}
@@ -104,7 +106,7 @@ class SystemPage(BoxLayout):
             rows.add_widget(row)
 
 
-class RatioCalOverlay(FloatLayout):
+class RatioCalOverlay(ModalTouch, FloatLayout):
     """Drive-ratio calibration: run the spindle at a preset, read the real
     spindle rpm with a tach, type it in.  new ratio = motor rpm / measured."""
     entry = StringProperty('')
@@ -155,7 +157,7 @@ class RatioCalOverlay(FloatLayout):
         App.get_running_app().apply_ratio(self.new_ratio)
 
 
-class SettingsOverlay(FloatLayout):
+class SettingsOverlay(ModalTouch, FloatLayout):
     """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
     PAGES = [('display', 'Display', 'DisplayPage'),
              ('system', 'System', 'SystemPage')]
@@ -220,7 +222,7 @@ class EnableButton(Button):
         App.get_running_app().set_speed(0)
 
 
-class NumpadOverlay(FloatLayout):
+class NumpadOverlay(ModalTouch, FloatLayout):
     entry = StringProperty('')
     over = BooleanProperty(False)
 
@@ -259,11 +261,11 @@ class NumpadOverlay(FloatLayout):
         app.close_numpad()
 
 
-class OfflineOverlay(FloatLayout):
+class OfflineOverlay(ModalTouch, FloatLayout):
     pass
 
 
-class AlarmOverlay(FloatLayout):
+class AlarmOverlay(ModalTouch, FloatLayout):
     code_text = StringProperty('')
     name_text = StringProperty('')
     body_text = StringProperty('')
@@ -327,6 +329,7 @@ class ServoCommanderApp(App):
     # ---- user settings (settings.json) ----------------------------------
     orientation = StringProperty('portrait')
     show_dro = BooleanProperty(True)
+    flip = BooleanProperty(False)
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -354,7 +357,7 @@ class ServoCommanderApp(App):
 
     def build_config(self, config):
         config.setdefaults('GUI', {'fullscreen': True, 'cursor': False,
-                                   'rotate': 90, 'flip': False, 'no_reverse': False,
+                                   'rotate': 90, 'no_reverse': False,
                                    'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
@@ -439,7 +442,7 @@ class ServoCommanderApp(App):
             rotation = 0
         else:
             rotation = self.rotate if self.orientation == 'portrait' else 0
-            if self.config.getboolean('GUI', 'flip'):
+            if self.flip:
                 rotation = (rotation + 180) % 360
         if rotation:
             from kivy.uix.scatter import Scatter
@@ -513,11 +516,13 @@ class ServoCommanderApp(App):
             self.settings['orientation'] = 'portrait'
         self.orientation = self.settings['orientation']
         self.show_dro = bool(self.settings['show_dro'])
+        self.flip = bool(self.settings['flip'])
         self.units = 'in' if self.settings['units'] == 'in' else 'mm'
 
     def _save_settings(self):
         self.settings.update({'orientation': self.orientation,
                               'show_dro': bool(self.show_dro),
+                              'flip': bool(self.flip),
                               'units': self.units})
         try:
             tmp = SETTINGS_PATH + '.tmp'
@@ -534,6 +539,17 @@ class ServoCommanderApp(App):
         self.orientation = orientation
         self._save_settings()
         log.info('Orientation -> %s', orientation)
+        self._build_stage()
+        if page:
+            self.open_settings(page)
+
+    def set_flip(self, flipped):
+        if bool(flipped) == self.flip:
+            return
+        page = self._settings_overlay.page if self._settings_overlay else None
+        self.flip = bool(flipped)
+        self._save_settings()
+        log.info('Flip display -> %s', self.flip)
         self._build_stage()
         if page:
             self.open_settings(page)

@@ -306,6 +306,56 @@ def after_ratio(ini_path, ini_before, old_ratio):
     app.toggle_enable()
     app.close_settings()
 
+    # overlays swallow touches: tapping where the gear sits while SET is
+    # open must not open settings (it did, through the axis label)
+    from kivy.base import EventLoop
+    from kivy.core.window import Window
+    from kivy.input.motionevent import MotionEvent
+
+    class UnitTestTouch(MotionEvent):
+        """Synthetic touch in window pixels (kivy.tests needs pytest)."""
+        def __init__(self, x, y):
+            super().__init__('unittest', 99, {'x': x / Window.width, 'y': y / Window.height},
+                             is_touch=True, type_id='touch')
+
+        def depack(self, args):
+            self.sx, self.sy = args['x'], args['y']
+            self.profile = ['pos']
+            super().depack(args)
+
+        def touch_down(self):
+            EventLoop._dispatch_input('begin', self)
+            EventLoop.dispatch_input()          # process the queued event now
+
+        def touch_up(self):
+            EventLoop._dispatch_input('end', self)
+            EventLoop.dispatch_input()
+
+    app.open_set('X')
+    gear = app.root_layout.children[-1].children[0]     # TitleBar's IconButton
+    gx, gy = gear.center
+    app.stage.do_layout()        # size the overlay now (normally next frame)
+    t = UnitTestTouch(gx, gy)
+    t.touch_down()
+    t.touch_up()
+    check('gear blocked behind SET overlay', app._settings_overlay, None)
+    check('SET overlay still open', app._set_overlay is not None, True)
+    app.close_set()
+    t = UnitTestTouch(gx, gy)
+    t.touch_down()
+    t.touch_up()
+    check('gear works with no overlay', app._settings_overlay is not None, True)
+    app.close_settings()
+
+    # flip display: rotation applies only on the panel, but the setting
+    # persists and the stage rebuilds
+    app.set_flip(True)
+    check('flip on', app.flip, True)
+    with open(SETTINGS, encoding='utf-8') as fh:
+        check('flip saved', json.load(fh)['flip'], True)
+    app.set_flip(False)
+    check('flip off', app.flip, False)
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:

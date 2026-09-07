@@ -1045,7 +1045,28 @@ class FitLabel(Label):
         self.font_size = fs
 
 
-class ModeOverlay(FloatLayout):
+class ModalTouch:
+    """Mixin for full-screen overlays: any touch the overlay's children
+    don't handle is swallowed here, so nothing underneath (the gear, the
+    axis cards...) can be hit through a popup."""
+
+    def on_touch_down(self, touch):
+        if super().on_touch_down(touch):
+            return True
+        return self.collide_point(*touch.pos)
+
+    def on_touch_move(self, touch):
+        if super().on_touch_move(touch):
+            return True
+        return self.collide_point(*touch.pos)
+
+    def on_touch_up(self, touch):
+        if super().on_touch_up(touch):
+            return True
+        return self.collide_point(*touch.pos)
+
+
+class ModeOverlay(ModalTouch, FloatLayout):
     def populate(self, modes, current):
         from kivy.uix.button import Button
         grid = self.ids.mode_grid
@@ -1071,7 +1092,7 @@ class ModeOverlay(FloatLayout):
         Clock.schedule_once(scroll_to_current, 0)
 
 
-class SetOverlay(FloatLayout):
+class SetOverlay(ModalTouch, FloatLayout):
     axis = StringProperty('X')
     entry = StringProperty('')
     font_px = NumericProperty(85)
@@ -1137,7 +1158,7 @@ class SetOverlay(FloatLayout):
         app.close_set()
 
 
-class CalcOverlay(FloatLayout):
+class CalcOverlay(ModalTouch, FloatLayout):
     """Four-function calculator.  Binary operators are stored as the
     display glyphs (+ − × ÷); a unary minus is a plain '-' glued to
     its number.  The result can be pushed straight into an axis SET."""
