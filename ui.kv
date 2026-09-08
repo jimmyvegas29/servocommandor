@@ -81,6 +81,7 @@
     FixedDigits:
         font_name: app.font
         text: root.value
+        axis: root.axis
         max_font: 84
         fit_text: '+888.888' if app.units == 'mm' else '+88.8888'
         # dimmed while the scale feed is not live
@@ -1746,6 +1747,75 @@
         valign: 'middle'
         padding: [6, 0]
     Widget:
+
+<CopyOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), min(root.height - 20, 620))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Copy ' + root.axis + '  ' + root.value_text + '  to'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            IconButton:
+                text: ''
+                size_hint_x: None
+                width: 44
+                on_press: app.close_copy()
+        SLabel:
+            text: 'Tap the datums that should read this value'
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 22
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        GridLayout:
+            id: grid
+            cols: 3
+            spacing: 5
+        BoxLayout:
+            size_hint_y: None
+            height: 54
+            spacing: 6
+            SetKey:
+                text: 'ALL'
+                font_size: '16sp'
+                on_press: root.select_all(True)
+            SetKey:
+                text: 'NONE'
+                font_size: '16sp'
+                on_press: root.select_all(False)
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=14][/size][/font]  APPLY'
+                font_size: '16sp'
+                size_hint_x: 1.4
+                color: (0.4, 0.85, 0.5, 1) if root.selected_count else (0.35, 0.35, 0.35, 1)
+                disabled: root.selected_count == 0
+                on_press: root.apply()
 
 <InfoRow@BoxLayout>:
     label: ''

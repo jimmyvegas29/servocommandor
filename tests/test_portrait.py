@@ -507,6 +507,42 @@ def after_layout(dt):
     app.apply_set('X', 0.0)
     app.apply_set('Z', 0.0)
 
+    # copy a reading into several datums (double-tap picker)
+    app.select_mode(0)
+    app.apply_set('X', 40.0)
+    app.select_mode(2)                            # SDM 1 reads 40 too (offset 0)
+    app.zero_axis('X')                            # SDM 1 -> 0
+    app.open_copy('X')
+    ov = app._copy_overlay
+    check('copy picker title value', (ov.axis, ov.value_text), ('X', '+0.000'))
+    check('current datum greyed', ov._buttons['SDM 1'].disabled, True)
+    ov.toggle('SDM 3')
+    ov.toggle('SDM 7')
+    ov.toggle('INC')
+    ov.toggle('SDM 7')                            # untoggle
+    check('selection', ov.selected(), ['INC', 'SDM 3'])
+    ov.apply()
+    check('picker closed', app._copy_overlay, None)
+    app.select_mode(4)                            # SDM 3
+    check('SDM 3 now reads 0', app.x_val, '+0.000')
+    app.select_mode(1)                            # INC
+    check('INC now reads 0', app.x_val, '+0.000')
+    app.select_mode(8)                            # SDM 7 untouched
+    check('SDM 7 untouched', app.x_val, '+40.000')
+    app.select_mode(0)
+    check('ABS untouched', app.x_val, '+40.000')
+    app.open_copy('X')
+    ov = app._copy_overlay
+    ov.select_all(True)
+    check('ALL selects 21', ov.selected_count, 21)
+    ov.select_all(False)
+    check('NONE clears', ov.selected_count, 0)
+    app.close_copy()
+    app.apply_set('X', 0.0)
+    for ax in ('X', 'Z'):
+        app.offs[ax]['INC'] = 0.0
+        app.offs[ax]['SDM'] = [0.0] * app.SDM_COUNT
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:

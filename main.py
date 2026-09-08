@@ -164,6 +164,71 @@ class RatioCalOverlay(ModalTouch, FloatLayout):
         App.get_running_app().apply_ratio(self.new_ratio)
 
 
+class CopyOverlay(ModalTouch, FloatLayout):
+    """Double-tap on a readout: pick which datums (INC, SDM 1-20) should be
+    set so they show this axis's current value."""
+    axis = StringProperty('X')
+    value_text = StringProperty('')
+    selected_count = NumericProperty(0)
+
+    TARGETS = ['INC'] + ['SDM %d' % i for i in range(1, 21)]
+
+    def populate(self, current_mode):
+        from kivy.uix.button import Button
+        from kivy.graphics import Color as _C, RoundedRectangle as _R
+        grid = self.ids.grid
+        grid.clear_widgets()
+        self._buttons = {}
+        self._selected = set()
+        self._current = current_mode
+        for name in self.TARGETS:
+            btn = Button(text=name, font_name=FONT, font_size=16,
+                         background_color=(0, 0, 0, 0), background_normal='',
+                         background_disabled_normal='',
+                         disabled=(name == current_mode),
+                         color=(0.4, 0.4, 0.4, 1) if name == current_mode else (0.8, 0.8, 0.8, 1))
+            with btn.canvas.before:
+                col = _C(0.16, 0.16, 0.16, 1)
+                rect = _R(size=btn.size, pos=btn.pos, radius=[(5, 5)] * 4)
+            btn._col = col
+            btn.bind(pos=lambda b, v, r=rect: setattr(r, 'pos', v),
+                     size=lambda b, v, r=rect: setattr(r, 'size', v))
+            btn.bind(on_press=lambda b, n=name: self.toggle(n))
+            grid.add_widget(btn)
+            self._buttons[name] = btn
+
+    def _paint(self, name):
+        btn = self._buttons[name]
+        on = name in self._selected
+        btn._col.rgba = (0, 0.5, 1, 1) if on else (0.16, 0.16, 0.16, 1)
+        btn.color = (1, 1, 1, 1) if on else (0.8, 0.8, 0.8, 1)
+
+    def toggle(self, name):
+        if name in self._selected:
+            self._selected.discard(name)
+        else:
+            self._selected.add(name)
+        self._paint(name)
+        self.selected_count = len(self._selected)
+
+    def select_all(self, on):
+        for name in self.TARGETS:
+            if name == self._current:
+                continue
+            if on:
+                self._selected.add(name)
+            else:
+                self._selected.discard(name)
+            self._paint(name)
+        self.selected_count = len(self._selected)
+
+    def selected(self):
+        return [n for n in self.TARGETS if n in self._selected]
+
+    def apply(self):
+        App.get_running_app().apply_copy(self.axis, self.selected())
+
+
 class SettingsOverlay(ModalTouch, FloatLayout):
     """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
     PAGES = [('display', 'Display', 'DisplayPage'),
@@ -373,6 +438,7 @@ class ServoCommanderApp(App):
         self._offline = None
         self._alarm = None
         self._ratio_cal = None
+        self._copy_overlay = None
 
     # ---- config ----------------------------------------------------------
     def get_application_config(self):
@@ -451,7 +517,8 @@ class ServoCommanderApp(App):
         straight.  Load history carries over."""
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
-                     '_offline', '_alarm', '_settings_overlay', '_ratio_cal'):
+                     '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
+                     '_copy_overlay'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -956,6 +1023,30 @@ class ServoCommanderApp(App):
     def apply_set(self, axis, value):
         mm_value = value if self.units == 'mm' else value * 25.4
         self._apply_mm(axis, mm_value)
+
+    # ---- copy a reading into other datums ------------------------------
+    def open_copy(self, axis):
+        ov = self._show('_copy_overlay', CopyOverlay(axis=axis))
+        ov.value_text = self.x_val if axis == 'X' else self.z_val
+        ov.populate(self.mode_text)
+
+    def close_copy(self):
+        self._hide('_copy_overlay')
+
+    def apply_copy(self, axis, targets):
+        """Set each target datum of this axis so it reads the value the axis
+        shows right now (in the current mode)."""
+        value = self.disp_mm(axis)
+        abs_mm = self._abs_mm(axis)
+        for name in targets:
+            if name == 'INC':
+                self.offs[axis]['INC'] = abs_mm - value
+            elif name.startswith('SDM '):
+                self.offs[axis]['SDM'][int(name.split()[1]) - 1] = abs_mm - value
+        log.info('Copied %s reading %.3f mm into %s', axis, value, ', '.join(targets) or 'nothing')
+        self.refresh_axes()
+        self._save_datums()
+        self.close_copy()
 
     def arm_half(self):
         """Toggle the 1/2 function; it disarms itself after HALF_TIMEOUT."""

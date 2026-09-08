@@ -1055,8 +1055,15 @@ class FixedDigits(Widget):
     max_font = NumericProperty(84)
     color = ListProperty([1, 1, 1, 1])
     font_name = StringProperty(FONT)
+    axis = StringProperty('')     # set on the axis cards: double-tap -> copy picker
     _glyph_cache = {}
     _metrics_cache = {}
+
+    def on_touch_down(self, touch):
+        if self.axis and touch.is_double_tap and self.collide_point(*touch.pos):
+            App.get_running_app().open_copy(self.axis)
+            return True
+        return super(FixedDigits, self).on_touch_down(touch)
 
     def __init__(self, **kwargs):
         super(FixedDigits, self).__init__(**kwargs)
