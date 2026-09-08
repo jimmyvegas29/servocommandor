@@ -1631,6 +1631,94 @@
             Widget:
     Widget:
 
+<UmButton@SegButton>:
+    axis: 'X'
+    um: 1
+    text: '%d um' % self.um
+    active: (app.dro_x_um if self.axis == 'X' else app.dro_z_um) == self.um
+    on_press: app.set_dro_um(self.axis, self.um)
+
+<DroPage@BoxLayout>:
+    orientation: 'vertical'
+    spacing: 8
+    SLabel:
+        text: 'DRO'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 32
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+    SettingCard:
+        SettingHead:
+            label: 'X direction'
+            hint: 'Flip if it counts the wrong way'
+        BoxLayout:
+            ToggleSwitch:
+                text: 'INVERTED' if self.active else 'NORMAL'
+                width: 130
+                active: app.dro_x_invert
+                on_press: app.set_dro_invert('X', not app.dro_x_invert)
+            Widget:
+    SettingCard:
+        SettingHead:
+            label: 'Z direction'
+            hint: 'Flip if it counts the wrong way'
+        BoxLayout:
+            ToggleSwitch:
+                text: 'INVERTED' if self.active else 'NORMAL'
+                width: 130
+                active: app.dro_z_invert
+                on_press: app.set_dro_invert('Z', not app.dro_z_invert)
+            Widget:
+    SettingCard:
+        SettingHead:
+            label: 'X scale resolution'
+            hint: 'Glass scale grating, per count'
+        BoxLayout:
+            spacing: 0
+            UmButton:
+                axis: 'X'
+                um: 1
+                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+            UmButton:
+                axis: 'X'
+                um: 5
+                corners: [(0, 0)] * 4
+            UmButton:
+                axis: 'X'
+                um: 10
+                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+    SettingCard:
+        SettingHead:
+            label: 'Z scale resolution'
+            hint: 'Glass scale grating, per count'
+        BoxLayout:
+            spacing: 0
+            UmButton:
+                axis: 'Z'
+                um: 1
+                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+            UmButton:
+                axis: 'Z'
+                um: 5
+                corners: [(0, 0)] * 4
+            UmButton:
+                axis: 'Z'
+                um: 10
+                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+    SLabel:
+        text: 'Scales: ' + app.dro_status
+        font_size: '13sp'
+        color: (0.6, 0.6, 0.6, 1)
+        size_hint_y: None
+        height: 30
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        padding: [6, 0]
+    Widget:
+
 <InfoRow@BoxLayout>:
     label: ''
     value: ''

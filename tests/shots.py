@@ -78,6 +78,10 @@ def s_settings_system():
     app._settings_overlay.select('system')
 
 
+def s_settings_dro():
+    app._settings_overlay.select('dro')
+
+
 def s_ratio_prep():
     app.close_settings()
     app.set_speed(1000)
@@ -135,6 +139,7 @@ plan = [
     (0.2, s_offline), (0.4, lambda: cap('offline')),
     (0.2, s_settings), (0.4, lambda: cap('settings_display')),
     (0.2, s_settings_system), (0.4, lambda: cap('settings_system')),
+    (0.2, s_settings_dro), (0.4, lambda: cap('settings_dro')),
     (0.2, s_ratio_prep), (1.6, s_ratio_cal), (1.2, lambda: cap('ratio_cal')),
     (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
     (0.2, s_landscape), (1.0, lambda: cap('landscape')),

@@ -19,9 +19,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 SETTINGS = os.path.join(ROOT, 'tests', 'settings_test.json')
+DATUMS = os.path.join(ROOT, 'tests', 'datums_test.json')
 os.environ['SERVOCOM_SETTINGS'] = SETTINGS
-if os.path.exists(SETTINGS):
-    os.remove(SETTINGS)
+os.environ['SERVOCOM_DATUMS'] = DATUMS
+for _p in (SETTINGS, DATUMS):
+    if os.path.exists(_p):
+        os.remove(_p)
 
 import main as m                      # noqa: E402
 from kivy.clock import Clock          # noqa: E402
@@ -210,7 +213,7 @@ def after_alarm(dt):
     app.open_settings()
     ov = app._settings_overlay
     check('settings opens on display page', ov.page, 'display')
-    check('menu has pages', sorted(ov._buttons), ['display', 'system'])
+    check('menu has pages', sorted(ov._buttons), ['display', 'dro', 'system'])
     ov.select('system')
     check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
     check('display button inactive', ov._buttons['display'].active, False)
@@ -421,6 +424,58 @@ def after_layout(dt):
     check('font size fixed', fd.font_px > 40, True)
     app.dro.feed('DRO X:0 Z:0 S:3 T:3')
     app._poll_dro(0)
+
+    # DRO settings: direction and resolution per axis
+    app.dro.feed('DRO X:2000 Z:2000 S:4 T:4')
+    app._poll_dro(0)
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+    app.set_dro_invert('X', False)
+    check('X invert off flips reading', app.x_val, '+4.000')      # -2 -> +2 around datum -2
+    app.set_dro_um('Z', 5)
+    check('Z at 5um per count', app.z_val, '-8.000')              # -10 - (-2)
+    with open(SETTINGS, encoding='utf-8') as fh:
+        s = json.load(fh)
+    check('dro settings saved', (s['dro_x_invert'], s['dro_z_um']), (False, 5))
+    app.set_dro_invert('X', True)
+    app.set_dro_um('Z', 1)
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+
+    # datums persist: save, then simulate a power cycle
+    app.apply_set('X', 25.0)                      # ABS reads 25 at raw -2
+    app.select_mode(3)                            # SDM 2
+    app.apply_set('X', 3.0)
+    app.select_mode(0)
+    app._save_datums()
+    with open(DATUMS, encoding='utf-8') as fh:
+        d = json.load(fh)
+    check('datums file written', (round(d['raw']['X'], 3), d['mode_index']), (-2.0, 0))
+    # "power cycle": fresh in-memory state, board restarts counting at 0
+    saved_abs = app.x_val
+    app.abs_off = {'X': 0.0, 'Z': 0.0}
+    app.offs = {ax: {'INC': 0.0, 'SDM': [0.0] * app.SDM_COUNT} for ax in ('X', 'Z')}
+    app._load_datums()
+    check('datums reloaded (SDM 2 kept)', app.offs['X']['SDM'][1] != 0.0, True)
+    app.dro.feed('DRO X:0 Z:0 S:1 T:1')           # board rebooted: counts from 0
+    app._poll_dro(0)
+    check('reading restored after power cycle', app.x_val, saved_abs)
+    app.select_mode(3)
+    check('SDM 2 restored', app.x_val, '+3.000')
+    app.select_mode(0)
+    app.dro.feed('DRO X:-1000 Z:0 S:2 T:2')       # move 1mm (inverted axis)
+    app._poll_dro(0)
+    check('still tracks after resync', app.x_val, '+26.000')
+    # app-only restart with the board still counting: no false shift
+    app._save_datums()
+    app._load_datums()
+    app.dro.feed('DRO X:-1000 Z:0 S:3 T:3')
+    app._poll_dro(0)
+    check('app restart, board kept counting', app.x_val, '+26.000')
+    app.apply_set('X', 0.0)
+    app.dro.feed('DRO X:0 Z:0 S:4 T:4')
+    app._poll_dro(0)
+    app.apply_set('X', 0.0)
     app.dro = None
     app.dro_stale = False
 

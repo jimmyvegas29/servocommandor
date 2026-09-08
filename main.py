@@ -42,8 +42,14 @@ USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
 # user-changeable settings live here (not in servo.ini, whose comments a
 # ConfigParser rewrite would throw away)
 SETTINGS_PATH = os.environ.get('SERVOCOM_SETTINGS') or os.path.join(HERE, 'settings.json')
+# datums (ABS offset, INC, SDMs, mode, last scale position) so a power cycle
+# comes back exactly where it left off
+DATUMS_PATH = os.environ.get('SERVOCOM_DATUMS') or os.path.join(HERE, 'datums.json')
 SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      'flip': False,
+                     # glass scales: direction per axis and resolution (um/count)
+                     'dro_x_invert': True, 'dro_z_invert': True,
+                     'dro_x_um': 1, 'dro_z_um': 1,
                      # 'classic' = the original Servo_tq layout; 'cards' = the
                      # portrait cards rearranged (parked, not in the UI)
                      'landscape_style': 'classic'}
@@ -161,6 +167,7 @@ class RatioCalOverlay(ModalTouch, FloatLayout):
 class SettingsOverlay(ModalTouch, FloatLayout):
     """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
     PAGES = [('display', 'Display', 'DisplayPage'),
+             ('dro', 'DRO', 'DroPage'),
              ('system', 'System', 'SystemPage')]
     page = StringProperty('')
 
@@ -334,6 +341,10 @@ class ServoCommanderApp(App):
     orientation = StringProperty('portrait')
     show_dro = BooleanProperty(True)
     flip = BooleanProperty(False)
+    dro_x_invert = BooleanProperty(True)
+    dro_z_invert = BooleanProperty(True)
+    dro_x_um = NumericProperty(1)
+    dro_z_um = NumericProperty(1)
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -368,9 +379,7 @@ class ServoCommanderApp(App):
                                    'rotate': 90, 'no_reverse': False,
                                    'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
-        config.setdefaults('DRO', {'enabled': False, 'port': '/dev/ttyACM0',
-                                   'counts_per_mm': 1000,
-                                   'x_invert': True, 'z_invert': True})
+        config.setdefaults('DRO', {'enabled': False, 'port': '/dev/ttyACM0'})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
                                         'ratio': 1.0, 'diameter': 100,
                                         'unit': 'metric'})
@@ -403,14 +412,17 @@ class ServoCommanderApp(App):
         self.servo.start_polling()
 
         # glass-scale tap board on USB serial
-        self.dro_cpm = cfg.getfloat('DRO', 'counts_per_mm')
-        self.dro_sign = {'X': -1.0 if cfg.getboolean('DRO', 'x_invert') else 1.0,
-                         'Z': -1.0 if cfg.getboolean('DRO', 'z_invert') else 1.0}
+        self._load_datums()
         if cfg.getboolean('DRO', 'enabled'):
             self.dro = DroSerial(cfg.get('DRO', 'port'))
             self.dro.start()
             self.dro_status = 'waiting for board'
             self.dro_stale = True
+        else:
+            # no board: the scale position is fixed at 0, so line the datum
+            # up with the saved reading straight away
+            self._resync_datums({'X': 0.0, 'Z': 0.0})
+        Clock.schedule_interval(self._datum_autosave, 2.0)
 
         self.base = FloatLayout()
         self._build_stage()
@@ -540,12 +552,20 @@ class ServoCommanderApp(App):
         self.show_dro = bool(self.settings['show_dro'])
         self.flip = bool(self.settings['flip'])
         self.units = 'in' if self.settings['units'] == 'in' else 'mm'
+        self.dro_x_invert = bool(self.settings['dro_x_invert'])
+        self.dro_z_invert = bool(self.settings['dro_z_invert'])
+        self.dro_x_um = self.settings['dro_x_um'] if self.settings['dro_x_um'] in (1, 5, 10) else 1
+        self.dro_z_um = self.settings['dro_z_um'] if self.settings['dro_z_um'] in (1, 5, 10) else 1
 
     def _save_settings(self):
         self.settings.update({'orientation': self.orientation,
                               'show_dro': bool(self.show_dro),
                               'flip': bool(self.flip),
-                              'units': self.units})
+                              'units': self.units,
+                              'dro_x_invert': bool(self.dro_x_invert),
+                              'dro_z_invert': bool(self.dro_z_invert),
+                              'dro_x_um': int(self.dro_x_um),
+                              'dro_z_um': int(self.dro_z_um)})
         try:
             tmp = SETTINGS_PATH + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as fh:
@@ -755,11 +775,115 @@ class ServoCommanderApp(App):
     def _abs_mm(self, axis):
         return self.raw[axis] - self.abs_off[axis]
 
+    def counts_to_mm(self, axis, counts):
+        um = self.dro_x_um if axis == 'X' else self.dro_z_um
+        sign = -1.0 if (self.dro_x_invert if axis == 'X' else self.dro_z_invert) else 1.0
+        return sign * counts * um / 1000.0
+
     def feed_counts(self, x_counts, z_counts):
         """Raw scale counts from the tap board -> raw mm (sign per axis)."""
-        self.raw['X'] = self.dro_sign['X'] * x_counts / self.dro_cpm
-        self.raw['Z'] = self.dro_sign['Z'] * z_counts / self.dro_cpm
+        self._last_counts = (x_counts, z_counts)
+        self.raw['X'] = self.counts_to_mm('X', x_counts)
+        self.raw['Z'] = self.counts_to_mm('Z', z_counts)
         self.refresh_axes()
+
+    # ---- DRO settings page -------------------------------------------------
+    def set_dro_invert(self, axis, inverted):
+        if axis == 'X':
+            self.dro_x_invert = bool(inverted)
+        else:
+            self.dro_z_invert = bool(inverted)
+        self._save_settings()
+        self._reapply_counts()
+        log.info('DRO %s invert -> %s', axis, inverted)
+
+    def set_dro_um(self, axis, um):
+        if axis == 'X':
+            self.dro_x_um = int(um)
+        else:
+            self.dro_z_um = int(um)
+        self._save_settings()
+        self._reapply_counts()
+        log.info('DRO %s resolution -> %s um', axis, um)
+
+    def _reapply_counts(self):
+        counts = getattr(self, '_last_counts', None)
+        if counts is not None:
+            self.feed_counts(*counts)
+        else:
+            self.refresh_axes()
+
+    # ---- datums.json --------------------------------------------------------
+    def _load_datums(self):
+        self._datums_dirty = False
+        self._datums_saved_raw = None
+        self._datums_resynced = False
+        try:
+            with open(DATUMS_PATH, encoding='utf-8') as fh:
+                d = json.load(fh)
+        except FileNotFoundError:
+            return
+        except Exception as exc:
+            log.error('datums.json unreadable, starting from zero: %s', exc)
+            return
+        try:
+            for ax in ('X', 'Z'):
+                self.abs_off[ax] = float(d['abs_off'][ax])
+                self.offs[ax]['INC'] = float(d['inc'][ax])
+                sdm = [float(v) for v in d['sdm'][ax]][:self.SDM_COUNT]
+                self.offs[ax]['SDM'][:len(sdm)] = sdm
+            self.mode_index = int(d.get('mode_index', 0)) % len(self.MODES)
+            self._datums_saved_raw = {ax: float(d['raw'][ax]) for ax in ('X', 'Z')}
+            log.info('datums.json loaded (mode %s, last raw X=%.3f Z=%.3f)',
+                     self.mode_text, self._datums_saved_raw['X'], self._datums_saved_raw['Z'])
+        except (KeyError, TypeError, ValueError) as exc:
+            log.error('datums.json malformed, starting from zero: %s', exc)
+
+    def _resync_datums(self, first_raw):
+        """First scale reading after start: shift each ABS datum by however
+        far the raw count moved since the last save.  A board that reset
+        with the power comes back at 0 -> the shift is -last_raw and the
+        reading is restored; a board that stayed powered and kept counting
+        while the app was down gives a shift equal to the real movement."""
+        if self._datums_resynced:
+            return
+        self._datums_resynced = True
+        if self._datums_saved_raw is None:
+            return
+        for ax in ('X', 'Z'):
+            delta = first_raw[ax] - self._datums_saved_raw[ax]
+            self.abs_off[ax] += delta
+            if abs(delta) > 0.0005:
+                log.info('datum resync %s: raw moved %+.3f mm since last save', ax, delta)
+        self.refresh_axes()
+        self._mark_datums()
+
+    def _mark_datums(self):
+        self._datums_dirty = True
+
+    def _save_datums(self):
+        data = {'abs_off': dict(self.abs_off),
+                'inc': {ax: self.offs[ax]['INC'] for ax in ('X', 'Z')},
+                'sdm': {ax: list(self.offs[ax]['SDM']) for ax in ('X', 'Z')},
+                'mode_index': int(self.mode_index),
+                'raw': dict(self.raw)}
+        try:
+            tmp = DATUMS_PATH + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as fh:
+                json.dump(data, fh, indent=1)
+            os.replace(tmp, DATUMS_PATH)
+            self._datums_dirty = False
+            self._datums_last_raw_saved = dict(self.raw)
+        except Exception as exc:
+            log.error('datums.json write failed: %s', exc)
+
+    def _datum_autosave(self, dt):
+        # every 2 s: write if a datum changed or the axes moved since the
+        # last write, so an abrupt power-off loses at most 2 s of travel
+        last = getattr(self, '_datums_last_raw_saved', None)
+        moved = last is None or any(abs(self.raw[ax] - last[ax]) > 0.0005 for ax in ('X', 'Z'))
+        if self._datums_dirty or moved:
+            self._save_datums()
 
     def _poll_dro(self, dt):
         if self.dro is None:
@@ -768,6 +892,8 @@ class ServoCommanderApp(App):
         stale = self.dro.stale
         if sample is not None and not stale:
             self.feed_counts(sample['x'], sample['z'])
+            if not self._datums_resynced:
+                self._resync_datums(dict(self.raw))
         if stale != self.dro_stale:
             self.dro_stale = stale
             log.info('DRO feed %s', 'STALE' if stale else 'live')
@@ -801,6 +927,7 @@ class ServoCommanderApp(App):
         else:
             self.offs[axis]['SDM'][int(m.split()[1]) - 1] = self._abs_mm(axis) - mm_value
         self.refresh_axes()
+        self._save_datums()
 
     def refresh_axes(self):
         self.x_mm = self._abs_mm('X')
@@ -816,6 +943,8 @@ class ServoCommanderApp(App):
     def on_mode_index(self, *args):
         self.mode_text = self.MODES[int(self.mode_index)]
         self.refresh_axes()
+        if getattr(self, 'stage', None) is not None:      # not during load
+            self._save_datums()
 
     def mode_step(self, delta):
         self.mode_index = (int(self.mode_index) + delta) % len(self.MODES)
@@ -1108,6 +1237,7 @@ class ServoCommanderApp(App):
             log.error('on_stop: %s', exc)
         if self.dro is not None:
             self.dro.stop()
+        self._save_datums()
         log.info('App stopped')
 
     def on_keyboard_down(self, window, keycode, scancode, text, modifiers):

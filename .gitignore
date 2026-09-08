@@ -5,4 +5,5 @@ logs/
 tests/*.png
 tests/shots/
 settings.json
+datums.json
 tests/*.json
