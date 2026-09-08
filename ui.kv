@@ -59,12 +59,25 @@
             size: self.size
             pos: self.pos
             radius: [(7, 7)] * 4
-    SLabel:
+    Button:
+        # axis letter: only does something while the 1/2 function is armed
         text: root.axis
+        font_name: app.font
         font_size: '46sp'
-        color: ACCENT
+        color: (1, 1, 1, 1) if app.half_armed else ACCENT
+        background_color: (0, 0, 0, 0)
+        background_normal: ''
+        background_down: ''
         size_hint_x: None
         width: 52
+        on_press: app.axis_tap(root.axis)
+        canvas.before:
+            Color:
+                rgba: ACCENT if app.half_armed else (0, 0, 0, 0)
+            RoundedRectangle:
+                size: (self.width - 4, self.height - 12)
+                pos: (self.x + 2, self.y + 6)
+                radius: [(5, 5), (0, 0), (0, 0), (5, 5)]
     FixedDigits:
         font_name: app.font
         text: root.value
@@ -209,6 +222,21 @@
                     pos: self.pos
                     radius: [(4, 4)] * 4
         Widget:
+        SButton:
+            # 1/2 (centerline): arm, then tap the blue X or Z to halve it
+            text: '1/2'
+            font_size: '15sp'
+            size_hint_x: None
+            width: 52
+            color: (1, 1, 1, 1) if app.half_armed else (0.85, 0.85, 0.85, 1)
+            on_press: app.arm_half()
+            canvas.before:
+                Color:
+                    rgba: ACCENT if (app.half_armed or self.state == 'down') else PANEL
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(4, 4)] * 4
         BoxLayout:
             size_hint_x: None
             width: 164

@@ -38,6 +38,14 @@ def s_running():
     app.toggle_enable()
 
 
+def s_half():
+    app.arm_half()
+
+
+def s_half_off():
+    app._disarm_half()
+
+
 def s_numpad():
     app.open_numpad()
     for ch in '1250':
@@ -132,6 +140,7 @@ def s_done():
 
 plan = [
     (1.0, s_running), (3.0, lambda: cap('running')),
+    (0.2, s_half), (0.4, lambda: cap('half_armed')), (0.2, s_half_off),
     (0.2, s_numpad), (0.4, lambda: cap('numpad')),
     (0.2, s_numpad_over), (0.4, lambda: cap('numpad_over')),
     (0.2, s_alarm), (0.4, lambda: cap('alarm')),

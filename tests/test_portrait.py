@@ -479,6 +479,34 @@ def after_layout(dt):
     app.dro = None
     app.dro_stale = False
 
+    # 1/2 centerline function
+    app.select_mode(0)
+    app.apply_set('X', 25.0)
+    app.apply_set('Z', -8.0)
+    app.axis_tap('X')
+    check('letter inert when not armed', app.x_val, '+25.000')
+    app.arm_half()
+    check('armed', app.half_armed, True)
+    app.axis_tap('X')
+    check('X halved', app.x_val, '+12.500')
+    check('disarmed after use', app.half_armed, False)
+    check('Z untouched', app.z_val, '-8.000')
+    app.arm_half()
+    app.arm_half()
+    check('arm toggles off', app.half_armed, False)
+    app.select_mode(1)                            # INC: halve the INC reading
+    app.zero_axis('Z')
+    app.apply_set('Z', 5.0)
+    app.arm_half()
+    app.axis_tap('Z')
+    check('halve in INC', app.z_val, '+2.500')
+    app.select_mode(0)
+    check('ABS Z unaffected by INC halve', app.z_val, '-8.000')
+    app.arm_half()
+    app._disarm_half()
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:

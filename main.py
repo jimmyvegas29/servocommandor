@@ -310,6 +310,10 @@ class ServoCommanderApp(App):
     # scale feed: True while no live sample has arrived in the last 0.5 s
     dro_stale = BooleanProperty(False)
     dro_status = StringProperty('disabled')
+    # 1/2 (centerline) function: armed until an axis letter is tapped or
+    # HALF_TIMEOUT seconds pass
+    half_armed = BooleanProperty(False)
+    HALF_TIMEOUT = 8.0
     SDM_COUNT = 20
     MODES = ['ABS', 'INC'] + ['SDM %d' % i for i in range(1, 21)]
     mode_index = NumericProperty(0)
@@ -952,6 +956,31 @@ class ServoCommanderApp(App):
     def apply_set(self, axis, value):
         mm_value = value if self.units == 'mm' else value * 25.4
         self._apply_mm(axis, mm_value)
+
+    def arm_half(self):
+        """Toggle the 1/2 function; it disarms itself after HALF_TIMEOUT."""
+        evt = getattr(self, '_half_evt', None)
+        if evt is not None:
+            evt.cancel()
+            self._half_evt = None
+        self.half_armed = not self.half_armed
+        if self.half_armed:
+            self._half_evt = Clock.schedule_once(lambda dt: self._disarm_half(), self.HALF_TIMEOUT)
+
+    def _disarm_half(self):
+        self.half_armed = False
+        self._half_evt = None
+
+    def axis_tap(self, axis):
+        """Blue axis letter: halves the current reading only when 1/2 is armed."""
+        if not self.half_armed:
+            return
+        self._apply_mm(axis, self.disp_mm(axis) / 2.0)
+        log.info('1/2 applied to %s (%s)', axis, self.mode_text)
+        evt = getattr(self, '_half_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._disarm_half()
 
     def zero_axis(self, axis):
         key = (axis, self.mode_text)
