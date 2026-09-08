@@ -35,6 +35,7 @@ from kivy.properties import (NumericProperty, StringProperty, ListProperty,
 from portrait_ui import (LoadGraph, FitLabel, SetOverlay, ModeOverlay,   # noqa: F401
                          CalcOverlay, HistRow, CalcHistory, ModalTouch,
                          FONT, FA, DT)
+from dro_serial import DroSerial
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -299,6 +300,9 @@ class ServoCommanderApp(App):
     units = StringProperty('mm')
     x_mm = NumericProperty(0.0)
     z_mm = NumericProperty(0.0)
+    # scale feed: True while no live sample has arrived in the last 0.5 s
+    dro_stale = BooleanProperty(False)
+    dro_status = StringProperty('disabled')
     SDM_COUNT = 20
     MODES = ['ABS', 'INC'] + ['SDM %d' % i for i in range(1, 21)]
     mode_index = NumericProperty(0)
@@ -336,6 +340,10 @@ class ServoCommanderApp(App):
         self._settings_overlay = None
         self.offs = {ax: {'INC': 0.0, 'SDM': [0.0] * self.SDM_COUNT}
                      for ax in ('X', 'Z')}
+        # raw scale position (mm) and the ABS datum offset: ABS = raw - abs_off
+        self.raw = {'X': 0.0, 'Z': 0.0}
+        self.abs_off = {'X': 0.0, 'Z': 0.0}
+        self.dro = None
         self._unzero = {}
         self.command_speed = 0      # motor rpm currently commanded
         self.current_speed = 0      # motor rpm reported by the drive
@@ -360,6 +368,9 @@ class ServoCommanderApp(App):
                                    'rotate': 90, 'no_reverse': False,
                                    'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
+        config.setdefaults('DRO', {'enabled': False, 'port': '/dev/ttyACM0',
+                                   'counts_per_mm': 1000,
+                                   'x_invert': True, 'z_invert': True})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
                                         'ratio': 1.0, 'diameter': 100,
                                         'unit': 'metric'})
@@ -391,11 +402,22 @@ class ServoCommanderApp(App):
         self.servo = ServoCommunicator(invert_direction=invert)
         self.servo.start_polling()
 
+        # glass-scale tap board on USB serial
+        self.dro_cpm = cfg.getfloat('DRO', 'counts_per_mm')
+        self.dro_sign = {'X': -1.0 if cfg.getboolean('DRO', 'x_invert') else 1.0,
+                         'Z': -1.0 if cfg.getboolean('DRO', 'z_invert') else 1.0}
+        if cfg.getboolean('DRO', 'enabled'):
+            self.dro = DroSerial(cfg.get('DRO', 'port'))
+            self.dro.start()
+            self.dro_status = 'waiting for board'
+            self.dro_stale = True
+
         self.base = FloatLayout()
         self._build_stage()
 
         Clock.schedule_once(self._set_window, 0)
         Clock.schedule_interval(self._poll_ui, DT)
+        Clock.schedule_interval(self._poll_dro, 0.05)
         Clock.schedule_interval(self._shot_hook, 0.5)
 
         shot = os.environ.get('SERVOCOM_SHOT')
@@ -598,6 +620,7 @@ class ServoCommanderApp(App):
                  ('Orientation', '%s%s' % (self.orientation,
                                           ' / %s' % cfg.get('GUI', 'rotate')
                                           if self.orientation == 'portrait' else '')),
+                 ('DRO scales', self.dro_status),
                  ('CPU temp', self._cpu_temp()),
                  ('Throttling', self._throttle_state()),
                  ('Build', self.build_id)]
@@ -730,7 +753,32 @@ class ServoCommanderApp(App):
         return '%+.4f' % (mm_value / 25.4)
 
     def _abs_mm(self, axis):
-        return self.x_mm if axis == 'X' else self.z_mm
+        return self.raw[axis] - self.abs_off[axis]
+
+    def feed_counts(self, x_counts, z_counts):
+        """Raw scale counts from the tap board -> raw mm (sign per axis)."""
+        self.raw['X'] = self.dro_sign['X'] * x_counts / self.dro_cpm
+        self.raw['Z'] = self.dro_sign['Z'] * z_counts / self.dro_cpm
+        self.refresh_axes()
+
+    def _poll_dro(self, dt):
+        if self.dro is None:
+            return
+        sample = self.dro.latest()
+        stale = self.dro.stale
+        if sample is not None and not stale:
+            self.feed_counts(sample['x'], sample['z'])
+        if stale != self.dro_stale:
+            self.dro_stale = stale
+            log.info('DRO feed %s', 'STALE' if stale else 'live')
+        if not self.dro.connected:
+            status = 'no board on %s' % self.dro.port_pattern
+        elif stale:
+            status = 'connected, no data'
+        else:
+            status = 'live  %d frames, %d dropped' % (self.dro.frames, self.dro.dropped)
+        if status != self.dro_status:
+            self.dro_status = status
 
     def _offset(self, axis):
         m = self.mode_text
@@ -746,10 +794,8 @@ class ServoCommanderApp(App):
     def _apply_mm(self, axis, mm_value):
         m = self.mode_text
         if m == 'ABS':
-            if axis == 'X':
-                self.x_mm = mm_value
-            else:
-                self.z_mm = mm_value
+            # move the ABS datum so the raw scale position reads mm_value
+            self.abs_off[axis] = self.raw[axis] - mm_value
         elif m == 'INC':
             self.offs[axis]['INC'] = self._abs_mm(axis) - mm_value
         else:
@@ -757,6 +803,8 @@ class ServoCommanderApp(App):
         self.refresh_axes()
 
     def refresh_axes(self):
+        self.x_mm = self._abs_mm('X')
+        self.z_mm = self._abs_mm('Z')
         self.x_val = self.fmt_axis(self.disp_mm('X'))
         self.z_val = self.fmt_axis(self.disp_mm('Z'))
 
@@ -1058,6 +1106,8 @@ class ServoCommanderApp(App):
             self.servo.disconnect()
         except Exception as exc:
             log.error('on_stop: %s', exc)
+        if self.dro is not None:
+            self.dro.stop()
         log.info('App stopped')
 
     def on_keyboard_down(self, window, keycode, scancode, text, modifiers):

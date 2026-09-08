@@ -73,6 +73,8 @@
         text_size: self.size
         halign: 'right'
         valign: 'middle'
+        # dimmed while the scale feed is not live
+        color: (0.45, 0.45, 0.45, 1) if app.dro_stale else (1, 1, 1, 1)
     BoxLayout:
         orientation: 'vertical'
         size_hint_x: None

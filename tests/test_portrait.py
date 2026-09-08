@@ -356,6 +356,45 @@ def after_ratio(ini_path, ini_before, old_ratio):
     app.set_flip(False)
     check('flip off', app.flip, False)
 
+    # scale feed: raw counts -> ABS through the datum offset
+    from dro_serial import parse_line, DroSerial
+    check('parse good line', parse_line('DRO X:12345 Z:-6789 S:3 T:100'),
+          {'x': 12345, 'z': -6789, 's': 3, 't': 100})
+    check('parse banner ignored', parse_line('DRO tap firmware v1'), None)
+    check('parse junk ignored', parse_line('X:1 Z:2'), None)
+    app.select_mode(0)
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+    app.dro = DroSerial('/nonexistent')          # never opens a port
+    app.dro.feed('DRO X:12345 Z:-6789 S:1 T:1')
+    app._poll_dro(0)
+    # x_invert / z_invert are true in servo.ini, so signs flip
+    check('X from counts', app.x_val, '-12.345')
+    check('Z from counts', app.z_val, '+6.789')
+    check('feed live', app.dro_stale, False)
+    app.zero_axis('X')
+    check('ABS zero with live raw', app.x_val, '+0.000')
+    app.dro.feed('DRO X:13345 Z:-6789 S:2 T:2')
+    app._poll_dro(0)
+    check('moves 1mm after zero', app.x_val, '-1.000')
+    app.select_mode(1)                            # INC
+    app.zero_axis('X')
+    app.dro.feed('DRO X:13845 Z:-6789 S:3 T:3')
+    app._poll_dro(0)
+    check('INC tracks raw', app.x_val, '-0.500')
+    app.select_mode(0)
+    check('ABS still tracks raw', app.x_val, '-1.500')
+    app.zero_axis('X')
+    app.zero_axis('X')
+    check('un-zero with live raw', app.x_val, '-1.500')
+    app.apply_set('X', 0.0)
+    app.dro.feed('DRO X:0 Z:0 S:4 T:4')
+    app._poll_dro(0)
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+    app.dro = None
+    app.dro_stale = False
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:
