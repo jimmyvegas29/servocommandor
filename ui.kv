@@ -65,14 +65,11 @@
         color: ACCENT
         size_hint_x: None
         width: 52
-    FitLabel:
+    FixedDigits:
         font_name: app.font
         text: root.value
         max_font: 84
         fit_text: '+888.888' if app.units == 'mm' else '+88.8888'
-        text_size: self.size
-        halign: 'right'
-        valign: 'middle'
         # dimmed while the scale feed is not live
         color: (0.45, 0.45, 0.45, 1) if app.dro_stale else (1, 1, 1, 1)
     BoxLayout:

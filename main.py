@@ -32,9 +32,9 @@ from kivy.uix.button import Button
 from kivy.properties import (NumericProperty, StringProperty, ListProperty,
                              BooleanProperty)
 
-from portrait_ui import (LoadGraph, FitLabel, SetOverlay, ModeOverlay,   # noqa: F401
-                         CalcOverlay, HistRow, CalcHistory, ModalTouch,
-                         FONT, FA, DT)
+from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa: F401
+                         ModeOverlay, CalcOverlay, HistRow, CalcHistory,
+                         ModalTouch, FONT, FA, DT)
 from dro_serial import DroSerial
 
 HERE = os.path.dirname(os.path.abspath(__file__))

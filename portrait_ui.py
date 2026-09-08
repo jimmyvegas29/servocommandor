@@ -17,7 +17,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Line, Rectangle
-from kivy.properties import NumericProperty, StringProperty
+from kivy.properties import NumericProperty, StringProperty, ListProperty
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT = os.path.join(HERE, 'assets', 'Orbitron-Medium.ttf')
@@ -1043,6 +1043,102 @@ class FitLabel(Label):
                 fs -= 2
             FitLabel._cache[key] = fs
         self.font_size = fs
+
+
+class FixedDigits(Widget):
+    """Numeric readout with tabular spacing: every digit gets the same cell
+    (the widest digit's width), sign and decimal point get their own fixed
+    cells, so a changing value never reflows.  Font size is chosen once
+    from fit_text (worst case) so it also never changes."""
+    text = StringProperty('')
+    fit_text = StringProperty('+888.888')
+    max_font = NumericProperty(84)
+    color = ListProperty([1, 1, 1, 1])
+    font_name = StringProperty(FONT)
+    _glyph_cache = {}
+    _metrics_cache = {}
+
+    def __init__(self, **kwargs):
+        super(FixedDigits, self).__init__(**kwargs)
+        self.font_px = 0
+        self.bind(text=self.redraw, size=self._refit, pos=self.redraw,
+                  fit_text=self._refit, max_font=self._refit, color=self.redraw)
+        Clock.schedule_once(self._refit, 0)
+
+    # -- measuring --------------------------------------------------------
+    def _glyph(self, ch, fs):
+        key = (self.font_name, fs, ch)
+        tex = FixedDigits._glyph_cache.get(key)
+        if tex is None:
+            lbl = CoreLabel(text=ch, font_size=fs, font_name=self.font_name)
+            lbl.refresh()
+            tex = lbl.texture
+            FixedDigits._glyph_cache[key] = tex
+        return tex
+
+    def _metrics(self, fs):
+        """cell widths at this size: digit, sign, dot; and glyph height."""
+        key = (self.font_name, fs)
+        m = FixedDigits._metrics_cache.get(key)
+        if m is None:
+            digit_w = max(self._glyph(d, fs).width for d in '0123456789')
+            sign_w = max(self._glyph(s, fs).width for s in '+-')
+            dot_w = self._glyph('.', fs).width
+            h = max(self._glyph(d, fs).height for d in '0123456789+')
+            m = (digit_w, sign_w, dot_w, h)
+            FixedDigits._metrics_cache[key] = m
+        return m
+
+    def _cell_w(self, ch, m):
+        digit_w, sign_w, dot_w, _h = m
+        if ch.isdigit():
+            return digit_w
+        if ch in '+-':
+            return sign_w
+        if ch == '.':
+            return dot_w + 2
+        return digit_w
+
+    def _total_w(self, text, m):
+        return sum(self._cell_w(ch, m) for ch in text)
+
+    def _refit(self, *args):
+        if self.width <= 0 or self.height <= 0:
+            return
+        fs = int(self.max_font)
+        while fs > 20:
+            m = self._metrics(fs)
+            if self._total_w(self.fit_text, m) <= self.width - 4 and m[3] <= self.height:
+                break
+            fs -= 2
+        self.font_px = fs
+        self.redraw()
+
+    def cells(self):
+        """[(char, x, cell_width)] for the current text, right-aligned."""
+        if not self.font_px:
+            return []
+        m = self._metrics(self.font_px)
+        x = self.right - 2 - self._total_w(self.text, m)
+        out = []
+        for ch in self.text:
+            w = self._cell_w(ch, m)
+            out.append((ch, x, w))
+            x += w
+        return out
+
+    # -- drawing ----------------------------------------------------------
+    def redraw(self, *args):
+        self.canvas.clear()
+        if not self.font_px or not self.text:
+            return
+        cy = self.center_y
+        with self.canvas:
+            Color(*self.color)
+            for ch, x, w in self.cells():
+                tex = self._glyph(ch, self.font_px)
+                Rectangle(texture=tex, size=tex.size,
+                          pos=(x + (w - tex.width) / 2.0, cy - tex.height / 2.0))
 
 
 class ModalTouch:

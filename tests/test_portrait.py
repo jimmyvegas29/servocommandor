@@ -395,6 +395,35 @@ def after_ratio(ini_path, ini_before, old_ratio):
     app.dro = None
     app.dro_stale = False
 
+    Clock.schedule_once(after_layout, 0.3)     # let the rebuilt root lay out
+
+
+def after_layout(dt):
+    from dro_serial import DroSerial
+    # tabular digits: the decimal point and every digit slot stay put no
+    # matter which digits are showing
+    card = app.root_layout.ids.dro.children[-1]          # X AxisCard
+    fd = [w for w in card.children if type(w).__name__ == 'FixedDigits'][0]
+    app.dro = DroSerial('/nonexistent')
+    app.dro.feed('DRO X:-111111 Z:0 S:1 T:1')       # x_invert -> +111.111
+    app._poll_dro(0)
+    cells_1 = fd.cells()
+    app.dro.feed('DRO X:-888888 Z:0 S:2 T:2')
+    app._poll_dro(0)
+    cells_8 = fd.cells()
+    check('digit strings differ', (fd.text, [c[0] for c in cells_1] != [c[0] for c in cells_8]),
+          ('+888.888', True))
+    check('slot positions identical', [(x, w) for _c, x, w in cells_1],
+          [(x, w) for _c, x, w in cells_8])
+    dot_1 = [x for c, x, _w in cells_1 if c == '.'][0]
+    dot_8 = [x for c, x, _w in cells_8 if c == '.'][0]
+    check('decimal point does not move', dot_1, dot_8)
+    check('font size fixed', fd.font_px > 40, True)
+    app.dro.feed('DRO X:0 Z:0 S:3 T:3')
+    app._poll_dro(0)
+    app.dro = None
+    app.dro_stale = False
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:
