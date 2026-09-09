@@ -1680,6 +1680,36 @@
         valign: 'middle'
     SettingCard:
         SettingHead:
+            label: 'Link to the tap board'
+            hint: 'USB cable or Bluetooth'
+        BoxLayout:
+            spacing: 0
+            SegButton:
+                text: 'USB'
+                active: app.dro_link == 'usb'
+                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                on_press: app.set_dro_link('usb')
+            SegButton:
+                text: 'BLUETOOTH'
+                active: app.dro_link == 'ble'
+                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                on_press: app.set_dro_link('ble')
+    SettingCard:
+        SettingHead:
+            label: 'Bluetooth board'
+            hint: (app.ble_name + '  ' + app.ble_address) if app.ble_address else 'none chosen, first board found is used'
+        BoxLayout:
+            spacing: 6
+            SetKey:
+                text: 'SCANNING...' if app.ble_scanning else 'SCAN'
+                font_size: '15sp'
+                size_hint_x: None
+                width: 150
+                disabled: app.ble_scanning
+                on_press: app.start_ble_scan()
+            Widget:
+    SettingCard:
+        SettingHead:
             label: 'X direction'
             hint: 'Flip if it counts the wrong way'
         BoxLayout:
@@ -1738,15 +1768,72 @@
                 corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
     SLabel:
         text: 'Scales: ' + app.dro_status
-        font_size: '13sp'
+        font_size: '12sp'
         color: (0.6, 0.6, 0.6, 1)
         size_hint_y: None
-        height: 30
+        height: 44
         text_size: self.size
         halign: 'left'
         valign: 'middle'
         padding: [6, 0]
     Widget:
+
+<BlePickerOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 440), min(root.height - 20, 520))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Bluetooth tap boards'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            IconButton:
+                text: ''
+                size_hint_x: None
+                width: 44
+                on_press: app.close_ble_picker()
+        ScrollView:
+            bar_width: 0
+            do_scroll_x: False
+            GridLayout:
+                id: grid
+                cols: 1
+                spacing: 5
+                size_hint_y: None
+                height: self.minimum_height
+        BoxLayout:
+            size_hint_y: None
+            height: 50
+            spacing: 6
+            SetKey:
+                text: 'RESCAN'
+                font_size: '16sp'
+                on_press: app.close_ble_picker(); app.start_ble_scan()
+            SetKey:
+                text: 'CANCEL'
+                font_size: '16sp'
+                on_press: app.close_ble_picker()
 
 <CopyOverlay>:
     canvas.before:

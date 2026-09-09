@@ -543,6 +543,52 @@ def after_layout(dt):
         app.offs[ax]['INC'] = 0.0
         app.offs[ax]['SDM'] = [0.0] * app.SDM_COUNT
 
+    # DRO link switch: USB <-> Bluetooth keeps the readout continuous
+    import struct
+    from dro_ble import DroBle, parse_packet
+    check('ble packet parse', parse_packet(struct.pack('<IiiI', 7, 1234, -50, 999)),
+          {'s': 7, 'x': 1234, 'z': -50, 't': 999})
+    check('ble bad packet', parse_packet(b'short'), None)
+    app.select_mode(0)
+    app.dro = DroSerial('/nonexistent')
+    app.dro.feed('DRO X:-5000 Z:0 S:1 T:1')        # raw X = +5.000 (inverted)
+    app._poll_dro(0)
+    app.apply_set('X', 10.0)                        # ABS reads 10 at raw 5
+    check('usb reading', app.x_val, '+10.000')
+    app.set_dro_link('ble')
+    check('link is ble', (app.dro_link, type(app.dro).__name__), ('ble', 'DroBle'))
+    with open(SETTINGS, encoding='utf-8') as fh:
+        check('link saved', json.load(fh)['dro_link'], 'ble')
+    # the BLE board's counter happens to be at a different raw value
+    app.dro.feed(struct.pack('<IiiI', 1, -8000, 0, 1))      # raw X = +8.000
+    app._poll_dro(0)
+    check('reading continuous across link switch', app.x_val, '+10.000')
+    app.dro.feed(struct.pack('<IiiI', 2, -9000, 0, 2))      # +1 mm
+    app._poll_dro(0)
+    check('tracks on ble', app.x_val, '+11.000')
+    check('status mentions BT', app.dro_status.startswith('BT'), True)
+    picker = m.BlePickerOverlay()
+    app._show('_ble_picker', picker)
+    picker.populate([('AA:BB:CC:DD:EE:01', 'SERVOCOM-DRO-0001', -50),
+                     ('AA:BB:CC:DD:EE:02', 'SERVOCOM-DRO-0002', -70)], '')
+    check('picker lists boards', len(picker.ids.grid.children), 2)
+    app.select_ble_board('AA:BB:CC:DD:EE:02', 'SERVOCOM-DRO-0002')
+    check('board chosen', (app.ble_address, app.ble_name, app._ble_picker),
+          ('AA:BB:CC:DD:EE:02', 'SERVOCOM-DRO-0002', None))
+    check('reader targets the board', app.dro.address, 'AA:BB:CC:DD:EE:02')
+    app.set_dro_link('usb')
+    check('back to usb', type(app.dro).__name__, 'DroSerial')
+    app.dro.stop()
+    app.dro = DroSerial('/nonexistent')
+    app.dro.feed('DRO X:0 Z:0 S:1 T:1')
+    app._poll_dro(0)
+    app.apply_set('X', 0.0)
+    app.ble_address = ''
+    app.ble_name = ''
+    app._save_settings()
+    app.dro = None
+    app.dro_stale = False
+
     # units persist
     app.toggle_units()
     with open(SETTINGS, encoding='utf-8') as fh:

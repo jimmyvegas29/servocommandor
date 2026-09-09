@@ -25,6 +25,28 @@ PING_UUID = '5e7a0003-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
 STALE_S = 0.5
 
 
+def scan_boards(timeout=4.0):
+    """Blocking scan (own event loop): [(address, name, rssi)] strongest first."""
+    if BleakScanner is None:
+        return []
+
+    async def _scan():
+        found = []
+        devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
+        for dev, adv in devices.values():
+            name = adv.local_name or dev.name or ''
+            if SERVICE_UUID in (adv.service_uuids or []) or name.startswith('SERVOCOM-DRO'):
+                found.append((dev.address, name, adv.rssi))
+        found.sort(key=lambda f: -(f[2] if f[2] is not None else -999))
+        return found
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_scan())
+    finally:
+        loop.close()
+
+
 def parse_packet(data):
     """bytes -> {'s','x','z','t'} or None."""
     if len(data) != 16:

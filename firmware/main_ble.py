@@ -35,6 +35,7 @@ for gp in (X_BASE, X_BASE + 1, Z_BASE, Z_BASE + 1):
 enc_x = Encoder(0, Pin(X_BASE))
 enc_z = Encoder(1, Pin(Z_BASE))
 
+aioble.config(gap_name=NAME)
 svc = aioble.Service(SERVICE_UUID)
 data_char = aioble.Characteristic(svc, DATA_UUID, read=True, notify=True)
 ping_char = aioble.Characteristic(svc, PING_UUID, write=True, write_no_response=True,

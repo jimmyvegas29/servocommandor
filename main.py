@@ -36,6 +36,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
                          ModeOverlay, CalcOverlay, HistRow, CalcHistory,
                          ModalTouch, FONT, FA, DT)
 from dro_serial import DroSerial
+from dro_ble import DroBle, scan_boards
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -50,6 +51,9 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      # glass scales: direction per axis and resolution (um/count)
                      'dro_x_invert': True, 'dro_z_invert': True,
                      'dro_x_um': 1, 'dro_z_um': 1,
+                     # how the tap board is reached: 'usb' or 'ble'; the
+                     # chosen Bluetooth board ('' = first one found)
+                     'dro_link': 'usb', 'ble_address': '', 'ble_name': '',
                      # 'classic' = the original Servo_tq layout; 'cards' = the
                      # portrait cards rearranged (parked, not in the UI)
                      'landscape_style': 'classic'}
@@ -227,6 +231,37 @@ class CopyOverlay(ModalTouch, FloatLayout):
 
     def apply(self):
         App.get_running_app().apply_copy(self.axis, self.selected())
+
+
+class BlePickerOverlay(ModalTouch, FloatLayout):
+    """List of tap boards found by a scan; tap one to use it."""
+
+    def populate(self, found, current):
+        from kivy.uix.button import Button
+        from kivy.uix.label import Label
+        from kivy.graphics import Color as _C, RoundedRectangle as _R
+        grid = self.ids.grid
+        grid.clear_widgets()
+        app = App.get_running_app()
+        if not found:
+            grid.add_widget(Label(text='No Servocom boards found.\nIs the board powered and not already connected elsewhere?',
+                                  font_name=FONT, font_size=15, color=(0.6, 0.6, 0.6, 1),
+                                  halign='center', size_hint_y=None, height=80))
+            return
+        for address, name, rssi in found:
+            sel = (address == current)
+            btn = Button(text='%s\n%s   %s dBm' % (name or 'unnamed', address, rssi),
+                         font_name=FONT, font_size=15, halign='center',
+                         size_hint_y=None, height=64,
+                         background_color=(0, 0, 0, 0), background_normal='',
+                         color=(1, 1, 1, 1) if sel else (0.85, 0.85, 0.85, 1))
+            with btn.canvas.before:
+                _C(0, 0.5, 1, 1) if sel else _C(0.16, 0.16, 0.16, 1)
+                rect = _R(size=btn.size, pos=btn.pos, radius=[(5, 5)] * 4)
+            btn.bind(pos=lambda b, v, r=rect: setattr(r, 'pos', v),
+                     size=lambda b, v, r=rect: setattr(r, 'size', v))
+            btn.bind(on_press=lambda b, a=address, n=name: app.select_ble_board(a, n))
+            grid.add_widget(btn)
 
 
 class SettingsOverlay(ModalTouch, FloatLayout):
@@ -414,6 +449,10 @@ class ServoCommanderApp(App):
     dro_z_invert = BooleanProperty(True)
     dro_x_um = NumericProperty(1)
     dro_z_um = NumericProperty(1)
+    dro_link = StringProperty('usb')
+    ble_address = StringProperty('')
+    ble_name = StringProperty('')
+    ble_scanning = BooleanProperty(False)
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -439,6 +478,7 @@ class ServoCommanderApp(App):
         self._alarm = None
         self._ratio_cal = None
         self._copy_overlay = None
+        self._ble_picker = None
 
     # ---- config ----------------------------------------------------------
     def get_application_config(self):
@@ -484,10 +524,7 @@ class ServoCommanderApp(App):
         # glass-scale tap board on USB serial
         self._load_datums()
         if cfg.getboolean('DRO', 'enabled'):
-            self.dro = DroSerial(cfg.get('DRO', 'port'))
-            self.dro.start()
-            self.dro_status = 'waiting for board'
-            self.dro_stale = True
+            self._start_dro_reader()
         else:
             # no board: the scale position is fixed at 0, so line the datum
             # up with the saved reading straight away
@@ -518,7 +555,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay'):
+                     '_copy_overlay', '_ble_picker'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -627,6 +664,9 @@ class ServoCommanderApp(App):
         self.dro_z_invert = bool(self.settings['dro_z_invert'])
         self.dro_x_um = self.settings['dro_x_um'] if self.settings['dro_x_um'] in (1, 5, 10) else 1
         self.dro_z_um = self.settings['dro_z_um'] if self.settings['dro_z_um'] in (1, 5, 10) else 1
+        self.dro_link = 'ble' if self.settings['dro_link'] == 'ble' else 'usb'
+        self.ble_address = str(self.settings['ble_address'] or '')
+        self.ble_name = str(self.settings['ble_name'] or '')
 
     def _save_settings(self):
         self.settings.update({'orientation': self.orientation,
@@ -636,7 +676,10 @@ class ServoCommanderApp(App):
                               'dro_x_invert': bool(self.dro_x_invert),
                               'dro_z_invert': bool(self.dro_z_invert),
                               'dro_x_um': int(self.dro_x_um),
-                              'dro_z_um': int(self.dro_z_um)})
+                              'dro_z_um': int(self.dro_z_um),
+                              'dro_link': self.dro_link,
+                              'ble_address': self.ble_address,
+                              'ble_name': self.ble_name})
         try:
             tmp = SETTINGS_PATH + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as fh:
@@ -858,6 +901,71 @@ class ServoCommanderApp(App):
         self.raw['Z'] = self.counts_to_mm('Z', z_counts)
         self.refresh_axes()
 
+    # ---- DRO link (USB serial or Bluetooth) --------------------------------
+    def _start_dro_reader(self):
+        if self.dro_link == 'ble':
+            self.dro = DroBle(self.ble_address or None)
+        else:
+            self.dro = DroSerial(self.config.get('DRO', 'port'))
+        self.dro.start()
+        self.dro_status = 'waiting for board'
+        self.dro_stale = True
+
+    def set_dro_link(self, link):
+        link = 'ble' if link == 'ble' else 'usb'
+        if link == self.dro_link and self.dro is not None:
+            return
+        self.dro_link = link
+        self._save_settings()
+        self._restart_dro_reader()
+        log.info('DRO link -> %s', link)
+
+    def _restart_dro_reader(self):
+        """Swap readers and keep the readout continuous: the next sample is
+        treated like a restart, so the datum shifts by however much the new
+        source's raw count differs from the current one."""
+        if self.dro is not None:
+            self.dro.stop()
+            self.dro = None
+        self._datums_saved_raw = dict(self.raw)
+        self._datums_resynced = False
+        if self.config.getboolean('DRO', 'enabled'):
+            self._start_dro_reader()
+
+    def start_ble_scan(self):
+        """Scan for tap boards in a thread, then show the picker."""
+        if self.ble_scanning:
+            return
+        self.ble_scanning = True
+        import threading
+
+        def worker():
+            try:
+                found = scan_boards(4.0)
+            except Exception as exc:
+                log.error('BLE scan failed: %s', exc)
+                found = []
+            Clock.schedule_once(lambda dt: self._scan_done(found), 0)
+        threading.Thread(target=worker, name='ble-scan', daemon=True).start()
+
+    def _scan_done(self, found):
+        self.ble_scanning = False
+        log.info('BLE scan: %s', found)
+        ov = self._show('_ble_picker', BlePickerOverlay())
+        ov.populate(found, self.ble_address)
+
+    def close_ble_picker(self):
+        self._hide('_ble_picker')
+
+    def select_ble_board(self, address, name):
+        self.ble_address = address
+        self.ble_name = name
+        self.dro_link = 'ble'
+        self._save_settings()
+        self.close_ble_picker()
+        self._restart_dro_reader()
+        log.info('BLE board selected: %s (%s)', name, address)
+
     # ---- DRO settings page -------------------------------------------------
     def set_dro_invert(self, axis, inverted):
         if axis == 'X':
@@ -968,12 +1076,18 @@ class ServoCommanderApp(App):
         if stale != self.dro_stale:
             self.dro_stale = stale
             log.info('DRO feed %s', 'STALE' if stale else 'live')
-        if not self.dro.connected:
-            status = 'no board on %s' % self.dro.port_pattern
-        elif stale:
-            status = 'connected, no data'
+        if isinstance(self.dro, DroBle):
+            where = 'BT %s' % (self.dro.device_name or self.ble_name or self.ble_address or 'scanning')
+            if self.dro.rssi is not None:
+                where += ' %s dBm' % self.dro.rssi
         else:
-            status = 'live  %d frames, %d dropped' % (self.dro.frames, self.dro.dropped)
+            where = 'USB %s' % self.dro.port_pattern
+        if not self.dro.connected:
+            status = '%s: not connected' % where
+        elif stale:
+            status = '%s: connected, no data' % where
+        else:
+            status = '%s: live, %d frames, %d dropped' % (where, self.dro.frames, self.dro.dropped)
         if status != self.dro_status:
             self.dro_status = status
 
