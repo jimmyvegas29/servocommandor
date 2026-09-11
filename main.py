@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import time
 
 os.environ['KIVY_METRICS_DENSITY'] = '1'
 
@@ -546,6 +547,8 @@ class ServoCommanderApp(App):
         self.dro = None
         self._unzero = {}
         self.command_speed = 0      # motor rpm currently commanded
+        self._gui_cmd_until = 0.0   # ignore the node's enable bit briefly after a GUI command
+        self._node_linked = False   # BLE link to the machine node seen up
         self.current_speed = 0      # motor rpm reported by the drive
         self.current_torque = 0
         self.offline_flag = False
@@ -1199,6 +1202,13 @@ class ServoCommanderApp(App):
             if 'control' in sample and sample['control'] != self.node_control:
                 self.node_control = sample['control']
                 log.info('Machine node control %s', 'ALLOWED' if self.node_control else 'read-only')
+                if self.node_control:
+                    self._push_speed('node control allowed')
+        linked = isinstance(self.dro, DroBle) and self.dro.connected and not stale
+        if linked != self._node_linked:
+            self._node_linked = linked
+            if linked and self.node_control:
+                self._push_speed('node link up')
         if stale != self.dro_stale:
             self.dro_stale = stale
             log.info('DRO feed %s', 'STALE' if stale else 'live')
@@ -1411,6 +1421,14 @@ class ServoCommanderApp(App):
         self.servo.set_speed(signed)
         self.update_rpm_display()
 
+    def _push_speed(self, why):
+        """Machine node: make the node's (and so the drive's) setpoint equal
+        the panel's command speed, e.g. right after the link comes up, so the
+        drive can never enable at a speed the panel is not showing."""
+        if isinstance(self.servo, NodeServo):
+            log.info('Pushing command speed %s to node (%s)', self.command_speed, why)
+            self._send_speed()
+
     def set_speed(self, speed):
         if not self._drive_ready():
             return
@@ -1469,6 +1487,10 @@ class ServoCommanderApp(App):
     def set_enabled(self, enabled, source='GUI'):
         if source == 'GUI' and not self._drive_ready():
             return
+        if source == 'GUI':
+            # the node's enable bit lags a GUI command by a packet or two;
+            # don't let the poller read it back as a switch action meanwhile
+            self._gui_cmd_until = time.monotonic() + 0.75
         if enabled:
             if source == 'GUI':
                 self.servo.enable_servo()
@@ -1498,7 +1520,7 @@ class ServoCommanderApp(App):
     # ---- drive polling (UI thread, reads the poller's cache) -------------
     def _poll_ui(self, dt):
         hw_state = self.servo.get_servo_state()
-        if hw_state != self.servo_state:
+        if hw_state != self.servo_state and time.monotonic() > self._gui_cmd_until:
             self.set_enabled(hw_state == 'enabled', source='switch')
         hw_dir = self.servo.get_hw_direction()
         if hw_dir is not None and hw_dir != self.direction:

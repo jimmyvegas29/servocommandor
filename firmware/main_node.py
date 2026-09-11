@@ -11,6 +11,9 @@ Bluetooth LE (USB serial mirrors everything for bench work):
   * executes drive commands from the panel (enable, disable, speed, clear
     alarm) - ONLY when CONTROL_ALLOWED is True; the read-only build never
     writes a single register, so nothing can move
+  * safeguards: drive is disabled when it first appears, when the BLE link
+    drops, and whenever the switch goes to OFF; the switch cannot start the
+    spindle until it has been seen in OFF once (boot / after a link loss)
 
 BLE service 5e7a0001-... :
   DATA  notify  '<IiiIhhHB'  seq, x, z, t_ms, rpm_0p1, torque, alarm, flags
@@ -33,7 +36,7 @@ from machine import Pin, UART, WDT, unique_id
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-CONTROL_ALLOWED = False      # read-only until the control path is signed off
+CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 INVERT_DIRECTION = True      # same as servo.ini [Hardware] invert_direction
 SLAVE_ID = 1
 BAUD = 9600
@@ -143,7 +146,24 @@ def clear_alarm():
 
 # ---------------------------------------------------------------- state
 state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0,
-         'switch': 'neutral', 'enabled': False, 'cmd_ok': True, 'last_speed': 0}
+         'switch': 'neutral', 'enabled': False, 'cmd_ok': True, 'last_speed': 0,
+         'armed': False,          # switch interlock: must pass through neutral first
+         'linked': False,         # a panel is connected over BLE
+         'boot_disable': False}   # drive was told 'disable' once after coming online
+
+
+def safe_disable(why, zero_speed=False):
+    """Best effort disable, used by every safeguard.  zero_speed also clears
+    the drive's speed setpoint (0x0089) so a stale value left in the drive
+    can never make the next enable spin the spindle."""
+    ok = write_reg(0x0062, 0)
+    if ok:
+        state['enabled'] = False
+    if zero_speed:
+        state['last_speed'] = 0
+        ok = write_reg(0x0089, 0) and ok
+    print('SAFE disable (%s)%s:' % (why, ' + speed 0' if zero_speed else ''), 'ok' if ok else 'FAILED')
+    return ok
 
 
 def apply_speed(speed):
@@ -156,7 +176,9 @@ def apply_speed(speed):
 def handle_cmd(data):
     ok = False
     if data[:1] == b'E':
-        ok = write_reg(0x0062, 1)
+        # the setpoint is re-written first so the drive can only ever enable
+        # at the speed the panel last asked for
+        ok = apply_speed(state['last_speed']) and write_reg(0x0062, 1)
         state['enabled'] = ok or state['enabled']
     elif data[:1] == b'D':
         ok = write_reg(0x0062, 0)
@@ -178,8 +200,12 @@ async def drive_poller():
         regs = read_input_regs(0x0009, 19)
         if regs is None:
             state['online'] = False
+            state['boot_disable'] = False
         else:
             state['online'] = True
+            if not state['boot_disable']:
+                # drive just (re)appeared: make sure it starts disabled
+                state['boot_disable'] = safe_disable('drive online', zero_speed=True)
             state['torque'] = regs[0] - 65536 if regs[0] > 32767 else regs[0]
             state['alarm'] = regs[17]
             state['rpm'] = regs[18] - 65536 if regs[18] > 32767 else regs[18]
@@ -198,13 +224,20 @@ async def switch_task():
             print('SWITCH', cur)
             if CONTROL_ALLOWED:
                 if cur == 'neutral':
-                    if write_reg(0x0062, 0):
-                        state['enabled'] = False
+                    safe_disable('switch neutral')
+                    if not state['armed']:
+                        state['armed'] = True
+                        print('SWITCH interlock armed')
+                elif not state['armed']:
+                    print('SWITCH ignored, interlock not armed (go through OFF first)')
                 else:
                     mag = abs(state['last_speed'])
                     apply_speed(-mag if cur == 'rev' else mag)
                     if write_reg(0x0062, 1):
                         state['enabled'] = True
+        elif cur == last and cur == 'neutral' and not state['armed']:
+            state['armed'] = True
+            print('SWITCH interlock armed')
         last = cur
         await asyncio.sleep_ms(50)
 
@@ -270,8 +303,14 @@ async def peripheral():
                                           services=[SERVICE_UUID]) as conn:
             print('BLE connected', conn.device)
             led.on()
+            state['linked'] = True
             await conn.disconnected(timeout_ms=None)
             print('BLE disconnected')
+            state['linked'] = False
+            # panel gone: stop the spindle and make the switch pass through
+            # OFF before it can start anything again
+            safe_disable('link lost', zero_speed=True)
+            state['armed'] = False
 
 
 async def pinger():

@@ -88,7 +88,13 @@ class ServoCommunicator:
         return payload[0]
 
     def connect(self):
-        return self.client.connect()
+        ok = self.client.connect()
+        if ok:
+            # the original app did this at startup: never trust a setpoint
+            # left in the drive from before the power cycle
+            self._write(0x0089, 0)
+            self._write(0x0062, 0)
+        return ok
 
     def disconnect(self):
         self._poll_stop.set()
