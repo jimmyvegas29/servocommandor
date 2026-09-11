@@ -22,7 +22,7 @@ BLE service 5e7a0001-... :
   PING  write/notify echo, for round-trip timing
 
 Pins: X A/B = GP6/GP7, Z A/B = GP2/GP3, MAX485 DI = GP0, RO = GP1,
-DE+RE = GP4, switch COM = GND, FWD = GP10, REV = GP11.
+DE+RE = GP4, switch COM = GND (pin 13), lever FWD contact on GP11 (pin 15), REV on GP10 (pin 14).
 """
 import struct
 import time
@@ -43,7 +43,7 @@ ADV_INTERVAL_US = 100_000
 
 X_BASE, Z_BASE = 6, 2
 PIN_TX, PIN_RX, PIN_DE = 0, 1, 4
-PIN_FWD, PIN_REV = 10, 11
+PIN_FWD, PIN_REV = 11, 10     # lever FWD closes the contact on GP11 (verified 2026-09-11)
 
 SERVICE_UUID = bluetooth.UUID('5e7a0001-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 DATA_UUID = bluetooth.UUID('5e7a0002-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
@@ -247,9 +247,9 @@ async def sampler():
         x, z, t = enc_x.value(), enc_z.value(), time.ticks_ms()
         print('DRO X:%d Z:%d S:%d T:%d' % (x, z, seq, t))
         if seq % 4 == 0:
-            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d' % (
+            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d pins fwd=%d rev=%d' % (
                 state['rpm'], state['torque'], state['alarm'], state['switch'],
-                state['online'], state['enabled']))
+                state['online'], state['enabled'], pin_fwd.value(), pin_rev.value()))
         try:
             data_char.write(struct.pack('<IiiIhhHB', seq, x, z, t, state['rpm'],
                                         state['torque'], state['alarm'], flags()),
