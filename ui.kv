@@ -491,7 +491,7 @@
                 on_press: app.toggle_direction()
                 canvas.before:
                     Color:
-                        rgba: (ACCENT if app.direction == 'fwd' else (0.85, 0.45, 0.1, 1)) if self.state == 'normal' else BTN_GRAY
+                        rgba: ACCENT if self.state == 'normal' else BTN_GRAY
                     RoundedRectangle:
                         size: self.size
                         pos: self.pos
