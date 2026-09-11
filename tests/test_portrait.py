@@ -213,7 +213,7 @@ def after_alarm(dt):
     app.open_settings()
     ov = app._settings_overlay
     check('settings opens on display page', ov.page, 'display')
-    check('menu has pages', sorted(ov._buttons), ['display', 'dro', 'system'])
+    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'dro', 'system'])
     ov.select('system')
     check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
     check('display button inactive', ov._buttons['display'].active, False)
@@ -588,6 +588,46 @@ def after_layout(dt):
     app._save_settings()
     app.dro = None
     app.dro_stale = False
+
+    # machine node: drive data and commands through the Bluetooth packet
+    from dro_ble import parse_packet as _pp, F_ONLINE, F_FWD, F_ENABLED, F_CONTROL, F_CMD_OK
+    pkt = struct.pack('<IiiIhhHB', 9, 100, 200, 5, -6600, 42, 0, F_ONLINE | F_FWD | F_CMD_OK)
+    nd = _pp(pkt)
+    check('node packet parsed', (nd['rpm'], nd['torque'], nd['online'], nd['switch'], nd['control']),
+          (-6600, 42, True, 'fwd', False))
+    app.set_dro_link('ble')
+    app.set_drive_link('node')
+    check('drive link is node', (app.drive_link, type(app.servo).__name__), ('node', 'NodeServo'))
+    app.dro.feed(pkt)
+    app._poll_dro(0)
+    app._poll_ui(0)
+    check('node rpm decoded (-6600 x0.1 -> 660 motor rpm)', app.current_speed, 660)
+    check('node torque decoded', app.current_torque, 42)
+    check('node direction synced from switch', app.direction, 'fwd')
+    check('node read-only flagged', app.node_control, False)
+    check('offline overlay not shown when node online', app._offline, None)
+    sent_before = app.dro.cmds_sent
+    app.set_speed(600)                      # goes out as a command, node will refuse
+    check('command attempted over BLE (no link => 0 sent)', app.dro.cmds_sent, sent_before)
+    pkt2 = struct.pack('<IiiIhhHB', 10, 100, 200, 6, 0, 0, 0, F_CMD_OK)   # node says drive offline
+    app.dro.feed(pkt2)
+    app._poll_dro(0)
+    app._poll_ui(0)
+    check('node reports drive offline -> popup', app._offline is not None, True)
+    app.dismiss_offline()
+    app.set_drive_link('hat')
+    check('back to hat', type(app.servo).__name__, 'ServoCommunicator')
+    app.set_dro_link('usb')
+    app.dro.stop()
+    app.dro = DroSerial('/nonexistent')
+    app.dro.feed('DRO X:0 Z:0 S:1 T:1')
+    app._poll_dro(0)
+    app.apply_set('X', 0.0)
+    app.apply_set('Z', 0.0)
+    app.dro = None
+    app.dro_stale = False
+    app.servo.offline = False
+    app._poll_ui(0)
 
     # units persist
     app.toggle_units()

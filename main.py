@@ -54,13 +54,91 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      # how the tap board is reached: 'usb' or 'ble'; the
                      # chosen Bluetooth board ('' = first one found)
                      'dro_link': 'usb', 'ble_address': '', 'ble_name': '',
+                     # where the drive is reached: 'hat' (RS-485 HAT + GPIO switch
+                     # on the Pi) or 'node' (through the Bluetooth machine node)
+                     'drive_link': 'hat',
                      # 'classic' = the original Servo_tq layout; 'cards' = the
                      # portrait cards rearranged (parked, not in the UI)
                      'landscape_style': 'classic'}
-if USE_MOCK:
-    from mock_servo_communication import ServoCommunicator
-else:
-    from servo_communication import ServoCommunicator
+ServoCommunicator = None      # imported in _start_servo() once the drive link is known
+
+
+class NodeServo:
+    """Drive access through the machine node over Bluetooth.  Presents the
+    same interface as ServoCommunicator; the numbers come out of the node's
+    20 Hz packet and commands go back as CMD writes.  The node itself
+    refuses commands while its firmware is in read-only mode."""
+
+    def __init__(self, ble):
+        self.ble = ble
+        self.invert_direction = False        # the node applies the inversion
+        self._last_speed = 0
+        self.control_allowed = False
+
+    def _node(self):
+        s = self.ble.latest() if self.ble is not None else None
+        if s is None or 'rpm' not in s or self.ble.stale:
+            return None
+        self.control_allowed = s['control']
+        return s
+
+    # reads
+    def get_rpm(self):
+        s = self._node()
+        if s is None or not s['online']:
+            return None
+        rpm = s['rpm'] if s['rpm'] >= 0 else 65536 + s['rpm']     # drive's raw form
+        return [s['alarm'], rpm]
+
+    def get_torque(self):
+        s = self._node()
+        if s is None or not s['online']:
+            return None
+        t = s['torque']
+        return t if t >= 0 else 65536 + t
+
+    def get_alarm(self):
+        s = self._node()
+        return s['alarm'] if s is not None and s['online'] else None
+
+    def get_servo_state(self):
+        s = self._node()
+        return 'enabled' if (s is not None and s['enabled']) else 'disabled'
+
+    def get_hw_direction(self):
+        s = self._node()
+        if s is None or s['switch'] == 'neutral':
+            return None
+        return s['switch']
+
+    # writes (the node enforces CONTROL_ALLOWED; we just report)
+    def _send(self, data, what):
+        ok = self.ble.send_cmd(data) if self.ble is not None else False
+        log.info('node cmd %s -> %s%s', what, 'sent' if ok else 'NO LINK',
+                 '' if self.control_allowed else ' (node is read-only, will refuse)')
+        return ok
+
+    def enable_servo(self):
+        self._send(b'E', 'enable')
+
+    def disable_servo(self):
+        self._send(b'D', 'disable')
+
+    def set_speed(self, speed):
+        import struct as _st
+        self._last_speed = int(speed)
+        self._send(b'S' + _st.pack('<h', max(-3000, min(3000, int(speed)))), 'speed %d' % speed)
+
+    def clear_alarm(self):
+        self._send(b'C', 'clear alarm')
+        return True
+
+    def start_polling(self, interval=0.25):
+        pass
+
+    def disconnect(self):
+        pass
+
 
 WHITE = [1, 1, 1, 1]
 DIM = [0.313, 0.313, 0.313, 1]
@@ -267,6 +345,7 @@ class BlePickerOverlay(ModalTouch, FloatLayout):
 class SettingsOverlay(ModalTouch, FloatLayout):
     """Left menu / right page.  Pages are kv dynamic classes named in PAGES."""
     PAGES = [('display', 'Display', 'DisplayPage'),
+             ('connection', 'Connection', 'ConnectionPage'),
              ('dro', 'DRO', 'DroPage'),
              ('system', 'System', 'SystemPage')]
     page = StringProperty('')
@@ -453,6 +532,8 @@ class ServoCommanderApp(App):
     ble_address = StringProperty('')
     ble_name = StringProperty('')
     ble_scanning = BooleanProperty(False)
+    drive_link = StringProperty('hat')
+    node_control = BooleanProperty(False)     # node firmware allows commands
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -518,14 +599,13 @@ class ServoCommanderApp(App):
         self.build_id = self._git_short()
 
         Builder.load_file(os.path.join(HERE, 'ui.kv'))
-        self.servo = ServoCommunicator(invert_direction=invert)
-        self.servo.start_polling()
 
-        # glass-scale tap board on USB serial
+        # glass-scale tap board (USB serial or Bluetooth)
         self._load_datums()
         if cfg.getboolean('DRO', 'enabled'):
             self._start_dro_reader()
-        else:
+        self._start_servo(invert)
+        if not cfg.getboolean('DRO', 'enabled'):
             # no board: the scale position is fixed at 0, so line the datum
             # up with the saved reading straight away
             self._resync_datums({'X': 0.0, 'Z': 0.0})
@@ -667,6 +747,7 @@ class ServoCommanderApp(App):
         self.dro_link = 'ble' if self.settings['dro_link'] == 'ble' else 'usb'
         self.ble_address = str(self.settings['ble_address'] or '')
         self.ble_name = str(self.settings['ble_name'] or '')
+        self.drive_link = 'node' if self.settings['drive_link'] == 'node' else 'hat'
 
     def _save_settings(self):
         self.settings.update({'orientation': self.orientation,
@@ -679,7 +760,8 @@ class ServoCommanderApp(App):
                               'dro_z_um': int(self.dro_z_um),
                               'dro_link': self.dro_link,
                               'ble_address': self.ble_address,
-                              'ble_name': self.ble_name})
+                              'ble_name': self.ble_name,
+                              'drive_link': self.drive_link})
         try:
             tmp = SETTINGS_PATH + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as fh:
@@ -749,7 +831,9 @@ class ServoCommanderApp(App):
                 ('Max spindle rpm', '%d' % round(self.max_rpm / self.ratio))]
         if self.mode == 'surface_speed':
             rows.append(('Diameter', '%g %s' % (self.diameter, 'in' if self.unit == 'inch' else 'mm')))
-        rows += [('Drive', 'MOCK' if USE_MOCK else 'XP200 ttyS0 9600'),
+        drive = 'MOCK' if USE_MOCK else ('XP200 via node%s' % ('' if self.node_control else ' (read-only)')
+                                           if self.drive_link == 'node' else 'XP200 ttyS0 9600')
+        rows += [('Drive', drive),
                  ('Invert direction', 'ON' if cfg.getboolean('Hardware', 'invert_direction') else 'OFF'),
                  ('Orientation', '%s%s' % (self.orientation,
                                           ' / %s' % cfg.get('GUI', 'rotate')
@@ -901,6 +985,43 @@ class ServoCommanderApp(App):
         self.raw['Z'] = self.counts_to_mm('Z', z_counts)
         self.refresh_axes()
 
+    # ---- drive link (HAT on the Pi, or the Bluetooth machine node) ---------
+    def _start_servo(self, invert):
+        global ServoCommunicator
+        old = getattr(self, 'servo', None)
+        if old is not None:
+            try:
+                old.disable_servo()
+                old.disconnect()
+            except Exception as exc:
+                log.error('stopping old drive link: %s', exc)
+        if self.drive_link == 'node' and isinstance(self.dro, DroBle):
+            self.servo = NodeServo(self.dro)
+            log.info('Drive link: machine node over Bluetooth')
+        else:
+            if ServoCommunicator is None:
+                if USE_MOCK:
+                    from mock_servo_communication import ServoCommunicator as SC
+                else:
+                    from servo_communication import ServoCommunicator as SC
+                ServoCommunicator = SC
+            self.servo = ServoCommunicator(invert_direction=invert)
+            self.servo.start_polling()
+            log.info('Drive link: RS-485 HAT on the Pi')
+        self._invert = invert
+
+    def set_drive_link(self, link):
+        link = 'node' if link == 'node' else 'hat'
+        if link == self.drive_link:
+            return
+        self.drive_link = link
+        self._save_settings()
+        self.command_speed = 0
+        self._start_servo(self._invert)
+        self.offline_flag = False
+        self._hide('_offline')
+        log.info('Drive link -> %s', link)
+
     # ---- DRO link (USB serial or Bluetooth) --------------------------------
     def _start_dro_reader(self):
         if self.dro_link == 'ble':
@@ -931,6 +1052,8 @@ class ServoCommanderApp(App):
         self._datums_resynced = False
         if self.config.getboolean('DRO', 'enabled'):
             self._start_dro_reader()
+        if self.drive_link == 'node' and getattr(self, 'servo', None) is not None:
+            self._start_servo(self._invert)      # node servo follows the new reader
 
     def start_ble_scan(self):
         """Scan for tap boards in a thread, then show the picker."""
@@ -1073,6 +1196,9 @@ class ServoCommanderApp(App):
             self.feed_counts(sample['x'], sample['z'])
             if not self._datums_resynced:
                 self._resync_datums(dict(self.raw))
+            if 'control' in sample and sample['control'] != self.node_control:
+                self.node_control = sample['control']
+                log.info('Machine node control %s', 'ALLOWED' if self.node_control else 'read-only')
         if stale != self.dro_stale:
             self.dro_stale = stale
             log.info('DRO feed %s', 'STALE' if stale else 'live')

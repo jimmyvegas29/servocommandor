@@ -1667,11 +1667,11 @@
     active: (app.dro_x_um if self.axis == 'X' else app.dro_z_um) == self.um
     on_press: app.set_dro_um(self.axis, self.um)
 
-<DroPage@BoxLayout>:
+<ConnectionPage@BoxLayout>:
     orientation: 'vertical'
     spacing: 8
     SLabel:
-        text: 'DRO'
+        text: 'Connection'
         font_size: '18sp'
         size_hint_y: None
         height: 32
@@ -1708,6 +1708,46 @@
                 disabled: app.ble_scanning
                 on_press: app.start_ble_scan()
             Widget:
+    SettingCard:
+        SettingHead:
+            label: 'Drive link'
+            hint: ('Machine node' + ('' if app.node_control else ', read-only firmware')) if app.drive_link == 'node' else 'RS-485 HAT and switch on the Pi'
+        BoxLayout:
+            spacing: 0
+            SegButton:
+                text: 'PI HAT'
+                active: app.drive_link == 'hat'
+                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                on_press: app.set_drive_link('hat')
+            SegButton:
+                text: 'MACHINE NODE'
+                active: app.drive_link == 'node'
+                disabled: app.dro_link != 'ble'
+                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                on_press: app.set_drive_link('node')
+    SLabel:
+        text: 'Scales: ' + app.dro_status
+        font_size: '12sp'
+        color: (0.6, 0.6, 0.6, 1)
+        size_hint_y: None
+        height: 44
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        padding: [6, 0]
+    Widget:
+
+<DroPage@BoxLayout>:
+    orientation: 'vertical'
+    spacing: 8
+    SLabel:
+        text: 'DRO'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 32
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
     SettingCard:
         SettingHead:
             label: 'X direction'

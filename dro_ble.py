@@ -22,7 +22,13 @@ except ImportError:          # desktop without bleak
 SERVICE_UUID = '5e7a0001-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
 DATA_UUID = '5e7a0002-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
 PING_UUID = '5e7a0003-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
+CMD_UUID = '5e7a0004-8d2c-4b1e-9c3a-2f6d0a1b3c4d'      # machine node only
 STALE_S = 0.5
+
+# node packet (firmware v3): seq, x, z, t_ms, rpm_0p1, torque, alarm, flags
+NODE_FMT = '<IiiIhhHB'
+NODE_LEN = struct.calcsize(NODE_FMT)      # 23 bytes
+F_ONLINE, F_FWD, F_REV, F_ENABLED, F_CONTROL, F_CMD_OK = 1, 2, 4, 8, 16, 32
 
 
 def scan_boards(timeout=4.0):
@@ -48,11 +54,23 @@ def scan_boards(timeout=4.0):
 
 
 def parse_packet(data):
-    """bytes -> {'s','x','z','t'} or None."""
-    if len(data) != 16:
-        return None
-    s, x, z, t = struct.unpack('<IiiI', data)
-    return {'s': s, 'x': x, 'z': z, 't': t}
+    """bytes -> {'s','x','z','t'} (+ drive fields from a machine node) or None.
+
+    16 bytes: DRO tap (firmware v2).  23 bytes: machine node (v3) adds
+    rpm (0.1 rpm, signed), torque %, alarm code and a flags byte."""
+    if len(data) == 16:
+        s, x, z, t = struct.unpack('<IiiI', data)
+        return {'s': s, 'x': x, 'z': z, 't': t}
+    if len(data) == NODE_LEN:
+        s, x, z, t, rpm, torque, alarm, flags = struct.unpack(NODE_FMT, data)
+        return {'s': s, 'x': x, 'z': z, 't': t, 'rpm': rpm, 'torque': torque,
+                'alarm': alarm, 'flags': flags,
+                'online': bool(flags & F_ONLINE),
+                'switch': 'fwd' if flags & F_FWD else ('rev' if flags & F_REV else 'neutral'),
+                'enabled': bool(flags & F_ENABLED),
+                'control': bool(flags & F_CONTROL),
+                'cmd_ok': bool(flags & F_CMD_OK)}
+    return None
 
 
 class DroBle:
@@ -75,6 +93,10 @@ class DroBle:
         self._ping_event = None
         self._ping_echo = None
         self.found = []                 # (address, name, rssi) from the last scan
+        self.is_node = False            # True once a CMD characteristic is found
+        self.last_ack = None
+        self.acks = 0
+        self.cmds_sent = 0
 
     # ---- lifecycle ------------------------------------------------------
     def start(self):
@@ -154,6 +176,16 @@ class DroBle:
 
                     await client.start_notify(DATA_UUID, on_data)
                     await client.start_notify(PING_UUID, on_ping)
+                    self.is_node = False
+                    try:
+                        def on_ack(_h, data):
+                            self.last_ack = bytes(data)
+                            self.acks += 1
+                        await client.start_notify(CMD_UUID, on_ack)
+                        self.is_node = True
+                        log.info('DRO BLE: machine node (command characteristic present)')
+                    except Exception:
+                        pass          # plain DRO tap: no CMD characteristic
                     await self._tune_interval(target)
                     while not self._stop.is_set() and client.is_connected:
                         await asyncio.sleep(0.2)
@@ -219,6 +251,21 @@ class DroBle:
                 self._last_rx = time.monotonic()
                 self.frames += 1
         return sample
+
+    # ---- machine-node commands ------------------------------------------
+    def send_cmd(self, data):
+        """Fire-and-forget command to the node (b'E', b'D', b'C', b'S'+int16).
+        Returns False if there is no connected node."""
+        if self._client is None or not self.connected or self._loop is None:
+            return False
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._client.write_gatt_char(CMD_UUID, bytes(data), response=False), self._loop)
+            self.cmds_sent += 1
+            return True
+        except Exception as exc:
+            log.warning('DRO BLE: command failed: %s', exc)
+            return False
 
     # ---- round-trip timing ------------------------------------------------
     async def _ping_once(self, token, timeout=1.0):
