@@ -132,6 +132,9 @@ def after_disable(n):
     # offline overlay: dismissable, speed section locked, DRO usable
     servo.offline = True
     app._poll_ui(0)
+    app._poll_ui(0)
+    check('one or two misses: no popup yet', app._offline, None)
+    app._poll_ui(0)
     check('offline overlay shown', app._offline is not None, True)
     app.dismiss_offline()
     check('offline dismissed', (app._offline, app.offline_dismissed), (None, True))
@@ -660,7 +663,8 @@ def after_layout(dt):
     pkt2 = struct.pack('<IiiIhhHB', 10, 100, 200, 6, 0, 0, 0, F_CMD_OK)   # node says drive offline
     app.dro.feed(pkt2)
     app._poll_dro(0)
-    app._poll_ui(0)
+    for _ in range(3):                      # popup only after three missed polls
+        app._poll_ui(0)
     check('node reports drive offline -> popup', app._offline is not None, True)
     app.dismiss_offline()
     app.set_drive_link('hat')
