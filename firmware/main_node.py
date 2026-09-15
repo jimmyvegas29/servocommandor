@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.8'         # shown on the panel; bump on every change
+VERSION = 'node 3.9'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -339,6 +339,7 @@ def handle_cmd(data):
             payload = bytes(resp) if ok else b''
             print('CMD X', pdu, '->', resp)
     elif data[:1] == b'R' and len(data) >= 4:
+        addr, count = struct.unpack('<HB', data[1:4])
         count = max(1, min(8, count))
         vals = read_holding_regs(addr, count) if addr + count <= 250 else None
         ok = vals is not None
