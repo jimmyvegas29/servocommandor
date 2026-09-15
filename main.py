@@ -63,7 +63,12 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      'landscape_style': 'classic',
                      # last overload alarm level (Pr070) read from the drive; the
                      # load readout goes red RED_MARGIN below it
-                     'overload_level': 140}
+                     'overload_level': 140,
+                     # drive parameters set from the panel, Pr number -> value.
+                     # The XP200 acknowledges the Modbus 'save to EEPROM'
+                     # command but never commits (verified 2026-09-15), so the
+                     # panel re-applies these every time the drive comes up.
+                     'drive_params': {}}
 RED_MARGIN = 20               # load turns red this many % points under the alarm level
 ServoCommunicator = None      # imported in _start_servo() once the drive link is known
 
@@ -713,6 +718,7 @@ class ServoCommanderApp(App):
         self._gui_cmd_until = 0.0   # ignore the node's enable bit briefly after a GUI command
         self._offline_polls = 0     # consecutive polls with no drive data
         self._params_requested = False
+        self._params_synced = False     # stored drive params re-applied this link session
         self._node_linked = False   # BLE link to the machine node seen up
         self.current_speed = 0      # motor rpm reported by the drive
         self.current_torque = 0
@@ -1079,16 +1085,13 @@ class ServoCommanderApp(App):
             return 'Drive offline'
         if self.drive_link == 'node' and not self.node_control:
             return 'Node firmware is read-only'
-        if self.drive_save_state == 'saving':
-            return 'Saving to EEPROM, drive busy for 5 s...'
         if self.servo_state == 'enabled':
             return 'Disable the servo to change parameters'
-        if self.drive_save_state == 'failed':
-            return 'Save FAILED - the drive did not answer 41H, try again'
-        if self.drive_dirty:
-            return 'Changed - SAVE to keep it after power off'
-        if self.drive_save_state == 'saved':
-            return 'Saved to EEPROM'
+        kept = len(self.settings.get('drive_params', {}))
+        if kept:
+            return ('Live from the drive. %d value%s kept by the panel and re-applied '
+                    'at every start-up (the drive only keeps them itself via keypad EE > SET)'
+                    % (kept, '' if kept == 1 else 's'))
         return 'Values live from the drive'
 
     def request_drive_params(self):
@@ -1113,14 +1116,39 @@ class ServoCommanderApp(App):
         if not (spec['lo'] <= value <= spec['hi']) or not self.drive_can_edit():
             return False
         self.servo.write_param(spec['addr'], value)
+        kept = self.settings.setdefault('drive_params', {})
+        kept[str(spec['addr'])] = int(value)
         if spec['mirror'] is not None:
             self.servo.write_param(spec['mirror'], -value)
-        self.drive_dirty = True
-        self.drive_save_state = ''
-        log.info('Drive parameter %s (Pr%03d%s) -> %d', key, spec['addr'],
+            kept[str(spec['mirror'])] = -int(value)
+        self._save_settings()
+        log.info('Drive parameter %s (Pr%03d%s) -> %d (kept by the panel)', key, spec['addr'],
                  '/Pr%03d' % spec['mirror'] if spec['mirror'] else '', value)
         self.close_param_edit()
         return True
+
+    def _resync_drive_params(self):
+        """Once per link session, after the first read: write back any
+        panel-kept parameter the drive has forgotten (it forgets everything
+        set over Modbus at power-off)."""
+        kept = self.settings.get('drive_params', {})
+        params = self.servo.params
+        if not kept:
+            self._params_synced = True
+            return
+        if not all(int(a) in params for a in kept):
+            return                          # first read not complete yet
+        if not self.drive_can_edit():
+            return                          # enabled: try again next poll
+        wrote = []
+        for a, v in kept.items():
+            if params.get(int(a)) != int(v):
+                self.servo.write_param(int(a), int(v))
+                wrote.append('Pr%03d=%d' % (int(a), int(v)))
+        self._params_synced = True
+        if wrote:
+            log.info('Drive parameters re-applied from the panel: %s', ' '.join(wrote))
+            self.request_drive_params()
 
     def save_drive_params(self):
         if not self.drive_can_edit():
@@ -1503,6 +1531,8 @@ class ServoCommanderApp(App):
             self._node_linked = linked
             if linked and self.node_control:
                 self._push_speed('node link up')
+            if not linked:
+                self._params_requested = False   # re-read and re-apply on relink
         if isinstance(self.dro, DroBle):
             if self.dro.node_version != self.node_version:
                 self.node_version = self.dro.node_version
@@ -1838,7 +1868,10 @@ class ServoCommanderApp(App):
         self._offline_polls = 0
         if not self._params_requested and (self.drive_link != 'node' or self.node_control):
             self._params_requested = True
+            self._params_synced = False
             self.request_drive_params()
+        elif not self._params_synced:
+            self._resync_drive_params()
         if self.offline_flag:
             self._hide('_offline')
             self.offline_flag = False

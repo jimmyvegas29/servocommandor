@@ -2105,9 +2105,9 @@
             SLabel:
                 text: root.status
                 font_size: '12sp'
-                color: (0.95, 0.75, 0.3, 1) if app.drive_dirty else (0.6, 0.6, 0.6, 1)
+                color: (0.6, 0.6, 0.6, 1)
                 size_hint_y: None
-                height: 30
+                height: 44
                 text_size: self.size
                 halign: 'left'
                 valign: 'middle'
@@ -2115,12 +2115,6 @@
                 size_hint_y: None
                 height: 44
                 spacing: 6
-                SetKey:
-                    text: 'SAVE TO DRIVE'
-                    font_size: '14sp'
-                    color: (0.4, 0.85, 0.5, 1) if (app.drive_dirty and root.can_edit) else ((1, 1, 1, 1) if root.can_edit else (0.35, 0.35, 0.35, 1))
-                    disabled: not root.can_edit
-                    on_press: app.save_drive_params()
                 SetKey:
                     text: 'CALIBRATE RATIO'
                     font_size: '14sp'

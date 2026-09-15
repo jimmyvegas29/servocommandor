@@ -369,24 +369,26 @@ def after_ratio(ini_path, ini_before, old_ratio):
         ed.add_digit(ch)
     ed.accept()
     check('overload level written both signs', (app.servo.params[70], app.servo.params[71]), (200, -200))
-    check('editor closed, page dirty', (app._param_edit, app.drive_dirty), (None, True))
+    check('editor closed, value kept by panel', (app._param_edit, app.settings['drive_params']),
+          (None, {'70': 200, '71': -200}))
     page.refresh()
     check('row shows new value', rows['overload_level'].value, '200 %')
-    check('status says save', page.status.startswith('Changed'), True)
+    check('status says kept', 'kept by the panel' in page.status, True)
     app.toggle_enable()
     page.refresh()
     check('no edit while enabled', (app.drive_edit_ok, page.status), (False, 'Disable the servo to change parameters'))
     check('write refused while enabled', app.apply_drive_param('overload_level', 150), False)
     app.toggle_enable()
     page.refresh()
-    app.save_drive_params()
-    check('saving state', (app.drive_save_state, app.drive_edit_ok), ('saving', False))
-    app._save_done(0)
-    page.refresh()
-    check('saved to eeprom', (app.drive_save_state, app.drive_dirty, app.servo.saved_params[70]), ('saved', False, 200))
+    # the drive "forgets" at power-off: on the next link the panel writes it back
+    app.servo.params[70], app.servo.params[71] = 140, -140
+    app._params_requested = False
+    app._poll_ui(0)                                  # first poll: read requested
+    app._poll_ui(0)                                  # second poll: re-apply
+    check('kept values re-applied', (app.servo.params[70], app.servo.params[71]), (200, -200))
     app.apply_drive_param('overload_level', 140)
-    app.servo.saved_params[70], app.servo.saved_params[71] = 140, -140
-    app.drive_dirty = False
+    app.settings['drive_params'] = {}
+    app._save_settings()
     app.close_settings()
 
     # overlays swallow touches: tapping where the gear sits while SET is
