@@ -39,8 +39,12 @@ def s_running():
 
 
 def s_scrolled():
-    app.graph.view_offset = 12
-    app.graph.redraw()
+    import math
+    g = app.graph
+    # a few minutes of made-up history so there is something to scroll into
+    g.hist = [int(40 + 30 * math.sin(i / 9.0) + (60 if 180 < i < 200 else 0)) for i in range(600)] + g.hist
+    g.view_offset = 130
+    g.redraw()
 
 
 def s_scroll_live():
