@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.7'         # shown on the panel; bump on every change
+VERSION = 'node 3.8'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -267,6 +267,23 @@ def handle_cmd(data):
     if data[:1] == b'I':
         ok = True
         payload = VERSION.encode()
+    elif data[:1] == b'L':
+        # crash log: b'L' + offset byte -> up to 18 bytes of crash.txt
+        off = data[1] if len(data) > 1 else 0
+        try:
+            with open('crash.txt') as fh:
+                fh.seek(off * 18)
+                payload = fh.read(18).encode()
+            ok = True
+        except OSError:
+            payload = b''
+            ok = False
+    elif data[:1] == b'K':
+        try:
+            os.remove('crash.txt')
+        except OSError:
+            pass
+        ok = True
     elif data[:1] == b'F' and len(data) >= 9:
         ota_abort()
         ota['size'], ota['crc'] = struct.unpack('<II', data[1:9])
@@ -572,4 +589,16 @@ async def main():
                          drive_poller(), switch_task(), watchdog(), trial_confirm())
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except Exception as exc:
+    # leave a note the panel can fetch with the L command, then let the
+    # launcher reset us
+    try:
+        import sys
+        with open('crash.txt', 'w') as fh:
+            fh.write(VERSION + ' ' + str(time.ticks_ms()) + chr(10))
+            sys.print_exception(exc, fh)
+    except Exception:
+        pass
+    raise

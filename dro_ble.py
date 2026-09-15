@@ -301,7 +301,7 @@ class DroBle:
             elif cmd == b'I' and ok:
                 self.node_version = data[2:].decode('utf-8', 'replace')
                 log.info('node firmware: %s', self.node_version)
-            elif cmd == b'X':
+            elif cmd in (b'X', b'L', b'K'):
                 self.last_raw = (ok, data[2:], time.time())
                 if self._raw_event is not None:
                     self._raw_event.set()
@@ -325,6 +325,28 @@ class DroBle:
             return None
         ok, resp, _t = self.last_raw
         return resp if ok else None
+
+    def _ask(self, data, timeout=3.0):
+        self._raw_event.clear()
+        self.last_raw = None
+        if not self.send_cmd(data) or not self._raw_event.wait(timeout):
+            return None
+        return self.last_raw
+
+    def read_crash_log(self):
+        """Fetch the node's crash.txt (written when its firmware died), or ''."""
+        out = b''
+        for off in range(40):
+            res = self._ask(b'L' + bytes([off]))
+            if res is None or not res[0] or not res[1]:
+                break
+            out += res[1]
+            if len(res[1]) < 18:
+                break
+        return out.decode('utf-8', 'replace')
+
+    def clear_crash_log(self):
+        return bool(self._ask(b'K'))
 
     # ---- over-the-air firmware update -------------------------------------
     def ota_send(self, path):

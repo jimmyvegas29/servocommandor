@@ -1094,9 +1094,10 @@ class ServoCommanderApp(App):
     def request_drive_params(self):
         if not self._servo_has_params():
             return
-        # reads of at most 8 registers each (one fits a single BLE notify)
-        for addr, count in ((60, 4), (65, 8), (75, 1)):
-            self.servo.request_params(addr, count)
+        # reads of at most 8 registers each (one fits a single BLE notify),
+        # spaced out so the node answers one before the next arrives
+        for i, (addr, count) in enumerate(((60, 4), (65, 8), (75, 1))):
+            Clock.schedule_once(lambda dt, a=addr, c=count: self.servo.request_params(a, c), 0.25 * i)
 
     def open_param_edit(self, key):
         if not self.drive_can_edit():
