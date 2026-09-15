@@ -94,6 +94,10 @@ class DroBle:
         self._ping_echo = None
         self.found = []                 # (address, name, rssi) from the last scan
         self.is_node = False            # True once a CMD characteristic is found
+        self.params = {}                # drive parameter number -> signed value (from 'R'/'W' acks)
+        self.params_ts = 0.0
+        self.last_write = None          # (addr, value, ok, time)
+        self.last_save = None           # (ok, time)
         self.last_ack = None
         self.acks = 0
         self.cmds_sent = 0
@@ -181,6 +185,7 @@ class DroBle:
                         def on_ack(_h, data):
                             self.last_ack = bytes(data)
                             self.acks += 1
+                            self._parse_ack(self.last_ack)
                         await client.start_notify(CMD_UUID, on_ack)
                         self.is_node = True
                         log.info('DRO BLE: machine node (command characteristic present)')
@@ -253,6 +258,31 @@ class DroBle:
         return sample
 
     # ---- machine-node commands ------------------------------------------
+    def _parse_ack(self, data):
+        """Ack layout: ok byte, command byte, payload (see firmware docstring)."""
+        if len(data) < 2:
+            return
+        ok, cmd = data[0] == 1, data[1:2]
+        try:
+            if cmd == b'R' and len(data) >= 5:
+                addr, count = struct.unpack('<HB', data[2:5])
+                if ok and len(data) >= 5 + 2 * count:
+                    vals = struct.unpack('<%dh' % count, data[5:5 + 2 * count])
+                    for i, v in enumerate(vals):
+                        self.params[addr + i] = v
+                    self.params_ts = time.time()
+            elif cmd == b'W' and len(data) >= 6:
+                addr, value = struct.unpack('<Hh', data[2:6])
+                self.last_write = (addr, value, ok, time.time())
+                if ok:
+                    self.params[addr] = value
+                log.info('node param write Pr%03d = %d -> %s', addr, value, 'ok' if ok else 'REFUSED')
+            elif cmd == b'V':
+                self.last_save = (ok, time.time())
+                log.info('node save to EEPROM -> %s', 'ok' if ok else 'REFUSED')
+        except struct.error:
+            pass
+
     def send_cmd(self, data):
         """Fire-and-forget command to the node (b'E', b'D', b'C', b'S'+int16).
         Returns False if there is no connected node."""

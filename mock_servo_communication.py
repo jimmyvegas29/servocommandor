@@ -21,6 +21,12 @@ class ServoCommunicator:
         self._last = time.time()
         self.hw_direction = None
         self.offline = False        # set True to exercise the offline overlay
+        # drive parameter table (XP200 defaults) for the Drive settings page
+        self.params = {60: 100, 61: 100, 63: 1000, 65: 300, 66: -300, 67: 100, 68: -100,
+                       69: 100, 70: 140, 71: -140, 72: 10000, 75: 3500}
+        self.last_write = None
+        self.last_save = None
+        self.saved_params = dict(self.params)
         ###### UNCOMMENT IF YOU WANT TO TEST PHYSICAL BUTTONS ######
         # self.enablebutton = Button(21, bounce_time=.1)
         # self.enablebutton.when_pressed = self.enable_servo
@@ -30,6 +36,26 @@ class ServoCommunicator:
 
     def get_servo_state(self):
         return self.servostate
+
+    # ---- drive parameters ----
+    def request_params(self, addr, count):
+        return all(addr + i in self.params for i in range(count))
+
+    def write_param(self, addr, value):
+        ok = self.servostate != 'enabled' and addr in self.params
+        if ok:
+            self.params[addr] = int(value)
+        self.last_write = (addr, int(value), ok, time.time())
+        print('Mock write Pr%03d = %s -> %s' % (addr, value, 'ok' if ok else 'refused'))
+        return ok
+
+    def save_params(self):
+        ok = self.servostate != 'enabled'
+        if ok:
+            self.saved_params = dict(self.params)
+        self.last_save = (ok, time.time())
+        print('Mock save to EEPROM ->', 'ok' if ok else 'refused')
+        return ok
 
     def start_polling(self, interval=0.25):
         print("Mock polling started")

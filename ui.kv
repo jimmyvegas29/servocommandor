@@ -1992,16 +1992,6 @@
         spacing: 4
         size_hint_y: None
         height: self.minimum_height
-    BoxLayout:
-        size_hint_y: None
-        height: 44
-        spacing: 6
-        padding: [0, 4, 0, 0]
-        SetKey:
-            text: 'CALIBRATE RATIO'
-            font_size: '14sp'
-            color: ACCENT
-            on_press: app.open_ratio_cal()
     Widget:
     GridLayout:
         cols: 3
@@ -2020,6 +2010,256 @@
             text: 'Quit app'
             font_size: '14sp'
             on_press: app.stop()
+
+<ParamRow@BoxLayout>:
+    key: ''
+    label: ''
+    hint: ''
+    value: '-'
+    size_hint_y: None
+    height: 52
+    padding: [8, 4]
+    spacing: 6
+    canvas.before:
+        Color:
+            rgba: (1, 1, 1, 0.04)
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(4, 4)] * 4
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: 0.5
+        SLabel:
+            text: root.label
+            font_size: '14sp'
+            text_size: self.size
+            halign: 'left'
+            valign: 'bottom'
+        SLabel:
+            text: root.hint
+            font_size: '10sp'
+            color: (0.5, 0.5, 0.5, 1)
+            text_size: self.size
+            halign: 'left'
+            valign: 'top'
+            shorten: True
+            shorten_from: 'right'
+    SLabel:
+        text: root.value
+        font_size: '14sp'
+        size_hint_x: 0.32
+        text_size: self.size
+        halign: 'right'
+        valign: 'middle'
+        shorten: True
+        shorten_from: 'left'
+    SetKey:
+        text: 'EDIT'
+        font_size: '13sp'
+        size_hint_x: None
+        width: 52
+        color: ACCENT if app.drive_edit_ok else (0.35, 0.35, 0.35, 1)
+        disabled: not app.drive_edit_ok
+        on_press: app.open_param_edit(root.key)
+
+<DrivePage>:
+    orientation: 'vertical'
+    spacing: 6
+    SLabel:
+        text: 'Drive'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 32
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+    ScrollView:
+        do_scroll_x: False
+        bar_width: 4
+        BoxLayout:
+            orientation: 'vertical'
+            spacing: 4
+            size_hint_y: None
+            height: self.minimum_height
+            GridLayout:
+                id: params
+                cols: 1
+                spacing: 4
+                size_hint_y: None
+                height: self.minimum_height
+            SLabel:
+                text: root.status
+                font_size: '12sp'
+                color: (0.95, 0.75, 0.3, 1) if app.drive_dirty else (0.6, 0.6, 0.6, 1)
+                size_hint_y: None
+                height: 30
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_y: None
+                height: 44
+                spacing: 6
+                SetKey:
+                    text: 'SAVE TO DRIVE'
+                    font_size: '14sp'
+                    color: (0.4, 0.85, 0.5, 1) if (app.drive_dirty and root.can_edit) else ((1, 1, 1, 1) if root.can_edit else (0.35, 0.35, 0.35, 1))
+                    disabled: not root.can_edit
+                    on_press: app.save_drive_params()
+                SetKey:
+                    text: 'CALIBRATE RATIO'
+                    font_size: '14sp'
+                    color: ACCENT
+                    on_press: app.open_ratio_cal()
+            Widget:
+                size_hint_y: None
+                height: 6
+            GridLayout:
+                id: info
+                cols: 1
+                spacing: 4
+                size_hint_y: None
+                height: self.minimum_height
+
+<ParamEditOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), root.height - 20)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 6
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: root.title
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_param_edit()
+        SLabel:
+            text: root.hint
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 34
+            text_size: self.size
+            halign: 'left'
+            valign: 'top'
+        InfoRow:
+            label: 'Current value'
+            value: root.current
+        BoxLayout:
+            size_hint_y: None
+            height: 60
+            padding: [12, 0]
+            canvas.before:
+                Color:
+                    rgba: (0.05, 0.05, 0.05, 1)
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: 'New value'
+                font_size: '13sp'
+                color: (0.6, 0.6, 0.6, 1)
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            SLabel:
+                text: (root.entry if root.entry else '0') + ' ' + root.unit
+                font_size: '40sp'
+                color: ((0.95, 0.25, 0.2, 1) if root.over else (1, 1, 1, 1)) if root.entry else (0.35, 0.35, 0.35, 1)
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
+        GridLayout:
+            cols: 3
+            spacing: 5
+            SetKey:
+                text: '7'
+                font_size: '26sp'
+                on_press: root.add_digit('7')
+            SetKey:
+                text: '8'
+                font_size: '26sp'
+                on_press: root.add_digit('8')
+            SetKey:
+                text: '9'
+                font_size: '26sp'
+                on_press: root.add_digit('9')
+            SetKey:
+                text: '4'
+                font_size: '26sp'
+                on_press: root.add_digit('4')
+            SetKey:
+                text: '5'
+                font_size: '26sp'
+                on_press: root.add_digit('5')
+            SetKey:
+                text: '6'
+                font_size: '26sp'
+                on_press: root.add_digit('6')
+            SetKey:
+                text: '1'
+                font_size: '26sp'
+                on_press: root.add_digit('1')
+            SetKey:
+                text: '2'
+                font_size: '26sp'
+                on_press: root.add_digit('2')
+            SetKey:
+                text: '3'
+                font_size: '26sp'
+                on_press: root.add_digit('3')
+            SetKey:
+                text: 'C'
+                font_size: '26sp'
+                on_press: root.clear()
+            SetKey:
+                text: '0'
+                font_size: '26sp'
+                on_press: root.add_digit('0')
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=22]\uf55a[/size][/font]'
+                on_press: root.backspace()
+        BoxLayout:
+            size_hint_y: None
+            height: 54
+            spacing: 6
+            SetKey:
+                text: 'CANCEL'
+                font_size: '17sp'
+                on_press: app.close_param_edit()
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=14]\uf00c[/size][/font]  WRITE TO DRIVE'
+                font_size: '17sp'
+                color: (0.4, 0.85, 0.5, 1) if (root.entry and not root.over) else (0.35, 0.35, 0.35, 1)
+                disabled: not root.entry or root.over
+                on_press: root.accept()
 
 <RatioCalOverlay>:
     canvas.before:

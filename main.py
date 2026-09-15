@@ -134,6 +134,30 @@ class NodeServo:
         self._send(b'C', 'clear alarm')
         return True
 
+    # drive parameters: the node answers on the CMD notify, DroBle caches them
+    @property
+    def params(self):
+        return self.ble.params if self.ble is not None else {}
+
+    @property
+    def last_write(self):
+        return self.ble.last_write if self.ble is not None else None
+
+    @property
+    def last_save(self):
+        return self.ble.last_save if self.ble is not None else None
+
+    def request_params(self, addr, count):
+        import struct as _st
+        return self._send(b'R' + _st.pack('<HB', addr, count), 'read Pr%03d x%d' % (addr, count))
+
+    def write_param(self, addr, value):
+        import struct as _st
+        return self._send(b'W' + _st.pack('<Hh', addr, int(value)), 'write Pr%03d = %d' % (addr, value))
+
+    def save_params(self):
+        return self._send(b'V', 'save parameters to EEPROM')
+
     def start_polling(self, interval=0.25):
         pass
 
@@ -194,6 +218,120 @@ class SystemPage(BoxLayout):
             row.label = label
             row.value = value
             rows.add_widget(row)
+
+
+# XP200 parameters exposed on the Drive page.  Pr number == Modbus address.
+# mirror: the CW twin that is kept at -value (the drive stores both signs).
+DRIVE_PARAMS = [
+    dict(key='torque_limit', label='Torque limit', hint='Pr065/066  hard ceiling',
+         addr=65, mirror=66, lo=0, hi=300, unit='%'),
+    dict(key='overload_level', label='Overload level', hint='Pr070/071  Err-29 above this',
+         addr=70, mirror=71, lo=0, hi=300, unit='%'),
+    dict(key='overload_time', label='Overload time', hint='Pr072  time over level before Err-29',
+         addr=72, mirror=None, lo=1, hi=30000, unit='ms'),
+    dict(key='accel', label='Accel time', hint='Pr060  0 to 1000 rpm',
+         addr=60, mirror=None, lo=0, hi=10000, unit='ms'),
+    dict(key='decel', label='Decel time', hint='Pr061  1000 rpm to 0',
+         addr=61, mirror=None, lo=0, hi=10000, unit='ms'),
+    dict(key='max_speed', label='Max motor speed', hint='Pr075  drive-side limit',
+         addr=75, mirror=None, lo=0, hi=6000, unit='rpm'),
+]
+DRIVE_PARAM_BY_KEY = dict((d['key'], d) for d in DRIVE_PARAMS)
+
+
+class DrivePage(BoxLayout):
+    """Drive-side settings: live parameter values with an editor, save to
+    EEPROM, the ratio calibrator and the drive info rows."""
+    status = StringProperty('')
+    can_edit = BooleanProperty(False)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        app = App.get_running_app()
+        self._rows = {}
+        for spec in DRIVE_PARAMS:
+            row = Factory.ParamRow()
+            row.key = spec['key']
+            row.label = spec['label']
+            row.hint = spec['hint']
+            self.ids.params.add_widget(row)
+            self._rows[spec['key']] = row
+        for label, value in app.drive_rows():
+            row = Factory.InfoRow()
+            row.label = label
+            row.value = value
+            self.ids.info.add_widget(row)
+        app.request_drive_params()
+        self.refresh()
+        self._evt = Clock.schedule_interval(self._tick, 0.5)
+
+    def _tick(self, dt):
+        if self.parent is None:          # page swapped out: stop polling
+            self._evt.cancel()
+            return
+        self.refresh()
+
+    def refresh(self):
+        app = App.get_running_app()
+        params = app.servo.params if hasattr(app.servo, 'params') else {}
+        for spec in DRIVE_PARAMS:
+            row = self._rows[spec['key']]
+            v = params.get(spec['addr'])
+            if v is None:
+                row.value = '-'
+            elif spec['mirror'] is not None and params.get(spec['mirror']) not in (None, -v):
+                row.value = '%d / %d %s' % (v, params.get(spec['mirror']), spec['unit'])
+            else:
+                row.value = '%d %s' % (v, spec['unit'])
+        self.can_edit = app.drive_can_edit()
+        app.drive_edit_ok = self.can_edit
+        self.status = app.drive_status_text()
+
+
+class ParamEditOverlay(ModalTouch, FloatLayout):
+    """Numpad editor for one Drive page parameter."""
+    key = StringProperty('')
+    title = StringProperty('')
+    hint = StringProperty('')
+    unit = StringProperty('')
+    entry = StringProperty('')
+    current = StringProperty('-')
+    lo = NumericProperty(0)
+    hi = NumericProperty(0)
+    over = BooleanProperty(False)
+
+    def setup(self, key):
+        spec = DRIVE_PARAM_BY_KEY[key]
+        app = App.get_running_app()
+        self.key = key
+        self.title = spec['label']
+        self.hint = '%s.  Range %d to %d %s' % (spec['hint'].replace('  ', ': '), spec['lo'], spec['hi'], spec['unit'])
+        self.unit = spec['unit']
+        self.lo, self.hi = spec['lo'], spec['hi']
+        v = app.servo.params.get(spec['addr']) if hasattr(app.servo, 'params') else None
+        self.current = '-' if v is None else '%d %s' % (v, spec['unit'])
+
+    def _check(self):
+        self.over = bool(self.entry) and not (self.lo <= int(self.entry) <= self.hi)
+
+    def add_digit(self, d):
+        if len(self.entry) >= 5:
+            return
+        self.entry = d if self.entry == '0' else self.entry + d
+        self._check()
+
+    def backspace(self):
+        self.entry = self.entry[:-1]
+        self._check()
+
+    def clear(self):
+        self.entry = ''
+        self._check()
+
+    def accept(self):
+        if not self.entry or self.over:
+            return
+        App.get_running_app().apply_drive_param(self.key, int(self.entry))
 
 
 class RatioCalOverlay(ModalTouch, FloatLayout):
@@ -348,6 +486,7 @@ class SettingsOverlay(ModalTouch, FloatLayout):
     PAGES = [('display', 'Display', 'DisplayPage'),
              ('connection', 'Connection', 'ConnectionPage'),
              ('dro', 'DRO', 'DroPage'),
+             ('drive', 'Drive', 'DrivePage'),
              ('system', 'System', 'SystemPage')]
     page = StringProperty('')
 
@@ -535,6 +674,9 @@ class ServoCommanderApp(App):
     ble_scanning = BooleanProperty(False)
     drive_link = StringProperty('hat')
     node_control = BooleanProperty(False)     # node firmware allows commands
+    drive_dirty = BooleanProperty(False)      # parameter written to the drive, not yet saved to EEPROM
+    drive_save_state = StringProperty('')     # '', 'saving', 'saved', 'failed'
+    drive_edit_ok = BooleanProperty(False)    # Drive page: EDIT buttons live
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -561,6 +703,7 @@ class ServoCommanderApp(App):
         self._offline = None
         self._alarm = None
         self._ratio_cal = None
+        self._param_edit = None
         self._copy_overlay = None
         self._ble_picker = None
 
@@ -828,17 +971,10 @@ class ServoCommanderApp(App):
 
     def system_rows(self):
         cfg = self.config
-        rows = [('Speed mode', 'RPM' if self.mode == 'rpm' else 'Surface speed'),
-                ('Ratio', '%.3f' % self.ratio),
-                ('Max motor rpm', '%d' % self.max_rpm),
-                ('Max spindle rpm', '%d' % round(self.max_rpm / self.ratio))]
+        rows = [('Speed mode', 'RPM' if self.mode == 'rpm' else 'Surface speed')]
         if self.mode == 'surface_speed':
             rows.append(('Diameter', '%g %s' % (self.diameter, 'in' if self.unit == 'inch' else 'mm')))
-        drive = 'MOCK' if USE_MOCK else ('XP200 via node%s' % ('' if self.node_control else ' (read-only)')
-                                           if self.drive_link == 'node' else 'XP200 ttyS0 9600')
-        rows += [('Drive', drive),
-                 ('Invert direction', 'ON' if cfg.getboolean('Hardware', 'invert_direction') else 'OFF'),
-                 ('Orientation', '%s%s' % (self.orientation,
+        rows += [('Orientation', '%s%s' % (self.orientation,
                                           ' / %s' % cfg.get('GUI', 'rotate')
                                           if self.orientation == 'portrait' else '')),
                  ('DRO scales', self.dro_status),
@@ -846,6 +982,95 @@ class ServoCommanderApp(App):
                  ('Throttling', self._throttle_state()),
                  ('Build', self.build_id)]
         return rows
+
+    def drive_rows(self):
+        cfg = self.config
+        drive = 'MOCK' if USE_MOCK else ('XP200 via node%s' % ('' if self.node_control else ' (read-only)')
+                                           if self.drive_link == 'node' else 'XP200 ttyS0 9600')
+        return [('Drive', drive),
+                ('Ratio', '%.3f' % self.ratio),
+                ('Max motor rpm', '%d' % self.max_rpm),
+                ('Max spindle rpm', '%d' % round(self.max_rpm / self.ratio)),
+                ('Invert direction', 'ON' if cfg.getboolean('Hardware', 'invert_direction') else 'OFF')]
+
+    # ---- drive page: parameters over Modbus (direct or via the node) ----
+    def _servo_has_params(self):
+        return hasattr(self.servo, 'params')
+
+    def drive_can_edit(self):
+        if not self._servo_has_params() or self.offline_flag or self.servo_state == 'enabled':
+            return False
+        if self.drive_link == 'node' and not self.node_control:
+            return False
+        return self.drive_save_state != 'saving'
+
+    def drive_status_text(self):
+        if not self._servo_has_params():
+            return 'Drive parameters not available'
+        if self.offline_flag:
+            return 'Drive offline'
+        if self.drive_link == 'node' and not self.node_control:
+            return 'Node firmware is read-only'
+        if self.drive_save_state == 'saving':
+            return 'Saving to EEPROM, drive busy for 5 s...'
+        if self.servo_state == 'enabled':
+            return 'Disable the servo to change parameters'
+        if self.drive_dirty:
+            return 'Changed - SAVE to keep it after power off'
+        if self.drive_save_state == 'saved':
+            return 'Saved to EEPROM'
+        if self.drive_save_state == 'failed':
+            return 'Save FAILED - the drive refused 41H'
+        return 'Values live from the drive'
+
+    def request_drive_params(self):
+        if not self._servo_has_params():
+            return
+        # reads of at most 8 registers each (one fits a single BLE notify)
+        for addr, count in ((60, 4), (65, 8), (75, 1)):
+            self.servo.request_params(addr, count)
+
+    def open_param_edit(self, key):
+        if not self.drive_can_edit():
+            return
+        ov = self._show('_param_edit', ParamEditOverlay())
+        ov.setup(key)
+
+    def close_param_edit(self):
+        self._hide('_param_edit')
+
+    def apply_drive_param(self, key, value):
+        spec = DRIVE_PARAM_BY_KEY[key]
+        if not (spec['lo'] <= value <= spec['hi']) or not self.drive_can_edit():
+            return False
+        self.servo.write_param(spec['addr'], value)
+        if spec['mirror'] is not None:
+            self.servo.write_param(spec['mirror'], -value)
+        self.drive_dirty = True
+        self.drive_save_state = ''
+        log.info('Drive parameter %s (Pr%03d%s) -> %d', key, spec['addr'],
+                 '/Pr%03d' % spec['mirror'] if spec['mirror'] else '', value)
+        self.close_param_edit()
+        return True
+
+    def save_drive_params(self):
+        if not self.drive_can_edit():
+            return
+        self.drive_save_state = 'saving'
+        self.drive_edit_ok = False
+        self.servo.save_params()
+        log.info('Drive parameters: save to EEPROM requested')
+        # the drive is busy for up to 5 s after 41H (manual 9.6.6)
+        Clock.schedule_once(self._save_done, 5.5)
+
+    def _save_done(self, dt):
+        res = getattr(self.servo, 'last_save', None)
+        ok = bool(res and res[0])
+        self.drive_save_state = 'saved' if ok else 'failed'
+        if ok:
+            self.drive_dirty = False
+        log.info('Drive parameters: save %s', 'OK' if ok else 'FAILED')
+        self.request_drive_params()
 
     @staticmethod
     def _cpu_temp():
@@ -915,7 +1140,7 @@ class ServoCommanderApp(App):
         self.update_rpm_display()
         self.close_ratio_cal()
         if self._settings_overlay is not None:
-            self.open_settings('system')
+            self.open_settings('drive')
 
     @staticmethod
     def _write_ini_value(section, key, value):

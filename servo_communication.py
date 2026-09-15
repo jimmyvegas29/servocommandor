@@ -2,6 +2,7 @@ from pymodbus.client import ModbusSerialClient
 from pymodbus.exceptions import ModbusException
 from pymodbus.pdu import ModbusPDU
 import threading
+import time
 
 from applog import log
 
@@ -36,6 +37,20 @@ class ClearAlarmRequest(ModbusPDU):
         pass
 
 
+class SaveParamsRequest(ModbusPDU):
+    """ Custom request for Modbus function 0x41 (write parameters to EEPROM). """
+    function_code = 0x41
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def encode(self):
+        return b''
+
+    def decode(self, data):
+        pass
+
+
 class ServoCommunicator:
     def __init__(self, port='/dev/ttyS0', baudrate=9600, slave_id=1, invert_direction=False):
         self.client = ModbusSerialClient(
@@ -55,6 +70,10 @@ class ServoCommunicator:
         # and the gpiozero callback threads all share this client.
         self._lock = threading.Lock()
         self._cache = {'ok': False, 'torque': None, 'alarm': None, 'rpm': None}
+        # drive parameter table access (Pr number == Modbus address)
+        self.params = {}
+        self.last_write = None      # (addr, value, ok, time)
+        self.last_save = None       # (ok, time)
         self._poll_thread = None
         self._poll_stop = threading.Event()
 
@@ -128,9 +147,17 @@ class ServoCommunicator:
                 else:
                     reason = str(response)
                     self._cache = {'ok': False, 'torque': None, 'alarm': None, 'rpm': None}
+        # drive parameter table access (Pr number == Modbus address)
+        self.params = {}
+        self.last_write = None      # (addr, value, ok, time)
+        self.last_save = None       # (ok, time)
             except Exception as exc:
                 reason = str(exc)
                 self._cache = {'ok': False, 'torque': None, 'alarm': None, 'rpm': None}
+        # drive parameter table access (Pr number == Modbus address)
+        self.params = {}
+        self.last_write = None      # (addr, value, ok, time)
+        self.last_save = None       # (ok, time)
             ok = self._cache['ok']
             if ok != last_ok:
                 if ok:
@@ -202,6 +229,44 @@ class ServoCommunicator:
         if speed < 0:
             speed = self.neg_speed(speed)
         self._write(0x0089, speed)
+
+    # ---------------- drive parameters (03H read / 06H write / 41H save) ----------------
+
+    def request_params(self, addr, count):
+        try:
+            with self._lock:
+                rr = self.client.read_holding_registers(addr, count=count, device_id=self.slave_id)
+            if rr.isError():
+                return False
+            for i, v in enumerate(rr.registers):
+                self.params[addr + i] = v - 65536 if v > 32767 else v
+            return True
+        except Exception as exc:
+            log.error('read params Pr%03d x%d FAILED: %s', addr, count, exc)
+            return False
+
+    def write_param(self, addr, value):
+        if self.servostate == 'enabled':
+            log.warning('write_param Pr%03d refused: drive enabled', addr)
+            ok = False
+        else:
+            ok = self._write(addr, int(value) & 0xFFFF)
+        self.last_write = (addr, int(value), ok, time.time())
+        if ok:
+            self.params[addr] = int(value)
+        return ok
+
+    def save_params(self):
+        log.info('save parameters to EEPROM (function 0x41)')
+        try:
+            with self._lock:
+                self.client.execute(True, SaveParamsRequest(dev_id=self.slave_id))
+            ok = True
+        except ModbusException as exc:
+            log.error('save_params FAILED: %s', exc)
+            ok = False
+        self.last_save = (ok, time.time())
+        return ok
 
     def clear_alarm(self):
         #Sends a custom Modbus command 0x43 to clear alarms on the servo drive.

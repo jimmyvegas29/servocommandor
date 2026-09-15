@@ -213,7 +213,7 @@ def after_alarm(dt):
     app.open_settings()
     ov = app._settings_overlay
     check('settings opens on display page', ov.page, 'display')
-    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'dro', 'system'])
+    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'drive', 'dro', 'system'])
     ov.select('system')
     check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
     check('display button inactive', ov._buttons['display'].active, False)
@@ -273,7 +273,8 @@ def after_alarm(dt):
     page = app._settings_overlay.ids.content.children[0]
     labels = [r.label for r in page.ids.rows.children]
     check('system rows present', all(l in labels for l in
-          ('Speed mode', 'Ratio', 'Max motor rpm', 'Build')), True)
+          ('Speed mode', 'Orientation', 'Build')), True)
+    check('drive rows moved off system', any(l in labels for l in ('Ratio', 'Drive')), False)
     ini_path = os.path.join(ROOT, 'servo.ini')
     ini_before = open(ini_path, encoding='utf-8').read()
     old_ratio = app.ratio
@@ -298,8 +299,8 @@ def after_ratio(ini_path, ini_before, old_ratio):
     cal.accept()
     check('ratio applied', app.ratio, want)
     check('readout uses new ratio', app.rpm_str, str(round(app.current_speed / want)).zfill(4))
-    check('cal closed, system page reopened',
-          (app._ratio_cal, app._settings_overlay.page), (None, 'system'))
+    check('cal closed, drive page reopened',
+          (app._ratio_cal, app._settings_overlay.page), (None, 'drive'))
     ini_after = open(ini_path, encoding='utf-8').read()
     check('ini ratio line rewritten', 'ratio=%s\n' % app.fmt_ratio(want) in ini_after.replace('\r\n', '\n'), True)
     check('ini comments intact', ini_after.count('#'), ini_before.count('#'))
@@ -307,6 +308,49 @@ def after_ratio(ini_path, ini_before, old_ratio):
     app.apply_ratio(old_ratio)
     check('ratio restored', open(ini_path, encoding='utf-8').read() == ini_before, True)
     app.toggle_enable()
+    app.close_settings()
+
+    # drive page: parameters read from the (mock) drive, edited, saved
+    app.open_settings('drive')
+    page = app._settings_overlay.ids.content.children[0]
+    page.refresh()
+    rows = dict((r.key, r) for r in page.ids.params.children)
+    check('drive page rows', sorted(rows), sorted(d['key'] for d in m.DRIVE_PARAMS))
+    check('torque limit read', rows['torque_limit'].value, '300 %')
+    check('overload level read', rows['overload_level'].value, '140 %')
+    check('drive info rows', [r.label for r in page.ids.info.children][::-1][:2], ['Drive', 'Ratio'])
+    check('edit allowed while disabled', (app.drive_edit_ok, page.status), (True, 'Values live from the drive'))
+    app.open_param_edit('overload_level')
+    ed = app._param_edit
+    check('editor shows current', (ed.title, ed.current), ('Overload level', '140 %'))
+    for ch in '350':
+        ed.add_digit(ch)
+    check('editor flags out of range', ed.over, True)
+    ed.accept()
+    check('out of range not written', app.servo.params[70], 140)
+    ed.clear()
+    for ch in '200':
+        ed.add_digit(ch)
+    ed.accept()
+    check('overload level written both signs', (app.servo.params[70], app.servo.params[71]), (200, -200))
+    check('editor closed, page dirty', (app._param_edit, app.drive_dirty), (None, True))
+    page.refresh()
+    check('row shows new value', rows['overload_level'].value, '200 %')
+    check('status says save', page.status.startswith('Changed'), True)
+    app.toggle_enable()
+    page.refresh()
+    check('no edit while enabled', (app.drive_edit_ok, page.status), (False, 'Disable the servo to change parameters'))
+    check('write refused while enabled', app.apply_drive_param('overload_level', 150), False)
+    app.toggle_enable()
+    page.refresh()
+    app.save_drive_params()
+    check('saving state', (app.drive_save_state, app.drive_edit_ok), ('saving', False))
+    app._save_done(0)
+    page.refresh()
+    check('saved to eeprom', (app.drive_save_state, app.drive_dirty, app.servo.saved_params[70]), ('saved', False, 200))
+    app.apply_drive_param('overload_level', 140)
+    app.servo.saved_params[70], app.servo.saved_params[71] = 140, -140
+    app.drive_dirty = False
     app.close_settings()
 
     # overlays swallow touches: tapping where the gear sits while SET is

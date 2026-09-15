@@ -22,6 +22,15 @@ BLE service 5e7a0001-... :
                        b4 control allowed, b5 last command ok
   CMD   write   b'E' enable, b'D' disable, b'C' clear alarm,
                 b'S' + int16 LE signed speed (drive units, +/-3000)
+                b'R' + uint16 LE addr + uint8 count: read drive parameters
+                      (03H), answered on the CMD notify as
+                      ok, b'R', addr, count, count x uint16 LE
+                b'W' + uint16 LE addr + int16 LE value: write one parameter
+                      (06H); only the PARAM_WRITABLE set, only while disabled
+                b'V' save parameters to EEPROM (41H); the drive poll pauses
+                      for 5 s afterwards while the drive is busy
+        every command is acknowledged on the CMD notify: ok byte, cmd byte,
+        then any payload
   PING  write/notify echo, for round-trip timing
 
 Pins: X A/B = GP6/GP7, Z A/B = GP2/GP3, MAX485 DI = GP0, RO = GP1,
@@ -129,6 +138,27 @@ def read_input_regs(addr, count):
     return struct.unpack('>%dH' % count, resp[2:2 + 2 * count])
 
 
+# drive parameters the panel may change (Pr number == Modbus address)
+PARAM_WRITABLE = (60, 61, 63, 65, 66, 67, 68, 69, 70, 71, 72, 75)
+SAVE_BUSY_MS = 5000          # manual: wait 5 s after 41H
+
+
+def read_holding_regs(addr, count):
+    pdu = struct.pack('>BHH', 0x03, addr, count)
+    resp = modbus_txn(pdu, 5 + 2 * count)
+    if resp is None or resp[0] != 0x03 or resp[1] != 2 * count:
+        return None
+    return struct.unpack('>%dH' % count, resp[2:2 + 2 * count])
+
+
+def save_params():
+    """41H: write the parameter table to EEPROM."""
+    if not CONTROL_ALLOWED:
+        return False
+    resp = modbus_txn(bytes([0x41]), 4, timeout_ms=400)
+    return resp is not None
+
+
 def write_reg(addr, value):
     if not CONTROL_ALLOWED:
         return False
@@ -148,6 +178,7 @@ def clear_alarm():
 state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0,
          'switch': 'neutral', 'enabled': False, 'cmd_ok': True, 'last_speed': 0,
          'armed': False,          # switch interlock: must pass through neutral first
+         'save_until': None,      # ticks_ms until which the drive is busy saving
          'linked': False,         # a panel is connected over BLE
          'boot_disable': False}   # drive was told 'disable' once after coming online
 
@@ -174,8 +205,34 @@ def apply_speed(speed):
 
 
 def handle_cmd(data):
+    """Execute one panel command; returns the ack payload."""
     ok = False
-    if data[:1] == b'E':
+    payload = b''
+    if data[:1] == b'R' and len(data) >= 4:
+        addr, count = struct.unpack('<HB', data[1:4])
+        count = max(1, min(8, count))
+        vals = read_holding_regs(addr, count) if addr + count <= 250 else None
+        ok = vals is not None
+        payload = struct.pack('<HB', addr, count)
+        if ok:
+            payload += struct.pack('<%dH' % count, *vals)
+    elif data[:1] == b'W' and len(data) >= 5:
+        addr, value = struct.unpack('<Hh', data[1:5])
+        payload = struct.pack('<Hh', addr, value)
+        if addr not in PARAM_WRITABLE:
+            print('CMD W refused: Pr%03d not writable from the panel' % addr)
+        elif state['enabled']:
+            print('CMD W refused: drive enabled')
+        else:
+            ok = write_reg(addr, value)
+    elif data[:1] == b'V':
+        if state['enabled']:
+            print('CMD V refused: drive enabled')
+        else:
+            ok = save_params()
+            if ok:
+                state['save_until'] = time.ticks_add(time.ticks_ms(), SAVE_BUSY_MS)
+    elif data[:1] == b'E':
         # the setpoint is re-written first so the drive can only ever enable
         # at the speed the panel last asked for
         ok = apply_speed(state['last_speed']) and write_reg(0x0062, 1)
@@ -191,12 +248,18 @@ def handle_cmd(data):
         speed = max(-3000, min(3000, speed))
         ok = apply_speed(speed)
     state['cmd_ok'] = ok
-    print('CMD', data, 'ok' if ok else 'refused/failed')
+    print('CMD', data[:1], 'ok' if ok else 'refused/failed')
+    return payload
 
 
 async def drive_poller():
     last_online = None
     while True:
+        if state['save_until'] is not None:
+            if time.ticks_diff(state['save_until'], time.ticks_ms()) > 0:
+                await asyncio.sleep_ms(POLL_MS)      # drive busy writing EEPROM
+                continue
+            state['save_until'] = None
         regs = read_input_regs(0x0009, 19)
         if regs is None:
             state['online'] = False
@@ -325,9 +388,10 @@ async def pinger():
 async def commander():
     while True:
         conn, data = await cmd_char.written()
-        handle_cmd(bytes(data))
+        payload = handle_cmd(bytes(data))
         try:
-            cmd_char.write(bytes([1 if state['cmd_ok'] else 0]) + bytes(data[:1]), send_update=True)
+            cmd_char.write(bytes([1 if state['cmd_ok'] else 0]) + bytes(data[:1]) + payload,
+                           send_update=True)
         except Exception:
             pass
 

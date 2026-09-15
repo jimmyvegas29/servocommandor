@@ -104,6 +104,23 @@ def s_settings_conn():
     app._settings_overlay.select('connection')
 
 
+def s_settings_drive():
+    app.set_enabled(False)
+    app._settings_overlay.select('drive')
+    app._settings_overlay.ids.content.children[0].refresh()
+
+
+def s_param_edit():
+    app.open_param_edit('overload_level')
+    for ch in '200':
+        app._param_edit.add_digit(ch)
+
+
+def s_param_dirty():
+    app._param_edit.accept()
+    app._settings_overlay.ids.content.children[0].refresh()
+
+
 def s_ratio_prep():
     app.close_settings()
     app.set_speed(1000)
@@ -112,7 +129,7 @@ def s_ratio_prep():
 
 def s_ratio_cal():
     print('RATIO_CAL state:', app.servo_state, app.current_speed, app.command_speed, app.offline_flag)
-    app.open_settings('system')
+    app.open_settings('drive')
     app.open_ratio_cal()
     for ch in '965':
         app._ratio_cal.add_digit(ch)
@@ -165,6 +182,9 @@ plan = [
     (0.2, s_settings_system), (0.4, lambda: cap('settings_system')),
     (0.2, s_settings_dro), (0.4, lambda: cap('settings_dro')),
     (0.2, s_settings_conn), (0.4, lambda: cap('settings_connection')),
+    (0.2, s_settings_drive), (0.6, lambda: cap('settings_drive')),
+    (0.2, s_param_edit), (0.4, lambda: cap('param_edit')),
+    (0.2, s_param_dirty), (0.6, lambda: cap('settings_drive_dirty')),
     (0.2, s_ratio_prep), (1.6, s_ratio_cal), (1.2, lambda: cap('ratio_cal')),
     (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
     (0.2, s_landscape), (1.0, lambda: cap('landscape')),
