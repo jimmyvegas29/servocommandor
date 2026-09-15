@@ -109,6 +109,8 @@ class DroBle:
         self.ota_progress = 0.0
         self.ota_error = ''
         self._ota_ack = None            # (ok, got) from the last 'G' ack
+        self.last_raw = None            # (ok, response pdu, time) from the last 'X' ack
+        self._raw_event = threading.Event()
         self._ota_event = None
         self.last_ack = None
         self.acks = 0
@@ -299,6 +301,10 @@ class DroBle:
             elif cmd == b'I' and ok:
                 self.node_version = data[2:].decode('utf-8', 'replace')
                 log.info('node firmware: %s', self.node_version)
+            elif cmd == b'X':
+                self.last_raw = (ok, data[2:], time.time())
+                if self._raw_event is not None:
+                    self._raw_event.set()
             elif cmd in (b'F', b'G'):
                 got = struct.unpack('<I', data[2:6])[0] if len(data) >= 6 else 0
                 self._ota_ack = (ok, cmd, got)
@@ -306,6 +312,19 @@ class DroBle:
                     self._ota_event.set()
         except struct.error:
             pass
+
+    # ---- diagnostics: raw Modbus PDU through the node ------------------------
+    def raw_modbus(self, pdu, timeout=3.0):
+        """Send function byte + data to the drive via the node; returns the
+        response PDU bytes, or None.  Blocks the calling (non-BLE) thread."""
+        self._raw_event.clear()
+        self.last_raw = None
+        if not self.send_cmd(b'X' + bytes(pdu)):
+            return None
+        if not self._raw_event.wait(timeout):
+            return None
+        ok, resp, _t = self.last_raw
+        return resp if ok else None
 
     # ---- over-the-air firmware update -------------------------------------
     def ota_send(self, path):

@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.6'         # shown on the panel; bump on every change
+VERSION = 'node 3.7'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -305,8 +305,23 @@ def handle_cmd(data):
                 ok = False
                 ota_abort()
         payload = struct.pack('<I', ota['got'])
+    elif data[:1] == b'X' and len(data) >= 2:
+        # diagnostics: raw Modbus PDU passthrough (function byte + data), only
+        # while the drive is disabled and never for the enable / speed
+        # registers.  Ack payload = the raw response PDU (or empty).
+        pdu = data[1:]
+        fn = pdu[0]
+        target = struct.unpack('>H', pdu[1:3])[0] if len(pdu) >= 3 else None
+        if state['enabled']:
+            print('CMD X refused: drive enabled')
+        elif fn in (0x06, 0x10) and target in (0x0062, 0x0089):
+            print('CMD X refused: enable/speed register')
+        else:
+            resp = modbus_txn(pdu, 4, timeout_ms=600)
+            ok = resp is not None
+            payload = bytes(resp) if ok else b''
+            print('CMD X', pdu, '->', resp)
     elif data[:1] == b'R' and len(data) >= 4:
-        addr, count = struct.unpack('<HB', data[1:4])
         count = max(1, min(8, count))
         vals = read_holding_regs(addr, count) if addr + count <= 250 else None
         ok = vals is not None
