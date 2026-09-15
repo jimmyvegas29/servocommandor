@@ -98,6 +98,12 @@ class DroBle:
         self.params_ts = 0.0
         self.last_write = None          # (addr, value, ok, time)
         self.last_save = None           # (ok, time)
+        self.node_version = ''          # from the 'I' ack
+        self.ota_state = 'idle'         # idle / sending / verifying / done / failed
+        self.ota_progress = 0.0
+        self.ota_error = ''
+        self._ota_ack = None            # (ok, got) from the last 'G' ack
+        self._ota_event = None
         self.last_ack = None
         self.acks = 0
         self.cmds_sent = 0
@@ -189,6 +195,10 @@ class DroBle:
                         await client.start_notify(CMD_UUID, on_ack)
                         self.is_node = True
                         log.info('DRO BLE: machine node (command characteristic present)')
+                        try:
+                            await client.write_gatt_char(CMD_UUID, b'I', response=False)
+                        except Exception:
+                            pass
                     except Exception:
                         pass          # plain DRO tap: no CMD characteristic
                     await self._tune_interval(target)
@@ -280,8 +290,74 @@ class DroBle:
             elif cmd == b'V':
                 self.last_save = (ok, time.time())
                 log.info('node save to EEPROM -> %s', 'ok' if ok else 'REFUSED')
+            elif cmd == b'I' and ok:
+                self.node_version = data[2:].decode('utf-8', 'replace')
+                log.info('node firmware: %s', self.node_version)
+            elif cmd in (b'F', b'G'):
+                got = struct.unpack('<I', data[2:6])[0] if len(data) >= 6 else 0
+                self._ota_ack = (ok, cmd, got)
+                if self._ota_event is not None:
+                    self._ota_event.set()
         except struct.error:
             pass
+
+    # ---- over-the-air firmware update -------------------------------------
+    def ota_send(self, path):
+        """Push a new node.py to the node (runs on the BLE loop).  Progress
+        in ota_state / ota_progress; the node verifies the crc and resets."""
+        if self._client is None or not self.connected or self._loop is None:
+            return False
+        if self.ota_state == 'sending':
+            return False
+        self.ota_state = 'sending'
+        self.ota_progress = 0.0
+        self.ota_error = ''
+        asyncio.run_coroutine_threadsafe(self._ota(path), self._loop)
+        return True
+
+    async def _wait_ota_ack(self, want, timeout):
+        try:
+            await asyncio.wait_for(self._ota_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        self._ota_event.clear()
+        ack = self._ota_ack
+        return ack if ack and ack[1] == want else None
+
+    async def _ota(self, path):
+        import zlib
+        try:
+            with open(path, 'rb') as fh:
+                blob = fh.read()
+            crc = zlib.crc32(blob) & 0xFFFFFFFF
+            self._ota_event = asyncio.Event()
+            client = self._client
+            mtu = getattr(client, 'mtu_size', 23) or 23
+            chunk = max(16, min(mtu - 4, 200))
+            log.info('node OTA: %s, %d bytes, crc %08x, chunk %d', path, len(blob), crc, chunk)
+            self._ota_event.clear()
+            await client.write_gatt_char(CMD_UUID, b'F' + struct.pack('<II', len(blob), crc), response=True)
+            ack = await self._wait_ota_ack(b'F', 3.0)
+            if not ack or not ack[0]:
+                raise RuntimeError('node refused the update start')
+            sent = 0
+            while sent < len(blob):
+                piece = blob[sent:sent + chunk]
+                await client.write_gatt_char(CMD_UUID, b'f' + piece, response=True)
+                sent += len(piece)
+                self.ota_progress = sent / float(len(blob))
+            self.ota_state = 'verifying'
+            self._ota_event.clear()
+            await client.write_gatt_char(CMD_UUID, b'G', response=True)
+            ack = await self._wait_ota_ack(b'G', 8.0)
+            if not ack or not ack[0]:
+                raise RuntimeError('node rejected the image (size/crc mismatch or drive enabled)')
+            self.ota_state = 'done'
+            log.info('node OTA: image accepted, node is resetting')
+        except Exception as exc:
+            self.ota_state = 'failed'
+            self.ota_error = str(exc)
+            log.error('node OTA failed: %s', exc)
 
     def send_cmd(self, data):
         """Fire-and-forget command to the node (b'E', b'D', b'C', b'S'+int16).

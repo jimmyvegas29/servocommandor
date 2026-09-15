@@ -1725,6 +1725,18 @@
                 disabled: app.dro_link != 'ble'
                 corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
                 on_press: app.set_drive_link('node')
+    SettingCard:
+        SettingHead:
+            label: 'Node firmware'
+            hint: 'Node: ' + (app.node_version if app.node_version else 'unknown') + '    Panel has: ' + app.node_fw_available
+        BoxLayout:
+            spacing: 6
+            SetKey:
+                text: app.ota_text
+                font_size: '14sp'
+                color: (0.4, 0.85, 0.5, 1) if app.ota_ready else (0.45, 0.45, 0.45, 1)
+                disabled: not app.ota_ready
+                on_press: app.update_node()
     SLabel:
         text: 'Scales: ' + app.dro_status
         font_size: '12sp'

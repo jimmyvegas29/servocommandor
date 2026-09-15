@@ -29,23 +29,40 @@ BLE service 5e7a0001-... :
                       (06H); only the PARAM_WRITABLE set, only while disabled
                 b'V' save parameters to EEPROM (41H); the drive poll pauses
                       for 5 s afterwards while the drive is busy
+                b'I' info: ack payload is the firmware VERSION string
+                b'F' + uint32 LE size + uint32 LE crc32: begin a firmware
+                      update (the new node.py), b'f' + bytes: append a chunk,
+                      b'G' finish: verify, stage as node_new.py and reset;
+                      main.py (the launcher, never updated over the air)
+                      swaps it in and rolls back if it does not confirm
         every command is acknowledged on the CMD notify: ok byte, cmd byte,
         then any payload
+
+First-connect lock: the first panel that connects is remembered in
+panel.lock and any other central is dropped at once.  To forget the panel,
+power the node on with the lever in REV.
   PING  write/notify echo, for round-trip timing
 
 Pins: X A/B = GP6/GP7, Z A/B = GP2/GP3, MAX485 DI = GP0, RO = GP1,
 DE+RE = GP4, switch COM = GND (pin 13), lever FWD on GP10 (pin 14), REV on GP11 (pin 15).
 """
+import os
 import struct
 import time
+import binascii
 import asyncio
 import bluetooth
 import aioble
-from machine import Pin, UART, WDT, unique_id
+from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
+VERSION = 'node 3.2'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
+LOCK_FILE = 'panel.lock'
+TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
+OTA_TMP = 'node_new.tmp'
+OTA_NEW = 'node_new.py'
 INVERT_DIRECTION = True      # same as servo.ini [Hardware] invert_direction
 SLAVE_ID = 1
 BAUD = 9600
@@ -72,6 +89,28 @@ enc_z = Encoder(1, Pin(Z_BASE))
 # ---------------------------------------------------------------- switch
 pin_fwd = Pin(PIN_FWD, Pin.IN, Pin.PULL_UP)
 pin_rev = Pin(PIN_REV, Pin.IN, Pin.PULL_UP)
+
+
+def file_exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def read_lock():
+    try:
+        with open(LOCK_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return None
+
+
+# lever held in REV at power-on: forget the locked panel
+if not pin_rev.value() and pin_fwd.value() and file_exists(LOCK_FILE):
+    os.remove(LOCK_FILE)
+    print('LOCK cleared (lever in REV at boot)')
 
 
 def read_switch():
@@ -204,11 +243,66 @@ def apply_speed(speed):
     return write_reg(0x0089, wire)
 
 
+ota = {'fh': None, 'size': 0, 'crc': 0, 'got': 0, 'reset_at': None}
+
+
+def ota_abort():
+    if ota['fh'] is not None:
+        try:
+            ota['fh'].close()
+        except Exception:
+            pass
+        ota['fh'] = None
+    if file_exists(OTA_TMP):
+        os.remove(OTA_TMP)
+
+
 def handle_cmd(data):
     """Execute one panel command; returns the ack payload."""
     ok = False
     payload = b''
-    if data[:1] == b'R' and len(data) >= 4:
+    if data[:1] == b'I':
+        ok = True
+        payload = VERSION.encode()
+    elif data[:1] == b'F' and len(data) >= 9:
+        ota_abort()
+        ota['size'], ota['crc'] = struct.unpack('<II', data[1:9])
+        ota['got'] = 0
+        try:
+            ota['fh'] = open(OTA_TMP, 'wb')
+            ok = True
+        except OSError as exc:
+            print('OTA open failed', exc)
+        print('OTA begin', ota['size'], 'bytes')
+    elif data[:1] == b'f':
+        if ota['fh'] is not None:
+            ota['fh'].write(data[1:])
+            ota['got'] += len(data) - 1
+            ok = True
+        payload = struct.pack('<I', ota['got'])
+    elif data[:1] == b'G':
+        if ota['fh'] is not None:
+            ota['fh'].close()
+            ota['fh'] = None
+            crc = 0
+            with open(OTA_TMP, 'rb') as fh:
+                while True:
+                    chunk = fh.read(512)
+                    if not chunk:
+                        break
+                    crc = binascii.crc32(chunk, crc)
+            ok = ota['got'] == ota['size'] and (crc & 0xFFFFFFFF) == ota['crc']
+            if ok and not state['enabled']:
+                os.rename(OTA_TMP, OTA_NEW)
+                ota['reset_at'] = time.ticks_add(time.ticks_ms(), 1500)
+                print('OTA verified, resetting to install')
+            else:
+                print('OTA rejected: got %d/%d crc %08x/%08x enabled=%s' % (
+                    ota['got'], ota['size'], crc & 0xFFFFFFFF, ota['crc'], state['enabled']))
+                ok = False
+                ota_abort()
+        payload = struct.pack('<I', ota['got'])
+    elif data[:1] == b'R' and len(data) >= 4:
         addr, count = struct.unpack('<HB', data[1:4])
         count = max(1, min(8, count))
         vals = read_holding_regs(addr, count) if addr + count <= 250 else None
@@ -364,6 +458,16 @@ async def peripheral():
         led.off()
         async with await aioble.advertise(ADV_INTERVAL_US, name=NAME,
                                           services=[SERVICE_UUID]) as conn:
+            addr = ':'.join('%02X' % b for b in conn.device.addr)
+            lock = read_lock()
+            if lock is None:
+                with open(LOCK_FILE, 'w') as fh:
+                    fh.write(addr)
+                print('LOCK set to first panel', addr)
+            elif lock != addr:
+                print('LOCK refused', addr, '(panel is', lock + ')')
+                await conn.disconnect()
+                continue
             print('BLE connected', conn.device)
             led.on()
             state['linked'] = True
@@ -400,13 +504,34 @@ async def watchdog():
     wdt = WDT(timeout=8000)
     while True:
         wdt.feed()
+        if ota['reset_at'] is not None and time.ticks_diff(ota['reset_at'], time.ticks_ms()) <= 0:
+            print('OTA reset')
+            time.sleep_ms(100)
+            reset()
         await asyncio.sleep_ms(1000)
 
 
+async def trial_confirm():
+    """First boot of a freshly installed image: after 30 s with the drive
+    polled and a panel linked, tell the launcher this image is good."""
+    if not file_exists(TRIAL_FLAG):
+        return
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < 30000:
+        await asyncio.sleep_ms(1000)
+    if state['online'] and state['linked']:
+        os.remove(TRIAL_FLAG)
+        print('TRIAL confirmed', VERSION)
+    else:
+        print('TRIAL not confirmed (online=%s linked=%s), launcher will roll back on next boot'
+              % (state['online'], state['linked']))
+
+
 async def main():
-    print('machine node firmware v3 as', NAME, '| control', 'ALLOWED' if CONTROL_ALLOWED else 'READ-ONLY')
+    print('machine node firmware', VERSION, 'as', NAME, '| control',
+          'ALLOWED' if CONTROL_ALLOWED else 'READ-ONLY', '| panel lock', read_lock() or 'open')
     await asyncio.gather(sampler(), peripheral(), pinger(), commander(),
-                         drive_poller(), switch_task(), watchdog())
+                         drive_poller(), switch_task(), watchdog(), trial_confirm())
 
 
 asyncio.run(main())

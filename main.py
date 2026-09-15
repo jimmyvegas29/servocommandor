@@ -674,6 +674,10 @@ class ServoCommanderApp(App):
     ble_scanning = BooleanProperty(False)
     drive_link = StringProperty('hat')
     node_control = BooleanProperty(False)     # node firmware allows commands
+    node_version = StringProperty('')         # firmware version the node reports
+    node_fw_available = StringProperty('')    # version of firmware/main_node.py on this panel
+    ota_text = StringProperty('UPDATE NODE')
+    ota_ready = BooleanProperty(False)
     drive_dirty = BooleanProperty(False)      # parameter written to the drive, not yet saved to EEPROM
     drive_save_state = StringProperty('')     # '', 'saving', 'saved', 'failed'
     drive_edit_ok = BooleanProperty(False)    # Drive page: EDIT buttons live
@@ -894,6 +898,7 @@ class ServoCommanderApp(App):
         self.ble_address = str(self.settings['ble_address'] or '')
         self.ble_name = str(self.settings['ble_name'] or '')
         self.drive_link = 'node' if self.settings['drive_link'] == 'node' else 'hat'
+        self.node_fw_available = self._panel_fw_version()
 
     def _save_settings(self):
         self.settings.update({'orientation': self.orientation,
@@ -982,6 +987,48 @@ class ServoCommanderApp(App):
                  ('Throttling', self._throttle_state()),
                  ('Build', self.build_id)]
         return rows
+
+    # ---- node firmware over the air ------------------------------------
+    @staticmethod
+    def _panel_fw_version():
+        try:
+            with open(os.path.join(HERE, 'firmware', 'main_node.py'), encoding='utf-8') as fh:
+                m = re.search(r"^VERSION = '([^']+)'", fh.read(), re.M)
+            return m.group(1) if m else ''
+        except OSError:
+            return ''
+
+    def _update_ota_button(self, linked):
+        st = self.dro.ota_state
+        if st == 'sending':
+            text, ready = 'SENDING %d%%' % int(self.dro.ota_progress * 100), False
+        elif st == 'verifying':
+            text, ready = 'VERIFYING...', False
+        elif st == 'done' and self.node_version != self.node_fw_available:
+            text, ready = 'NODE RESTARTING...', False
+        elif st == 'failed':
+            text, ready = 'FAILED - RETRY', linked and self.servo_state != 'enabled'
+        elif not linked:
+            text, ready = 'NODE NOT LINKED', False
+        elif not self.node_version:
+            text, ready = 'NODE TOO OLD FOR OTA', False
+        elif self.node_version == self.node_fw_available:
+            text, ready = 'NODE UP TO DATE', False
+        elif self.servo_state == 'enabled':
+            text, ready = 'DISABLE SERVO FIRST', False
+        else:
+            text, ready = 'UPDATE NODE', True
+        if text != self.ota_text:
+            self.ota_text = text
+        if ready != self.ota_ready:
+            self.ota_ready = ready
+
+    def update_node(self):
+        if not isinstance(self.dro, DroBle) or not self.ota_ready:
+            return
+        path = os.path.join(HERE, 'firmware', 'main_node.py')
+        log.info('Node OTA requested: %s -> node', self.node_fw_available)
+        self.dro.ota_send(path)
 
     def drive_rows(self):
         cfg = self.config
@@ -1434,6 +1481,10 @@ class ServoCommanderApp(App):
             self._node_linked = linked
             if linked and self.node_control:
                 self._push_speed('node link up')
+        if isinstance(self.dro, DroBle):
+            if self.dro.node_version != self.node_version:
+                self.node_version = self.dro.node_version
+            self._update_ota_button(linked)
         if stale != self.dro_stale:
             self.dro_stale = stale
             log.info('DRO feed %s', 'STALE' if stale else 'live')
