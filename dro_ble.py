@@ -110,6 +110,7 @@ class DroBle:
         self.ota_error = ''
         self._ota_ack = None            # (ok, got) from the last 'G' ack
         self.last_raw = None            # (ok, response pdu, time) from the last 'X' ack
+        self.last_raw_ms = None         # drive response time of the last raw command, ms
         self._raw_event = threading.Event()
         self._ota_event = None
         self.last_ack = None
@@ -324,6 +325,9 @@ class DroBle:
         if not self._raw_event.wait(timeout):
             return None
         ok, resp, _t = self.last_raw
+        if len(resp) >= 2:                      # node 3.10+: response time first
+            self.last_raw_ms = struct.unpack('<H', resp[:2])[0] / 10.0
+            resp = resp[2:]
         return resp if ok else None
 
     def _ask(self, data, timeout=3.0):

@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.9'         # shown on the panel; bump on every change
+VERSION = 'node 3.10'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -334,10 +334,16 @@ def handle_cmd(data):
         elif fn in (0x06, 0x10) and target in (0x0062, 0x0089):
             print('CMD X refused: enable/speed register')
         else:
+            t0 = time.ticks_us()
             resp = modbus_txn(pdu, 4, timeout_ms=600)
+            dt_us = time.ticks_diff(time.ticks_us(), t0)
             ok = resp is not None
-            payload = bytes(resp) if ok else b''
-            print('CMD X', pdu, '->', resp)
+            # ack payload: uint16 LE response time in 0.1 ms, then the response PDU
+            payload = struct.pack('<H', min(65535, dt_us // 100)) + (bytes(resp) if ok else b'')
+            if fn == 0x41:
+                # give the drive total bus silence after a save request
+                state['save_until'] = time.ticks_add(time.ticks_ms(), 10000)
+            print('CMD X', pdu, '->', resp, dt_us, 'us')
     elif data[:1] == b'R' and len(data) >= 4:
         addr, count = struct.unpack('<HB', data[1:4])
         count = max(1, min(8, count))
