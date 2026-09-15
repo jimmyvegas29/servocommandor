@@ -707,6 +707,7 @@ class ServoCommanderApp(App):
         self._unzero = {}
         self.command_speed = 0      # motor rpm currently commanded
         self._gui_cmd_until = 0.0   # ignore the node's enable bit briefly after a GUI command
+        self._offline_polls = 0     # consecutive polls with no drive data
         self._node_linked = False   # BLE link to the machine node seen up
         self.current_speed = 0      # motor rpm reported by the drive
         self.current_torque = 0
@@ -1075,12 +1076,12 @@ class ServoCommanderApp(App):
             return 'Saving to EEPROM, drive busy for 5 s...'
         if self.servo_state == 'enabled':
             return 'Disable the servo to change parameters'
+        if self.drive_save_state == 'failed':
+            return 'Save FAILED - the drive did not answer 41H, try again'
         if self.drive_dirty:
             return 'Changed - SAVE to keep it after power off'
         if self.drive_save_state == 'saved':
             return 'Saved to EEPROM'
-        if self.drive_save_state == 'failed':
-            return 'Save FAILED - the drive refused 41H'
         return 'Values live from the drive'
 
     def request_drive_params(self):
@@ -1817,12 +1818,16 @@ class ServoCommanderApp(App):
 
         result = self.servo.get_rpm()
         if result is None:
-            if not self.offline_flag:
+            # three misses in a row (0.75 s) before the popup: one lost poll
+            # on the RS-485 must not flash the overlay mid-cut
+            self._offline_polls += 1
+            if not self.offline_flag and self._offline_polls >= 3:
                 self.offline_flag = True
                 self.offline_dismissed = False
                 self._show('_offline', OfflineOverlay())
                 log.warning('Offline overlay shown')
             return
+        self._offline_polls = 0
         if self.offline_flag:
             self._hide('_offline')
             self.offline_flag = False

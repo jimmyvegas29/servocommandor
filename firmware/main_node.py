@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.5'         # shown on the panel; bump on every change
+VERSION = 'node 3.6'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -162,7 +162,7 @@ def modbus_txn(pdu, expect_len, timeout_ms=150):
             if len(buf) >= expect_len:
                 break
         time.sleep_ms(2)
-    if len(buf) < 5 or buf[0] != SLAVE_ID:
+    if len(buf) < 4 or buf[0] != SLAVE_ID:      # 41H / 43H answer with 4 bytes
         return None
     if struct.unpack('<H', buf[-2:])[0] != crc16(buf[:-2]):
         return None
@@ -221,7 +221,8 @@ state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0, 'avg_load': 0,
          'armed': False,          # switch interlock: must pass through neutral first
          'save_until': None,      # ticks_ms until which the drive is busy saving
          'linked': False,         # a panel is connected over BLE
-         'boot_disable': False}   # drive was told 'disable' once after coming online
+         'boot_disable': False,   # drive was told 'disable' once after coming online
+         'poll_errors': 0}        # failed drive polls since boot (RS-485 noise indicator)
 
 
 def safe_disable(why, zero_speed=False):
@@ -348,8 +349,14 @@ def handle_cmd(data):
     return payload
 
 
+OFFLINE_AFTER = 5            # consecutive failed polls (x POLL_MS) before 'offline'
+REAPPEAR_MS = 2000           # offline at least this long => treat as a drive power cycle
+
+
 async def drive_poller():
     last_online = None
+    fails = 0
+    offline_since = None
     while True:
         if state['save_until'] is not None:
             if time.ticks_diff(state['save_until'], time.ticks_ms()) > 0:
@@ -358,13 +365,23 @@ async def drive_poller():
             state['save_until'] = None
         regs = read_input_regs(0x0009, 19)
         if regs is None:
-            state['online'] = False
-            state['boot_disable'] = False
+            regs = read_input_regs(0x0009, 19)     # one immediate retry (noise)
+        if regs is None:
+            fails += 1
+            state['poll_errors'] += 1
+            if fails == OFFLINE_AFTER and state['online']:
+                state['online'] = False
+                offline_since = time.ticks_ms()
         else:
-            state['online'] = True
-            if not state['boot_disable']:
-                # drive just (re)appeared: make sure it starts disabled
-                state['boot_disable'] = safe_disable('drive online', zero_speed=True)
+            fails = 0
+            if not state['online']:
+                state['online'] = True
+                gone_ms = time.ticks_diff(time.ticks_ms(), offline_since) if offline_since else 0
+                if not state['boot_disable'] or gone_ms >= REAPPEAR_MS:
+                    # first sight at boot, or the drive was really away (power
+                    # cycle): make sure it starts disabled with setpoint 0.
+                    # A short RS-485 dropout must NOT stop a cut.
+                    state['boot_disable'] = safe_disable('drive online', zero_speed=True)
             state['torque'] = regs[0] - 65536 if regs[0] > 32767 else regs[0]
             state['avg_load'] = regs[15]          # 0x0018 average load ratio %
             state['alarm'] = regs[17]
@@ -444,9 +461,10 @@ async def sampler():
         x, z, t = enc_x.value(), enc_z.value(), time.ticks_ms()
         print('DRO X:%d Z:%d S:%d T:%d' % (x, z, seq, t))
         if seq % 4 == 0:
-            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d pins fwd=%d rev=%d' % (
+            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d pe:%d pins fwd=%d rev=%d' % (
                 state['rpm'], state['torque'], state['alarm'], state['switch'],
-                state['online'], state['enabled'], pin_fwd.value(), pin_rev.value()))
+                state['online'], state['enabled'], state['poll_errors'],
+                pin_fwd.value(), pin_rev.value()))
         try:
             data_char.write(struct.pack('<IiiIhhHBH', seq, x, z, t, state['rpm'],
                                         state['torque'], state['alarm'], flags(),
