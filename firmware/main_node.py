@@ -57,7 +57,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.3'         # shown on the panel; bump on every change
+VERSION = 'node 3.4'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -401,6 +401,10 @@ async def switch_task():
 
 # ---------------------------------------------------------------- BLE
 aioble.config(gap_name=NAME)
+try:
+    bluetooth.BLE().config(mtu=250)      # let the panel use ~240-byte writes for updates
+except Exception as exc:
+    print('MTU config not accepted:', exc)
 svc = aioble.Service(SERVICE_UUID)
 data_char = aioble.Characteristic(svc, DATA_UUID, read=True, notify=True)
 ping_char = aioble.Characteristic(svc, PING_UUID, write=True, write_no_response=True,
@@ -512,19 +516,16 @@ async def watchdog():
 
 
 async def trial_confirm():
-    """First boot of a freshly installed image: after 30 s with the drive
-    polled and a panel linked, tell the launcher this image is good."""
+    """First boot of a freshly installed image: once it has run 30 s and
+    has the drive polled and a panel linked, tell the launcher it is good.
+    Keeps checking, so a panel that links later still confirms it."""
     if not file_exists(TRIAL_FLAG):
         return
-    t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t0) < 30000:
-        await asyncio.sleep_ms(1000)
-    if state['online'] and state['linked']:
-        os.remove(TRIAL_FLAG)
-        print('TRIAL confirmed', VERSION)
-    else:
-        print('TRIAL not confirmed (online=%s linked=%s), launcher will roll back on next boot'
-              % (state['online'], state['linked']))
+    await asyncio.sleep_ms(30000)
+    while not (state['online'] and state['linked']):
+        await asyncio.sleep_ms(2000)
+    os.remove(TRIAL_FLAG)
+    print('TRIAL confirmed', VERSION)
 
 
 async def main():
