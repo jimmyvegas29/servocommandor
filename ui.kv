@@ -1959,6 +1959,7 @@
 <InfoRow@BoxLayout>:
     label: ''
     value: ''
+    value_color: (1, 1, 1, 1)
     size_hint_y: None
     height: 34
     padding: [8, 0]
@@ -1980,6 +1981,7 @@
     SLabel:
         text: root.value
         font_size: '14sp'
+        color: root.value_color
         size_hint_x: 0.52
         text_size: self.size
         halign: 'right'

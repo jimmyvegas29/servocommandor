@@ -102,6 +102,10 @@ class NodeServo:
         s = self._node()
         return s['alarm'] if s is not None and s['online'] else None
 
+    def get_avg_load(self):
+        s = self._node()
+        return s.get('avg_load') if s is not None and s['online'] else None
+
     def get_servo_state(self):
         s = self._node()
         return 'enabled' if (s is not None and s['enabled']) else 'disabled'
@@ -256,6 +260,9 @@ class DrivePage(BoxLayout):
             row.hint = spec['hint']
             self.ids.params.add_widget(row)
             self._rows[spec['key']] = row
+        self._avg_row = Factory.InfoRow()
+        self._avg_row.label = 'Average load (motor heating)'
+        self.ids.info.add_widget(self._avg_row)
         for label, value in app.drive_rows():
             row = Factory.InfoRow()
             row.label = label
@@ -283,6 +290,11 @@ class DrivePage(BoxLayout):
                 row.value = '%d / %d %s' % (v, params.get(spec['mirror']), spec['unit'])
             else:
                 row.value = '%d %s' % (v, spec['unit'])
+        if app.avg_load < 0:
+            self._avg_row.value = '-'
+        else:
+            self._avg_row.value = '%d %%' % app.avg_load
+        self._avg_row.value_color = (0.95, 0.25, 0.2, 1) if app.avg_load > 100 else (1, 1, 1, 1)
         self.can_edit = app.drive_can_edit()
         app.drive_edit_ok = self.can_edit
         self.status = app.drive_status_text()
@@ -681,6 +693,7 @@ class ServoCommanderApp(App):
     drive_dirty = BooleanProperty(False)      # parameter written to the drive, not yet saved to EEPROM
     drive_save_state = StringProperty('')     # '', 'saving', 'saved', 'failed'
     drive_edit_ok = BooleanProperty(False)    # Drive page: EDIT buttons live
+    avg_load = NumericProperty(-1)            # 0x0018 average load ratio %, -1 = unknown
     def __init__(self, **kw):
         super().__init__(**kw)
         self.settings = dict(SETTINGS_DEFAULTS)
@@ -1829,6 +1842,11 @@ class ServoCommanderApp(App):
             ov.set_code(alarm_status)
             self.alarm_flag = True
             log.error('Drive ALARM raised: code %s', alarm_status)
+
+        avg = self.servo.get_avg_load() if hasattr(self.servo, 'get_avg_load') else None
+        avg = -1 if avg is None else int(avg)
+        if avg != self.avg_load:
+            self.avg_load = avg
 
         torque = self.servo.get_torque()
         if isinstance(torque, int):

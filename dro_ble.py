@@ -27,7 +27,9 @@ STALE_S = 0.5
 
 # node packet (firmware v3): seq, x, z, t_ms, rpm_0p1, torque, alarm, flags
 NODE_FMT = '<IiiIhhHB'
-NODE_LEN = struct.calcsize(NODE_FMT)      # 23 bytes
+NODE_LEN = struct.calcsize(NODE_FMT)      # 23 bytes (node <= 3.4)
+NODE_FMT2 = '<IiiIhhHBH'                  # + average load ratio % (node 3.5)
+NODE_LEN2 = struct.calcsize(NODE_FMT2)    # 25 bytes
 F_ONLINE, F_FWD, F_REV, F_ENABLED, F_CONTROL, F_CMD_OK = 1, 2, 4, 8, 16, 32
 
 
@@ -61,10 +63,14 @@ def parse_packet(data):
     if len(data) == 16:
         s, x, z, t = struct.unpack('<IiiI', data)
         return {'s': s, 'x': x, 'z': z, 't': t}
-    if len(data) == NODE_LEN:
-        s, x, z, t, rpm, torque, alarm, flags = struct.unpack(NODE_FMT, data)
+    if len(data) in (NODE_LEN, NODE_LEN2):
+        if len(data) == NODE_LEN2:
+            s, x, z, t, rpm, torque, alarm, flags, avg_load = struct.unpack(NODE_FMT2, data)
+        else:
+            s, x, z, t, rpm, torque, alarm, flags = struct.unpack(NODE_FMT, data)
+            avg_load = None
         return {'s': s, 'x': x, 'z': z, 't': t, 'rpm': rpm, 'torque': torque,
-                'alarm': alarm, 'flags': flags,
+                'alarm': alarm, 'flags': flags, 'avg_load': avg_load,
                 'online': bool(flags & F_ONLINE),
                 'switch': 'fwd' if flags & F_FWD else ('rev' if flags & F_REV else 'neutral'),
                 'enabled': bool(flags & F_ENABLED),

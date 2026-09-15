@@ -143,21 +143,14 @@ class ServoCommunicator:
                 if not response.isError():
                     regs = response.registers
                     self._cache = {'ok': True, 'torque': regs[0],
-                                   'alarm': regs[17], 'rpm': regs[18]}
+                                   'alarm': regs[17], 'rpm': regs[18],
+                                   'avg_load': regs[15]}
                 else:
                     reason = str(response)
                     self._cache = {'ok': False, 'torque': None, 'alarm': None, 'rpm': None}
-        # drive parameter table access (Pr number == Modbus address)
-        self.params = {}
-        self.last_write = None      # (addr, value, ok, time)
-        self.last_save = None       # (ok, time)
             except Exception as exc:
                 reason = str(exc)
                 self._cache = {'ok': False, 'torque': None, 'alarm': None, 'rpm': None}
-        # drive parameter table access (Pr number == Modbus address)
-        self.params = {}
-        self.last_write = None      # (addr, value, ok, time)
-        self.last_save = None       # (ok, time)
             ok = self._cache['ok']
             if ok != last_ok:
                 if ok:
@@ -181,6 +174,10 @@ class ServoCommunicator:
     def get_torque(self):
         cache = self._cache
         return cache['torque'] if cache['ok'] else None
+
+    def get_avg_load(self):
+        """0x0018 average load ratio %, the drive's motor heating model."""
+        return self._cache.get('avg_load') if self._cache['ok'] else None
 
     def get_alarm(self):
         cache = self._cache

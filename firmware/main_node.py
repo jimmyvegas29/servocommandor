@@ -16,7 +16,9 @@ Bluetooth LE (USB serial mirrors everything for bench work):
     spindle until it has been seen in OFF once (boot / after a link loss)
 
 BLE service 5e7a0001-... :
-  DATA  notify  '<IiiIhhHB'  seq, x, z, t_ms, rpm_0p1, torque, alarm, flags
+  DATA  notify  '<IiiIhhHBH' seq, x, z, t_ms, rpm_0p1, torque, alarm, flags,
+                avg_load (0x0018 average load ratio %, the drive's motor
+                heating model)
                 flags: b0 drive online, b1 switch FWD, b2 switch REV,
                        b3 enabled (as this node last commanded),
                        b4 control allowed, b5 last command ok
@@ -57,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 from encoder_rp2 import Encoder
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.4'         # shown on the panel; bump on every change
+VERSION = 'node 3.5'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -214,7 +216,7 @@ def clear_alarm():
 
 
 # ---------------------------------------------------------------- state
-state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0,
+state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0, 'avg_load': 0,
          'switch': 'neutral', 'enabled': False, 'cmd_ok': True, 'last_speed': 0,
          'armed': False,          # switch interlock: must pass through neutral first
          'save_until': None,      # ticks_ms until which the drive is busy saving
@@ -364,6 +366,7 @@ async def drive_poller():
                 # drive just (re)appeared: make sure it starts disabled
                 state['boot_disable'] = safe_disable('drive online', zero_speed=True)
             state['torque'] = regs[0] - 65536 if regs[0] > 32767 else regs[0]
+            state['avg_load'] = regs[15]          # 0x0018 average load ratio %
             state['alarm'] = regs[17]
             state['rpm'] = regs[18] - 65536 if regs[18] > 32767 else regs[18]
         if state['online'] != last_online:
@@ -445,8 +448,9 @@ async def sampler():
                 state['rpm'], state['torque'], state['alarm'], state['switch'],
                 state['online'], state['enabled'], pin_fwd.value(), pin_rev.value()))
         try:
-            data_char.write(struct.pack('<IiiIhhHB', seq, x, z, t, state['rpm'],
-                                        state['torque'], state['alarm'], flags()),
+            data_char.write(struct.pack('<IiiIhhHBH', seq, x, z, t, state['rpm'],
+                                        state['torque'], state['alarm'], flags(),
+                                        state['avg_load'] & 0xFFFF),
                             send_update=True)
         except Exception:
             pass

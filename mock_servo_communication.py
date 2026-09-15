@@ -115,6 +115,15 @@ class ServoCommunicator:
         load = 20 + abs(self._actual) / 100.0 + random.uniform(-3, 3)
         return int(load)
 
+    def get_avg_load(self):
+        if self.offline:
+            return None
+        now = time.time()
+        target = 20 + abs(self._actual) / 100.0 if self.servostate == 'enabled' else 0.0
+        avg = getattr(self, '_avg', 0.0)
+        self._avg = avg + (target - avg) * 0.02
+        return int(self._avg)
+
     def get_alarm(self):
         return self.alarmcode
 
