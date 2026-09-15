@@ -33,19 +33,29 @@ if exists('node_new.py'):
         fh.write('1')
     print('LAUNCHER installed new node.py (trial)')
 elif exists('trial.flag'):
-    os.remove('trial.flag')
-    if exists('node_prev.py'):
+    # a trial image is running and has not confirmed yet.  Roll back only if
+    # it died (watchdog reset, or the crash flag written below); a plain
+    # power cycle or a REPL soft reset just gives it another go.
+    crashed = machine.reset_cause() == machine.WDT_RESET or exists('crash.flag')
+    if exists('crash.flag'):
+        os.remove('crash.flag')
+    if crashed and exists('node_prev.py'):
+        os.remove('trial.flag')
         if exists('node.py'):
             if exists('node_bad.py'):
                 os.remove('node_bad.py')
             os.rename('node.py', 'node_bad.py')
         os.rename('node_prev.py', 'node.py')
-        print('LAUNCHER trial never confirmed: rolled back to previous node.py')
+        print('LAUNCHER trial image died: rolled back to previous node.py')
+    else:
+        print('LAUNCHER trial image gets another boot to confirm')
 
 try:
     import node  # noqa: F401  (runs forever)
 except Exception as exc:
     sys.print_exception(exc)
+    with open('crash.flag', 'w') as fh:
+        fh.write('1')
     print('LAUNCHER node.py crashed, resetting in 3 s')
     time.sleep(3)
     machine.reset()

@@ -332,6 +332,10 @@ class DroBle:
             crc = zlib.crc32(blob) & 0xFFFFFFFF
             self._ota_event = asyncio.Event()
             client = self._client
+            try:
+                await client._acquire_mtu()          # BlueZ: ask for the real MTU
+            except Exception:
+                pass
             mtu = getattr(client, 'mtu_size', 23) or 23
             chunk = max(16, min(mtu - 4, 200))
             log.info('node OTA: %s, %d bytes, crc %08x, chunk %d', path, len(blob), crc, chunk)
