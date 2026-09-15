@@ -814,6 +814,8 @@ class ServoCommanderApp(App):
         self.root_layout = root
         self.graph = self._find(root, 'graph')
         self.graph.hist = hist
+        # scrolled back in the graph: the readout follows the right edge
+        self.graph.bind(cursor_value=self._on_graph_cursor)
         self._update_icon_scale()
         w, h = self._stage_size()
         self.stage = FloatLayout(size_hint=(None, None), size=(w, h), pos=(0, 0))
@@ -1859,19 +1861,33 @@ class ServoCommanderApp(App):
                 torque = torque - 65536
             self.current_torque = torque
             load = abs(torque)
-            self.load_str = str(load)
-            over = load > 100
-            self.load_color = [0.95, 0.25, 0.2, 1] if over else [1, 1, 1, 1]
-            self.load_color_dim = [0.95, 0.35, 0.3, 0.8] if over else [0.7, 0.7, 0.7, 1]
-            # landscape 3-digit torque readout (original Servo_tq behaviour)
-            digits = str(min(load, 999)).zfill(3)
-            lit = [1, 0, 0, 1] if torque < 0 else WHITE
-            self.load_digits = digits
-            self.load_colors = [GHOST if load < 100 else lit,
-                                GHOST if load < 10 else lit, lit]
+            self._live_load = (load, torque < 0)
+            if self.graph.view_offset == 0:
+                self._show_load(load, torque < 0)
             # the graph only records while the servo is enabled
             if self.servo_state == 'enabled':
                 self.graph.add_sample(load)
+
+    def _show_load(self, load, negative):
+        self.load_str = str(load)
+        over = load > 100
+        self.load_color = [0.95, 0.25, 0.2, 1] if over else [1, 1, 1, 1]
+        self.load_color_dim = [0.95, 0.35, 0.3, 0.8] if over else [0.7, 0.7, 0.7, 1]
+        # landscape 3-digit torque readout (original Servo_tq behaviour)
+        digits = str(min(load, 999)).zfill(3)
+        lit = [1, 0, 0, 1] if negative else WHITE
+        self.load_digits = digits
+        self.load_colors = [GHOST if load < 100 else lit,
+                            GHOST if load < 10 else lit, lit]
+
+    def _on_graph_cursor(self, graph, value):
+        """Graph scrolled back: show the sample at its right edge; back to
+        live: show the latest drive reading again."""
+        if value >= 0:
+            self._show_load(int(value), False)
+        else:
+            load, negative = getattr(self, '_live_load', (0, False))
+            self._show_load(load, negative)
 
     def alarm_clear(self):
         self.servo.disable_servo()

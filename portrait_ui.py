@@ -16,7 +16,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.behaviors import ButtonBehavior
-from kivy.graphics import Color, Line, Rectangle
+from kivy.graphics import Color, Line, Rectangle, Ellipse
 from kivy.properties import NumericProperty, StringProperty, ListProperty
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +34,7 @@ class LoadGraph(Widget):
     1s/5s time ticks. Newest data enters at the right edge."""
     view_offset = NumericProperty(0)
     show_times = NumericProperty(0)   # toggled by double-tap: 5s tick labels
+    cursor_value = NumericProperty(-1)   # sample at the right edge while scrolled back, -1 = live
     GUT_R = 36       # right gutter for the scale labels
     TICK_H = 13      # bottom zone for time ticks
 
@@ -108,6 +109,7 @@ class LoadGraph(Widget):
         end = total - self.view_offset
         start = max(0, end - WINDOW_N)
         visible = self.hist[start:end]
+        self.cursor_value = visible[-1] if (self.view_offset and visible) else -1
         vmax = max(visible) if visible else 0
         ymax = 100.0 if vmax <= 100 else ((int(vmax * 1.1) // 10) + 1) * 10.0
 
@@ -161,6 +163,10 @@ class LoadGraph(Widget):
                     pts.extend([right - (len(visible) - 1 - i) * stepx,
                                 py + frac * ph])
                 Line(points=pts, width=1.5)
+                if self.view_offset:
+                    # scrolled back: mark the sample the readout is showing
+                    Color(1, 1, 1, 1)
+                    Ellipse(pos=(pts[-2] - 3.5, pts[-1] - 3.5), size=(7, 7))
 
 
 

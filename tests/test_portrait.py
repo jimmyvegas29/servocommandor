@@ -129,6 +129,21 @@ def after_disable(n):
     app._poll_ui(0)
     check('switch neutral synced', (app.servo_state, app.direction), ('disabled', 'fwd'))
 
+    # load graph scrolled back: readout shows the sample at the right edge
+    g = app.graph
+    saved_hist = list(g.hist)
+    g.hist = [10 + i for i in range(300)]        # 300 samples, newest = 309
+    live_str = app.load_str
+    g.view_offset = 40
+    g.redraw()
+    check('scrolled readout = right-edge sample', app.load_str, str(g.hist[-41]))
+    g.add_sample(500)                             # history moves, view keeps its place
+    check('scrolled readout tracks while data arrives', app.load_str, str(g.hist[-42]))
+    g.go_live()
+    check('live readout restored', (g.cursor_value, app.load_str), (-1, live_str))
+    g.hist = saved_hist
+    g.redraw()
+
     # offline overlay: dismissable, speed section locked, DRO usable
     servo.offline = True
     app._poll_ui(0)

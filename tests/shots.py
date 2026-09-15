@@ -38,6 +38,15 @@ def s_running():
     app.toggle_enable()
 
 
+def s_scrolled():
+    app.graph.view_offset = 12
+    app.graph.redraw()
+
+
+def s_scroll_live():
+    app.graph.go_live()
+
+
 def s_half():
     app.arm_half()
 
@@ -171,6 +180,7 @@ def s_done():
 
 plan = [
     (1.0, s_running), (3.0, lambda: cap('running')),
+    (4.0, s_scrolled), (0.4, lambda: cap('graph_scrolled')), (0.2, s_scroll_live),
     (0.2, s_half), (0.4, lambda: cap('half_armed')), (0.2, s_half_off),
     (0.2, s_copy), (0.5, lambda: cap('copy_picker')), (0.2, s_copy_off),
     (0.2, s_numpad), (0.4, lambda: cap('numpad')),
