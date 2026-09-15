@@ -129,6 +129,20 @@ def after_disable(n):
     app._poll_ui(0)
     check('switch neutral synced', (app.servo_state, app.direction), ('disabled', 'fwd'))
 
+    # load goes red 20 points under the drive's overload alarm level (Pr070)
+    check('red threshold from mock Pr070=140', app.red_at(), 120)
+    app._show_load(119, False)
+    check('119 not red', app.load_color, [1, 1, 1, 1])
+    app._show_load(120, False)
+    check('120 red', app.load_color, [0.95, 0.25, 0.2, 1])
+    app.servo.params[70] = 250
+    check('threshold follows Pr070=250', (app.red_at(), app.settings['overload_level']), (230, 250))
+    app._show_load(229, False)
+    check('229 not red at 250', app.load_color, [1, 1, 1, 1])
+    app.servo.params[70] = 140
+    app.red_at()
+    app._on_graph_cursor(app.graph, -1)          # back to the live reading
+
     # load graph scrolled back: readout shows the sample at the right edge
     g = app.graph
     saved_hist = list(g.hist)

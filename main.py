@@ -60,7 +60,11 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      'drive_link': 'hat',
                      # 'classic' = the original Servo_tq layout; 'cards' = the
                      # portrait cards rearranged (parked, not in the UI)
-                     'landscape_style': 'classic'}
+                     'landscape_style': 'classic',
+                     # last overload alarm level (Pr070) read from the drive; the
+                     # load readout goes red RED_MARGIN below it
+                     'overload_level': 140}
+RED_MARGIN = 20               # load turns red this many % points under the alarm level
 ServoCommunicator = None      # imported in _start_servo() once the drive link is known
 
 
@@ -294,7 +298,7 @@ class DrivePage(BoxLayout):
             self._avg_row.value = '-'
         else:
             self._avg_row.value = '%d %%' % app.avg_load
-        self._avg_row.value_color = (0.95, 0.25, 0.2, 1) if app.avg_load > 100 else (1, 1, 1, 1)
+        self._avg_row.value_color = (0.95, 0.25, 0.2, 1) if app.avg_load >= app.red_at() else (1, 1, 1, 1)
         self.can_edit = app.drive_can_edit()
         app.drive_edit_ok = self.can_edit
         self.status = app.drive_status_text()
@@ -708,6 +712,7 @@ class ServoCommanderApp(App):
         self.command_speed = 0      # motor rpm currently commanded
         self._gui_cmd_until = 0.0   # ignore the node's enable bit briefly after a GUI command
         self._offline_polls = 0     # consecutive polls with no drive data
+        self._params_requested = False
         self._node_linked = False   # BLE link to the machine node seen up
         self.current_speed = 0      # motor rpm reported by the drive
         self.current_torque = 0
@@ -1830,6 +1835,9 @@ class ServoCommanderApp(App):
                 log.warning('Offline overlay shown')
             return
         self._offline_polls = 0
+        if not self._params_requested and (self.drive_link != 'node' or self.node_control):
+            self._params_requested = True
+            self.request_drive_params()
         if self.offline_flag:
             self._hide('_offline')
             self.offline_flag = False
@@ -1868,9 +1876,21 @@ class ServoCommanderApp(App):
             if self.servo_state == 'enabled':
                 self.graph.add_sample(load)
 
+    def red_at(self):
+        """Load % at which the readout turns red: 20 points under the drive's
+        overload alarm level (Pr070), which trips Err-29."""
+        params = getattr(self.servo, 'params', None) or {}
+        lvl = params.get(70)
+        if lvl is not None and lvl != self.settings.get('overload_level'):
+            self.settings['overload_level'] = int(lvl)
+            self._save_settings()
+        if lvl is None:
+            lvl = self.settings.get('overload_level', 140)
+        return max(1, int(lvl) - RED_MARGIN)
+
     def _show_load(self, load, negative):
         self.load_str = str(load)
-        over = load > 100
+        over = load >= self.red_at()
         self.load_color = [0.95, 0.25, 0.2, 1] if over else [1, 1, 1, 1]
         self.load_color_dim = [0.95, 0.35, 0.3, 0.8] if over else [0.7, 0.7, 0.7, 1]
         # landscape 3-digit torque readout (original Servo_tq behaviour)
