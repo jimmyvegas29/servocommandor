@@ -351,7 +351,7 @@ def after_ratio(ini_path, ini_before, old_ratio):
     check('torque limit read', rows['torque_limit'].value, '300 %')
     check('overload level read', rows['overload_level'].value, '140 %')
     check('drive info rows', [r.label for r in page.ids.info.children][::-1][:3],
-          ['Average load (motor heating)', 'Drive', 'Ratio'])
+          ['Average load', 'Drive', 'Ratio'])
     app._poll_ui(0)
     page.refresh()
     check('average load row live', page._avg_row.value.endswith(' %'), True)

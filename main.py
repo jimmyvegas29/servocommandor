@@ -270,7 +270,7 @@ class DrivePage(BoxLayout):
             self.ids.params.add_widget(row)
             self._rows[spec['key']] = row
         self._avg_row = Factory.InfoRow()
-        self._avg_row.label = 'Average load (motor heating)'
+        self._avg_row.label = 'Average load'
         self.ids.info.add_widget(self._avg_row)
         for label, value in app.drive_rows():
             row = Factory.InfoRow()
