@@ -894,12 +894,12 @@ class ServoCommanderApp(App):
         aspect = self.config.getfloat('GUI', 'pixel_aspect')
         if self.windowed or aspect <= 0:
             aspect = 1.0
-        # portrait on the panel: either the app spins the stage (rotate=90) or
-        # the desktop itself is rotated and hands us a tall window; both put
-        # the panel's wide pixel axis along our logical y
-        tall_window = Window.width < Window.height
-        if self.orientation == 'portrait' and (self.rotate or tall_window):
-            self.icon_sx, self.icon_sy = 1.0, aspect     # logical y = physical x
+        # the panel's pixels are wider than tall along its long (800) axis.
+        # In portrait, whether the app spins the stage (rotate=90) or the
+        # desktop is rotated for us, logical y runs along that long axis;
+        # in landscape logical x does.
+        if self.orientation == 'portrait':
+            self.icon_sx, self.icon_sy = 1.0, aspect
         else:
             self.icon_sx, self.icon_sy = aspect, 1.0
 
