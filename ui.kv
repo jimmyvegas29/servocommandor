@@ -2012,7 +2012,7 @@
         spacing: 6
         padding: [0, 6, 0, 0]
         SetKey:
-            text: 'SAVE DRO LOG'
+            text: 'SAVE LOG'
             font_size: '14sp'
             color: ACCENT
             on_press: app.save_dro_capture()
@@ -2023,7 +2023,7 @@
             disabled: not app.upload_ready
             on_press: app.send_diag()
     SLabel:
-        text: app.capture_status if app.capture_status else 'Keeps the last 30 min of scale samples in memory; save when something looks wrong'
+        text: app.capture_status if app.capture_status else 'Keeps the last 30 min of scale, drive and readout data in memory; save when something looks wrong'
         font_size: '11sp'
         color: (0.4, 0.85, 0.5, 1) if app.capture_status.startswith('Saved') else (0.55, 0.55, 0.55, 1)
         size_hint_y: None
