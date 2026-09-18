@@ -697,6 +697,14 @@ def after_layout(dt):
     for _ in range(3):                      # popup only after three missed polls
         app._poll_ui(0)
     check('node reports drive offline -> popup', app._offline is not None, True)
+    # DRO capture: ring holds raw + UI lines, save writes a file, old ones pruned
+    check('capture ring has raw and UI lines',
+          (any(' UI ' in l for l in app.dro.ring), any(' raw=' in l for l in app.dro.ring)), (True, True))
+    cap_path = app.save_dro_capture()
+    check('capture saved', cap_path is not None and os.path.exists(cap_path), True)
+    check('capture status', app.capture_status.startswith('Saved'), True)
+    if cap_path:
+        os.remove(cap_path)
     app.dismiss_offline()
     app.set_drive_link('hat')
     check('back to hat', type(app.servo).__name__, 'ServoCommunicator')

@@ -1309,6 +1309,55 @@ class ServoCommanderApp(App):
         self.raw['X'] = self.counts_to_mm('X', x_counts)
         self.raw['Z'] = self.counts_to_mm('Z', z_counts)
         self.refresh_axes()
+        ring = getattr(self.dro, 'ring', None)
+        if ring is not None:
+            # what the panel showed for these counts, next to the raw sample
+            ring.append('%s UI x=%s z=%s mode=%s abs_off=%.3f/%.3f' % (
+                time.strftime('%H:%M:%S'), self.x_val, self.z_val, self.mode_text,
+                self.abs_off['X'], self.abs_off['Z']))
+
+    # ---- DRO capture: dump the last 30 min of raw samples on request ----
+    capture_status = StringProperty('')
+    CAPTURE_KEEP = 10
+
+    def save_dro_capture(self):
+        ring = getattr(self.dro, 'ring', None)
+        if not ring:
+            self.capture_status = 'Nothing captured (no Bluetooth DRO feed)'
+            return None
+        from applog import LOG_DIR
+        os.makedirs(LOG_DIR, exist_ok=True)
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        path = os.path.join(LOG_DIR, 'dro_capture_%s.log' % stamp)
+        lines = list(ring)
+        try:
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write('# Servo Commander DRO capture %s  build %s  node %s\n' % (
+                    stamp, self.build_id, self.node_version or '?'))
+                fh.write('# raw lines: time seq x z (counts) rpm(0.1) torque%% alarm flags dropped rawhex\n')
+                fh.write('# UI lines: what the readouts showed for the counts just above\n')
+                fh.write('\n'.join(lines))
+                fh.write('\n\n# ---- app log tail ----\n')
+                try:
+                    with open(os.path.join(LOG_DIR, 'servocom.log'), encoding='utf-8',
+                              errors='replace') as lf:
+                        fh.write(''.join(lf.readlines()[-400:]))
+                except OSError:
+                    pass
+        except OSError as exc:
+            self.capture_status = 'Save failed: %s' % exc
+            log.error('DRO capture save failed: %s', exc)
+            return None
+        # keep only the newest few captures
+        old = sorted(f for f in os.listdir(LOG_DIR) if f.startswith('dro_capture_'))
+        for f in old[:-self.CAPTURE_KEEP]:
+            try:
+                os.remove(os.path.join(LOG_DIR, f))
+            except OSError:
+                pass
+        self.capture_status = 'Saved %d samples to logs/%s' % (len(lines), os.path.basename(path))
+        log.info('DRO capture saved: %s (%d lines)', path, len(lines))
+        return path
 
     # ---- drive link (HAT on the Pi, or the Bluetooth machine node) ---------
     def _start_servo(self, invert):

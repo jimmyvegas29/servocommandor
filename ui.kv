@@ -2006,6 +2006,25 @@
         spacing: 4
         size_hint_y: None
         height: self.minimum_height
+    BoxLayout:
+        size_hint_y: None
+        height: 44
+        spacing: 6
+        padding: [0, 6, 0, 0]
+        SetKey:
+            text: 'SAVE DRO LOG'
+            font_size: '14sp'
+            color: ACCENT
+            on_press: app.save_dro_capture()
+    SLabel:
+        text: app.capture_status if app.capture_status else 'Keeps the last 30 min of scale samples in memory; save when something looks wrong'
+        font_size: '11sp'
+        color: (0.4, 0.85, 0.5, 1) if app.capture_status.startswith('Saved') else (0.55, 0.55, 0.55, 1)
+        size_hint_y: None
+        height: 34
+        text_size: self.size
+        halign: 'left'
+        valign: 'top'
     Widget:
     GridLayout:
         cols: 3

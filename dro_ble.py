@@ -11,7 +11,7 @@ import asyncio
 import struct
 import threading
 import time
-import os
+import collections
 
 from applog import log
 
@@ -25,6 +25,7 @@ DATA_UUID = '5e7a0002-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
 PING_UUID = '5e7a0003-8d2c-4b1e-9c3a-2f6d0a1b3c4d'
 CMD_UUID = '5e7a0004-8d2c-4b1e-9c3a-2f6d0a1b3c4d'      # machine node only
 STALE_S = 0.5
+RING_N = 36000                            # 30 min at 20 Hz, about 4 MB
 
 # node packet (firmware v3): seq, x, z, t_ms, rpm_0p1, torque, alarm, flags
 NODE_FMT = '<IiiIhhHB'
@@ -112,7 +113,8 @@ class DroBle:
         self._ota_ack = None            # (ok, got) from the last 'G' ack
         self.last_raw = None            # (ok, response pdu, time) from the last 'X' ack
         self.last_raw_ms = None         # drive response time of the last raw command, ms
-        self._mon = None                # raw sample log file while /tmp/dromon exists
+        # last ~30 min of raw samples (20 Hz), dumped by the panel's SAVE DRO LOG
+        self.ring = collections.deque(maxlen=RING_N)
         self._raw_event = threading.Event()
         self._ota_event = None
         self.last_ack = None
@@ -259,34 +261,12 @@ class DroBle:
         except Exception as exc:
             log.warning('DRO BLE: interval tune failed: %s', exc)
 
-    # ---- raw sample monitor (touch /tmp/dromon to start, remove to stop) -----
-    MON_FLAG = '/tmp/dromon'
-    MON_LOG = '/tmp/dromon.log'
-
+    # ---- raw sample ring (always on, memory only) ---------------------------
     def _monitor(self, sample, raw):
-        n = self.frames
-        if n % 40 == 0 or self._mon is None:          # check the flag twice a second
-            want = os.path.exists(self.MON_FLAG)
-            if want and self._mon is None:
-                try:
-                    self._mon = open(self.MON_LOG, 'a')
-                    self._mon.write('# %s start' % time.strftime('%H:%M:%S') + chr(10))
-                except OSError:
-                    self._mon = False
-            elif not want and self._mon:
-                self._mon.close()
-                self._mon = None
-        if not self._mon:
-            return
-        try:
-            self._mon.write('%s %d x=%d z=%d rpm=%d tq=%d al=%d f=%02x d=%d raw=%s' % (
-                time.strftime('%H:%M:%S'), sample['s'], sample['x'], sample['z'],
-                sample.get('rpm', 0), sample.get('torque', 0), sample.get('alarm', 0),
-                sample.get('flags', 0), self.dropped, raw.hex()) + chr(10))
-            if n % 20 == 0:
-                self._mon.flush()
-        except OSError:
-            pass
+        self.ring.append('%s.%03d %d x=%d z=%d rpm=%d tq=%d al=%d f=%02x d=%d raw=%s' % (
+            time.strftime('%H:%M:%S'), int((time.time() % 1) * 1000), sample['s'],
+            sample['x'], sample['z'], sample.get('rpm', 0), sample.get('torque', 0),
+            sample.get('alarm', 0), sample.get('flags', 0), self.dropped, raw.hex()))
 
     # ---- reads ---------------------------------------------------------
     def latest(self):
@@ -302,6 +282,7 @@ class DroBle:
         """Test hook: inject a packet as if it arrived over the air."""
         sample = parse_packet(data)
         if sample is not None:
+            self._monitor(sample, bytes(data))
             with self._lock:
                 self._latest = sample
                 self._last_rx = time.monotonic()
