@@ -3,7 +3,7 @@
 One box at the lathe does the real-time work and talks to the panel over
 Bluetooth LE (USB serial mirrors everything for bench work):
 
-  * counts both Sino glass scales (PIO X4 decoder, hard IRQ)
+  * counts both Sino glass scales (X4 decoder entirely in the PIO)
   * polls the XP200 drive over RS-485 (MAX485 on UART0, DE/RE on GP4):
     one bulk read of input registers 0x0009..0x001B every 100 ms
     -> torque %, alarm code, speed in 0.1 rpm
@@ -56,10 +56,10 @@ import asyncio
 import bluetooth
 import aioble
 from machine import Pin, UART, WDT, unique_id, reset
-from encoder_rp2 import Encoder
+import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.10'         # shown on the panel; bump on every change
+VERSION = 'node 3.11'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -83,6 +83,93 @@ CMD_UUID = bluetooth.UUID('5e7a0004-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 NAME = 'SERVOCOM-NODE-' + ''.join('%02X' % b for b in unique_id()[-2:])
 
 # ---------------------------------------------------------------- scales
+# X4 quadrature decoder that lives entirely in the PIO (port of
+# pico-examples quadrature_encoder).  The old encoder_rp2 counted in a
+# Python IRQ behind a 4-deep FIFO; anything that held interrupts off (BLE,
+# UART) made it miss edges, and a missed quadrature edge decodes as motion
+# the wrong way, so the count walked whenever the spindle shook the scale.
+
+
+@rp2.asm_pio(in_shiftdir=rp2.PIO.SHIFT_LEFT, out_shiftdir=rp2.PIO.SHIFT_RIGHT)
+def _quadrature():
+    # 16-entry jump table, index = old_state << 2 | new_state
+    jmp("update")        # 00 -> 00
+    jmp("decrement")     # 00 -> 01
+    jmp("increment")     # 00 -> 10
+    jmp("update")        # 00 -> 11 (invalid, both changed)
+    jmp("increment")     # 01 -> 00
+    jmp("update")        # 01 -> 01
+    jmp("update")        # 01 -> 10 (invalid)
+    jmp("decrement")     # 01 -> 11
+    jmp("decrement")     # 10 -> 00
+    jmp("update")        # 10 -> 01 (invalid)
+    jmp("update")        # 10 -> 10
+    jmp("increment")     # 10 -> 11
+    jmp("update")        # 11 -> 00 (invalid)
+    jmp("increment")     # 11 -> 01
+    jmp("decrement")     # 11 -> 10
+    jmp("update")        # 11 -> 11
+    label("decrement")
+    jmp(y_dec, "update")  # y -= 1 (jmp y-- always falls to update)
+    wrap_target()
+    label("update")
+    mov(isr, y)
+    push(noblock)
+    out(isr, 2)          # previous 2 pin bits (low bits of OSR) -> ISR
+    in_(pins, 2)         # current 2 pin bits appended -> 4-bit table index
+    mov(osr, isr)        # remember for next loop
+    mov(pc, isr)         # jump into the table
+    label("increment")
+    mov(y, invert(y))
+    jmp(y_dec, "increment_cont")
+    label("increment_cont")
+    mov(y, invert(y))    # y = ~(~y - 1) = y + 1
+    wrap()
+    # padding to 32 instructions so the program is loaded at address 0
+    nop()
+    nop()
+    nop()
+    nop()
+    nop()
+    nop()
+
+
+class Encoder:
+    """Drop-in for encoder_rp2.Encoder: Encoder(sm_no, base_pin).value()."""
+
+    def __init__(self, sm_no, base_pin, scale=1):
+        self.scale = scale
+        self._offset = 0
+        self.sm = rp2.StateMachine(sm_no, _quadrature, in_base=base_pin)
+        # y = 0, OSR = current pins so the first loop sees "no change"
+        self.sm.exec("set(y, 0)")
+        self.sm.exec("in_(pins, 2)")
+        self.sm.exec("mov(osr, isr)")
+        self.sm.exec("mov(isr, null)")
+        self.sm.active(1)
+
+    def _raw(self):
+        sm = self.sm
+        # the FIFO is refilled every loop; drain it and take a fresh value
+        while sm.rx_fifo():
+            sm.get()
+        v = sm.get()
+        v = v - 0x100000000 if v & 0x80000000 else v
+        # the table counts A-leading as negative; the old decoder (and so the
+        # panel's saved datums and direction settings) had it positive
+        return -v
+
+    def value(self, value=None):
+        if value is not None:
+            self._offset = value - self._raw()
+        return self._raw() + self._offset
+
+    def position(self, value=None):
+        if value is not None:
+            self.value(round(value / self.scale))
+        return self.value() * self.scale
+
+
 for gp in (X_BASE, X_BASE + 1, Z_BASE, Z_BASE + 1):
     Pin(gp, Pin.IN, Pin.PULL_UP)
 enc_x = Encoder(0, Pin(X_BASE))
