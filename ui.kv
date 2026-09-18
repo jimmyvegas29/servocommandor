@@ -2016,12 +2016,27 @@
             font_size: '14sp'
             color: ACCENT
             on_press: app.save_dro_capture()
+        SetKey:
+            text: 'SEND LOG'
+            font_size: '14sp'
+            color: (0.4, 0.85, 0.5, 1) if app.upload_ready else (0.4, 0.4, 0.4, 1)
+            disabled: not app.upload_ready
+            on_press: app.send_diag()
     SLabel:
         text: app.capture_status if app.capture_status else 'Keeps the last 30 min of scale samples in memory; save when something looks wrong'
         font_size: '11sp'
         color: (0.4, 0.85, 0.5, 1) if app.capture_status.startswith('Saved') else (0.55, 0.55, 0.55, 1)
         size_hint_y: None
-        height: 34
+        height: 30
+        text_size: self.size
+        halign: 'left'
+        valign: 'top'
+    SLabel:
+        text: app.upload_status if app.upload_status else ('SEND LOG uploads the capture, settings and a screenshot as panel "' + app.panel_name + '"' if app.upload_ready else 'SEND LOG needs the upload token in ~/.servocom/upload_token')
+        font_size: '11sp'
+        color: (0.4, 0.85, 0.5, 1) if app.upload_status.startswith('Sent') else ((0.95, 0.5, 0.3, 1) if app.upload_status.startswith('Send failed') else (0.55, 0.55, 0.55, 1))
+        size_hint_y: None
+        height: 30
         text_size: self.size
         halign: 'left'
         valign: 'top'

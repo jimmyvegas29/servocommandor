@@ -13,6 +13,7 @@ Environment hooks (all optional):
 import json
 import os
 import re
+import platform
 import subprocess
 import time
 
@@ -38,6 +39,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
                          ModalTouch, FONT, FA, DT)
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
+import diag_upload
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -68,7 +70,9 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      # The XP200 acknowledges the Modbus 'save to EEPROM'
                      # command but never commits (verified 2026-09-15), so the
                      # panel re-applies these every time the drive comes up.
-                     'drive_params': {}}
+                     'drive_params': {},
+                     # folder name for diagnostic uploads ('' = the Pi's serial)
+                     'panel_name': ''}
 RED_MARGIN = 20               # load turns red this many % points under the alarm level
 ServoCommunicator = None      # imported in _start_servo() once the drive link is known
 
@@ -792,6 +796,11 @@ class ServoCommanderApp(App):
         Clock.schedule_once(self._set_window, 0)
         Clock.schedule_interval(self._poll_ui, DT)
         Clock.schedule_interval(self._poll_dro, 0.05)
+        self.uploader = diag_upload.Uploader()
+        self.panel_name = self._panel_name()
+        Clock.schedule_interval(self._refresh_upload_status, 1.0)
+        if diag_upload.pending_bundles():
+            self.uploader.send_now()
         Clock.schedule_interval(self._shot_hook, 0.5)
 
         shot = os.environ.get('SERVOCOM_SHOT')
@@ -1318,7 +1327,78 @@ class ServoCommanderApp(App):
 
     # ---- DRO capture: dump the last 30 min of raw samples on request ----
     capture_status = StringProperty('')
+    upload_status = StringProperty('')
+    upload_ready = BooleanProperty(False)
+    panel_name = StringProperty('')
     CAPTURE_KEEP = 10
+
+    # ---- SEND LOG: bundle + upload to the private servocom-logs repo -----
+    def _panel_name(self):
+        name = (self.settings.get('panel_name') or '').strip()
+        return diag_upload.safe_name(name or diag_upload.pi_serial())
+
+    def _diag_manifest(self):
+        ini = ''
+        try:
+            with open(os.path.join(HERE, 'servo.ini'), encoding='utf-8', errors='replace') as fh:
+                ini = fh.read()
+        except OSError:
+            pass
+        settings = dict(self.settings)
+        try:
+            uptime = open('/proc/uptime').read().split()[0]
+        except OSError:
+            uptime = ''
+        return {'panel': self._panel_name(), 'sent_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'build': self.build_id, 'node_firmware': self.node_version,
+                'drive_link': self.drive_link, 'dro_link': self.dro_link,
+                'dro_status': self.dro_status, 'servo_state': self.servo_state,
+                'offline': bool(self.offline_flag), 'alarm': bool(self.alarm_flag),
+                'command_speed': self.command_speed, 'ratio': self.ratio,
+                'drive_params': dict(getattr(self.servo, 'params', {}) or {}),
+                'settings': settings, 'servo_ini': ini,
+                'platform': platform.platform(), 'python': platform.python_version(),
+                'uptime_s': uptime, 'cpu_temp': self._cpu_temp(),
+                'throttling': self._throttle_state()}
+
+    def send_diag(self):
+        """SEND LOG button: save a fresh capture, bundle it with the manifest
+        and a screenshot, hand it to the uploader."""
+        if not diag_upload.has_token():
+            self.upload_status = 'No upload token on this panel'
+            return None
+        capture = self.save_dro_capture()
+        shot = os.path.join(diag_upload.LOG_DIR, 'send_shot.png')
+        try:
+            self.stage.export_to_png(shot)
+        except Exception as exc:
+            log.warning('screenshot for upload failed: %s', exc)
+            shot = None
+        bundle = diag_upload.build_bundle(self._panel_name(), capture, self._diag_manifest(), shot)
+        log.info('Diagnostic bundle built: %s', os.path.basename(bundle))
+        self.uploader.send_now()
+        self._refresh_upload_status(0)
+        return bundle
+
+    def _refresh_upload_status(self, dt):
+        state, detail = self.uploader.status()
+        pending = len(diag_upload.pending_bundles())
+        if state == 'sending':
+            text = 'Sending %s...' % detail
+        elif state == 'sent':
+            text = 'Sent: %s' % detail
+        elif state == 'failed':
+            text = 'Send failed: %s' % detail
+        elif pending:
+            text = '%d bundle%s waiting to send' % (pending, '' if pending == 1 else 's')
+        else:
+            text = ''
+        if text != self.upload_status:
+            self.upload_status = text
+        ready = diag_upload.has_token() and state != 'sending'
+        if ready != self.upload_ready:
+            self.upload_ready = ready
+        self.uploader.tick()
 
     def save_dro_capture(self):
         ring = getattr(self.dro, 'ring', None)

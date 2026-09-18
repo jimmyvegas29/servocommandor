@@ -705,6 +705,29 @@ def after_layout(dt):
     check('capture status', app.capture_status.startswith('Saved'), True)
     if cap_path:
         os.remove(cap_path)
+    # SEND LOG: bundle built, uploaded through a fake transport, folder cleared
+    import diag_upload
+    uploaded = []
+
+    def fake_put(token, repo_path, data, message):
+        uploaded.append((repo_path, len(data)))
+    app.uploader = diag_upload.Uploader(transport=fake_put)
+    app.settings['panel_name'] = 'Test Panel #1'
+    manifest = app._diag_manifest()
+    check('manifest has build and settings', ('build' in manifest, 'settings' in manifest, manifest['panel']),
+          (True, True, 'Test-Panel-1'))
+    cap_path = app.save_dro_capture()
+    bundle = diag_upload.build_bundle(app._panel_name(), cap_path, manifest, None)
+    check('bundle pending', len(diag_upload.pending_bundles()), 1)
+    app.uploader.send_now()
+    app.uploader._thread.join(10)
+    check('bundle uploaded and cleared',
+          (sorted(p.split('/')[0] for p, n in uploaded), len(uploaded), diag_upload.pending_bundles()),
+          (['Test-Panel-1', 'Test-Panel-1'], 2, []))
+    check('upload status', app.uploader.status()[0], 'sent')
+    app.settings['panel_name'] = ''
+    if cap_path and os.path.exists(cap_path):
+        os.remove(cap_path)
     app.dismiss_offline()
     app.set_drive_link('hat')
     check('back to hat', type(app.servo).__name__, 'ServoCommunicator')
