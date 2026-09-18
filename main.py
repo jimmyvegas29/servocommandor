@@ -894,7 +894,11 @@ class ServoCommanderApp(App):
         aspect = self.config.getfloat('GUI', 'pixel_aspect')
         if self.windowed or aspect <= 0:
             aspect = 1.0
-        if self.orientation == 'portrait' and self.rotate:
+        # portrait on the panel: either the app spins the stage (rotate=90) or
+        # the desktop itself is rotated and hands us a tall window; both put
+        # the panel's wide pixel axis along our logical y
+        tall_window = Window.width < Window.height
+        if self.orientation == 'portrait' and (self.rotate or tall_window):
             self.icon_sx, self.icon_sy = 1.0, aspect     # logical y = physical x
         else:
             self.icon_sx, self.icon_sy = aspect, 1.0
@@ -2093,6 +2097,20 @@ class ServoCommanderApp(App):
             self.sys_poweroff()
         elif value == 999124:
             self.sys_reboot()
+        elif value == 999125:
+            self.desktop_mode()
+
+    def desktop_mode(self):
+        """Cheat code: bring the Pi's taskbar back and drop to the desktop
+        (until the next reboot, when the kiosk session hides it again)."""
+        log.info('Desktop mode requested: starting the taskbar and quitting')
+        if os.name != 'nt':
+            try:
+                subprocess.Popen(['/usr/bin/wf-panel-pi'], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError as exc:
+                log.error('taskbar start failed: %s', exc)
+        self.stop()
 
     def _sys(self, action):
         if hasattr(self, 'servo'):
