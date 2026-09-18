@@ -11,6 +11,7 @@ import asyncio
 import struct
 import threading
 import time
+import os
 
 from applog import log
 
@@ -111,6 +112,7 @@ class DroBle:
         self._ota_ack = None            # (ok, got) from the last 'G' ack
         self.last_raw = None            # (ok, response pdu, time) from the last 'X' ack
         self.last_raw_ms = None         # drive response time of the last raw command, ms
+        self._mon = None                # raw sample log file while /tmp/dromon exists
         self._raw_event = threading.Event()
         self._ota_event = None
         self.last_ack = None
@@ -180,6 +182,7 @@ class DroBle:
                         if last_seq is not None and sample['s'] > last_seq + 1:
                             self.dropped += sample['s'] - last_seq - 1
                         last_seq = sample['s']
+                        self._monitor(sample, bytes(data))
                         with self._lock:
                             if self._last_rx:
                                 self.intervals.append(now - self._last_rx)
@@ -255,6 +258,35 @@ class DroBle:
                      lo, hi, handle, r.returncode, (r.stdout + r.stderr).strip())
         except Exception as exc:
             log.warning('DRO BLE: interval tune failed: %s', exc)
+
+    # ---- raw sample monitor (touch /tmp/dromon to start, remove to stop) -----
+    MON_FLAG = '/tmp/dromon'
+    MON_LOG = '/tmp/dromon.log'
+
+    def _monitor(self, sample, raw):
+        n = self.frames
+        if n % 40 == 0 or self._mon is None:          # check the flag twice a second
+            want = os.path.exists(self.MON_FLAG)
+            if want and self._mon is None:
+                try:
+                    self._mon = open(self.MON_LOG, 'a')
+                    self._mon.write('# %s start' % time.strftime('%H:%M:%S') + chr(10))
+                except OSError:
+                    self._mon = False
+            elif not want and self._mon:
+                self._mon.close()
+                self._mon = None
+        if not self._mon:
+            return
+        try:
+            self._mon.write('%s %d x=%d z=%d rpm=%d tq=%d al=%d f=%02x d=%d raw=%s' % (
+                time.strftime('%H:%M:%S'), sample['s'], sample['x'], sample['z'],
+                sample.get('rpm', 0), sample.get('torque', 0), sample.get('alarm', 0),
+                sample.get('flags', 0), self.dropped, raw.hex()) + chr(10))
+            if n % 20 == 0:
+                self._mon.flush()
+        except OSError:
+            pass
 
     # ---- reads ---------------------------------------------------------
     def latest(self):
