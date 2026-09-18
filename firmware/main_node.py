@@ -59,7 +59,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.11'         # shown on the panel; bump on every change
+VERSION = 'node 3.12'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -81,6 +81,10 @@ DATA_UUID = bluetooth.UUID('5e7a0002-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 PING_UUID = bluetooth.UUID('5e7a0003-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 CMD_UUID = bluetooth.UUID('5e7a0004-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 NAME = 'SERVOCOM-NODE-' + ''.join('%02X' % b for b in unique_id()[-2:])
+
+# the watchdog starts before anything that could block, so a hang anywhere
+# (including PIO setup) always ends in a reset and the launcher's rollback
+wdt = WDT(timeout=8000)
 
 # ---------------------------------------------------------------- scales
 # X4 quadrature decoder that lives entirely in the PIO (port of
@@ -140,6 +144,8 @@ class Encoder:
     def __init__(self, sm_no, base_pin, scale=1):
         self.scale = scale
         self._offset = 0
+        self._last = 0
+        self.stalled = 0
         self.sm = rp2.StateMachine(sm_no, _quadrature, in_base=base_pin)
         # y = 0, OSR = current pins so the first loop sees "no change"
         self.sm.exec("set(y, 0)")
@@ -150,11 +156,22 @@ class Encoder:
 
     def _raw(self):
         sm = self.sm
-        # the FIFO is refilled every loop; drain it and take a fresh value
+        # the FIFO is refilled every loop; drain it and take a fresh value.
+        # Never block: if the state machine is not pushing, keep the last
+        # value rather than hang the whole node.
+        v = None
         while sm.rx_fifo():
-            sm.get()
-        v = sm.get()
+            v = sm.get()
+        if v is None:
+            for _ in range(1000):
+                if sm.rx_fifo():
+                    v = sm.get()
+                    break
+            else:
+                self.stalled += 1
+                return self._last
         v = v - 0x100000000 if v & 0x80000000 else v
+        self._last = -v
         # the table counts A-leading as negative; the old decoder (and so the
         # panel's saved datums and direction settings) had it positive
         return -v
@@ -653,7 +670,6 @@ async def commander():
 
 
 async def watchdog():
-    wdt = WDT(timeout=8000)
     while True:
         wdt.feed()
         if ota['reset_at'] is not None and time.ticks_diff(ota['reset_at'], time.ticks_ms()) <= 0:
