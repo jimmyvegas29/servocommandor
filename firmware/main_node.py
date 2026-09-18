@@ -156,20 +156,14 @@ class Encoder:
 
     def _raw(self):
         sm = self.sm
-        # the FIFO is refilled every loop; drain it and take a fresh value.
-        # Never block: if the state machine is not pushing, keep the last
-        # value rather than hang the whole node.
-        v = None
-        while sm.rx_fifo():
-            v = sm.get()
-        if v is None:
-            for _ in range(1000):
-                if sm.rx_fifo():
-                    v = sm.get()
-                    break
-            else:
-                self.stalled += 1
-                return self._last
+        # the state machine refills the 4-deep FIFO every ~100 ns, so the
+        # oldest queued value is well under a microsecond old: take it.  Never
+        # drain "until empty" (it never empties) and never block (a stalled
+        # state machine must not hang the node).
+        if not sm.rx_fifo():
+            self.stalled += 1
+            return self._last
+        v = sm.get()
         v = v - 0x100000000 if v & 0x80000000 else v
         self._last = -v
         # the table counts A-leading as negative; the old decoder (and so the

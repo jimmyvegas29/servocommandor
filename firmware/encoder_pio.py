@@ -67,6 +67,8 @@ class Encoder:
     def __init__(self, sm_no, base_pin, scale=1):
         self.scale = scale
         self._offset = 0
+        self._last = 0
+        self.stalled = 0
         self.sm = rp2.StateMachine(sm_no, _quadrature, in_base=base_pin)
         # y = 0, OSR = current pins so the first loop sees "no change"
         self.sm.exec("set(y, 0)")
@@ -77,11 +79,16 @@ class Encoder:
 
     def _raw(self):
         sm = self.sm
-        # the FIFO is refilled every loop; drain it and take a fresh value
-        while sm.rx_fifo():
-            sm.get()
+        # the state machine refills the 4-deep FIFO every ~100 ns, so the
+        # oldest queued value is well under a microsecond old: take it.  Never
+        # drain "until empty" (it never empties) and never block (a stalled
+        # state machine must not hang the node).
+        if not sm.rx_fifo():
+            self.stalled += 1
+            return self._last
         v = sm.get()
         v = v - 0x100000000 if v & 0x80000000 else v
+        self._last = -v
         # the table counts A-leading as negative; the old decoder (and so the
         # panel's saved datums and direction settings) had it positive
         return -v
