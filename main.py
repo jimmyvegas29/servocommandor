@@ -2109,6 +2109,15 @@ class ServoCommanderApp(App):
         """Cheat code: bring the Pi's taskbar back and drop to the desktop
         (until the next reboot, when the kiosk session hides it again)."""
         log.info('Desktop mode requested: starting the taskbar and quitting')
+        if os.name != 'nt' and self.orientation == 'landscape' and self.landscape_rotate:
+            # the kiosk desktop is portrait; in landscape give the desktop the
+            # panel's native orientation too.  Not saved anywhere: kanshi puts
+            # the portrait transform back at the next boot.
+            try:
+                subprocess.call(['wlr-randr', '--output', 'DSI-1', '--transform', 'normal'],
+                                timeout=5)
+            except Exception as exc:
+                log.error('desktop transform failed: %s', exc)
         if os.name != 'nt':
             try:
                 subprocess.Popen(['/usr/bin/wf-panel-pi'], stdout=subprocess.DEVNULL,
