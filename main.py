@@ -746,7 +746,7 @@ class ServoCommanderApp(App):
 
     def build_config(self, config):
         config.setdefaults('GUI', {'fullscreen': True, 'cursor': False,
-                                   'rotate': 90, 'no_reverse': False,
+                                   'rotate': 90, 'landscape_rotate': 0, 'no_reverse': False,
                                    'pixel_aspect': 1.0})
         config.setdefaults('Hardware', {'invert_direction': False})
         config.setdefaults('DRO', {'enabled': False, 'port': '/dev/ttyACM0'})
@@ -766,6 +766,11 @@ class ServoCommanderApp(App):
         invert = cfg.getboolean('Hardware', 'invert_direction')
         rot_env = os.environ.get('SERVOCOM_ROTATE')
         self.rotate = int(rot_env) if rot_env not in (None, '') else cfg.getint('GUI', 'rotate')
+        # degrees to spin the LANDSCAPE stage: 0 on a normal desktop, 90 when
+        # the Pi desktop itself is rotated to portrait (kiosk), so landscape
+        # still fills the panel.  Explicit on purpose: the window size is not
+        # known reliably at build time.
+        self.landscape_rotate = cfg.getint('GUI', 'landscape_rotate')
         if self.mode == 'surface_speed':
             self.speed_mode_text = 'S.F.M.' if self.unit == 'inch' else 'S.M.M.'
             self.speed_unit_short = 'sfm' if self.unit == 'inch' else 'smm'
@@ -849,7 +854,7 @@ class ServoCommanderApp(App):
         if self.windowed:
             rotation = 0
         else:
-            rotation = self.rotate if self.orientation == 'portrait' else 0
+            rotation = self.rotate if self.orientation == 'portrait' else self.landscape_rotate
             if self.flip:
                 rotation = (rotation + 180) % 360
         if rotation:
