@@ -323,7 +323,7 @@ class SpeedPadPage(BoxLayout):
         r = Factory.PadRow()
         r.key = 'step'
         r.label = 'Step buttons'
-        r.hint = 'the + and - buttons change the speed by this much'
+        r.hint = '+ / - button size'
         r.value = '%d %s' % (app.step_value(), unit)
         rows.add_widget(r)
         for pos in range(1, 7):
@@ -336,7 +336,7 @@ class SpeedPadPage(BoxLayout):
         r = Factory.PadRow()
         r.key = 'jog'
         r.label = 'Jog speed'
-        r.hint = 'button 9, hold to turn the spindle'
+        r.hint = 'hold to enable'
         r.value = '%d rpm' % app.jog_rpm()
         rows.add_widget(r)
         for tool in ('hss', 'cbd'):
