@@ -22,10 +22,15 @@ from portrait_ui import ModalTouch
 DRILL_MATERIALS = [('Mild steel', 90), ('Medium carbon', 70), ('Stainless', 50),
                    ('Cast iron', 70), ('Aluminum', 250), ('Brass', 200), ('Plastic', 150)]
 DEFAULT_SFM = dict(DRILL_MATERIALS)
+# turning surface speeds (ft/min) for coated carbide inserts, for the SFM
+# popup's material buttons; editable on the Speed Pad page too
+TURN_MATERIALS = [('Mild steel', 400), ('Medium carbon', 350), ('Stainless', 250),
+                  ('Cast iron', 300), ('Aluminum', 800), ('Brass', 500), ('Plastic', 600)]
+DEFAULT_TURN_SFM = dict(TURN_MATERIALS)
 
-# drill size lists: inch 1/8 .. 1 in 1/16 steps, metric 3 .. 25 mm in 1 mm steps
+# drill size lists: 15 each - inch 1/8 .. 1 in 1/16 steps, metric 6 .. 20 mm
 INCH_SIZES = [(n, 16) for n in range(2, 17)]
-MM_SIZES = list(range(3, 26))
+MM_SIZES = list(range(6, 21))
 JOG_RPM_DEFAULT = 5
 JOG_RPM_MAX = 60
 
@@ -60,6 +65,7 @@ class DrillOverlay(ModalTouch, FloatLayout):
     rpm_set = NumericProperty(0)             # what SET will command (capped)
     capped = BooleanProperty(False)
     result_text = StringProperty('Pick a size')
+    entry = StringProperty('')               # keypad: a custom size being typed
 
     def populate(self):
         app = App.get_running_app()
@@ -104,6 +110,7 @@ class DrillOverlay(ModalTouch, FloatLayout):
     def set_unit(self, unit):
         if unit != self.unit:
             self.unit = unit
+            self.entry = ''
             self.size_text = ''
             self.dia_in = 0.0
             self._fill_sizes()
@@ -116,19 +123,48 @@ class DrillOverlay(ModalTouch, FloatLayout):
         App.get_running_app().save_speed_pad(drill_material=name)
 
     def choose(self, label, dia_in):
+        self.entry = ''
         self.size_text = label + (' in' if self.unit == 'inch' else ' mm')
         self.dia_in = dia_in
         self._restyle()
         self._compute()
 
     def custom_size(self, value):
-        """Numpad result: inches or mm depending on the unit toggle."""
+        """A typed size: inches or mm depending on the unit toggle."""
         if value <= 0:
             return
         self.size_text = fmt_num(value) + (' in' if self.unit == 'inch' else ' mm')
         self.dia_in = value if self.unit == 'inch' else value / 25.4
         self._restyle()
         self._compute()
+
+    # keypad under the size grid: typing a size overrides the picked one
+    def _apply_entry(self):
+        try:
+            v = float(self.entry)
+        except ValueError:
+            v = 0.0
+        if v > 0:
+            self.custom_size(v)
+        elif not self.entry:
+            self.size_text = ''
+            self.dia_in = 0.0
+            self._restyle()
+            self._compute()
+
+    def add_digit(self, d):
+        if len(self.entry) >= 6:
+            return
+        self.entry = d if self.entry == '0' else self.entry + d
+        self._apply_entry()
+
+    def add_dot(self):
+        if '.' not in self.entry:
+            self.entry = (self.entry or '0') + '.'
+
+    def backspace(self):
+        self.entry = self.entry[:-1]
+        self._apply_entry()
 
     def _compute(self):
         app = App.get_running_app()
@@ -158,6 +194,7 @@ class SfmOverlay(ModalTouch, FloatLayout):
     unit = StringProperty('inch')            # diameter unit
     diameter = NumericProperty(0.0)          # in the chosen unit
     sfm = NumericProperty(100)
+    material = StringProperty('')            # last material button pressed, '' = custom SFM
     rpm = NumericProperty(0)
     rpm_set = NumericProperty(0)
     capped = BooleanProperty(False)
@@ -170,6 +207,15 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self.unit = sp.get('sfm_unit', 'inch')
         self.diameter = float(sp.get('sfm_diameter', 0.0))
         self.sfm = int(sp.get('sfm_sfm', 100))
+        self.material = sp.get('sfm_material', '')
+        self._compute()
+
+    def set_material(self, name):
+        """Material hot button: load that material's turning surface speed."""
+        app = App.get_running_app()
+        self.material = name
+        self.sfm = int(app.turn_sfm(name))
+        app.save_speed_pad(sfm_material=name, sfm_sfm=self.sfm)
         self._compute()
 
     def set_unit(self, unit):
@@ -187,7 +233,8 @@ class SfmOverlay(ModalTouch, FloatLayout):
 
     def set_sfm(self, v):
         self.sfm = int(v)
-        App.get_running_app().save_speed_pad(sfm_sfm=self.sfm)
+        self.material = ''                   # typed by hand: no material lit
+        App.get_running_app().save_speed_pad(sfm_sfm=self.sfm, sfm_material='')
         self._compute()
 
     def dia_text(self):
@@ -272,4 +319,11 @@ class SpeedPadPage(BoxLayout):
             r.label = name
             r.hint = 'drill surface speed, HSS'
             r.value = '%d SFM' % app.drill_sfm(name)
+            rows.add_widget(r)
+        for name, _default in TURN_MATERIALS:
+            r = Factory.PadRow()
+            r.key = 'tsfm:' + name
+            r.label = name
+            r.hint = 'turning surface speed, carbide (SFM popup)'
+            r.value = '%d SFM' % app.turn_sfm(name)
             rows.add_widget(r)

@@ -2515,11 +2515,13 @@
                 text: 'Plastic'
                 active: root.material == 'Plastic'
                 on_press: root.set_material('Plastic')
-            PickButton:
-                text: 'CUSTOM SIZE'
+            SLabel:
+                text: ('Custom: ' + root.entry + (' in' if root.unit == 'inch' else ' mm')) if root.entry else 'type a size below'
                 font_size: '12sp'
-                color: ACCENT
-                on_press: app.open_drill_custom()
+                color: ACCENT if root.entry else (0.45, 0.45, 0.45, 1)
+                text_size: self.size
+                halign: 'center'
+                valign: 'middle'
         SLabel:
             text: 'Drill size' + ('  (inch)' if root.unit == 'inch' else '  (mm)')
             font_size: '12sp'
@@ -2529,15 +2531,64 @@
             text_size: self.size
             halign: 'left'
             valign: 'middle'
-        ScrollView:
-            do_scroll_x: False
-            bar_width: 4
-            GridLayout:
-                id: sizes
-                cols: 5
-                spacing: 4
-                size_hint_y: None
-                height: self.minimum_height
+        GridLayout:
+            id: sizes
+            cols: 5
+            spacing: 4
+            size_hint_y: None
+            height: self.minimum_height
+        GridLayout:
+            cols: 3
+            spacing: 4
+            padding: [40, 4, 40, 0]
+            SetKey:
+                text: '7'
+                font_size: '22sp'
+                on_press: root.add_digit('7')
+            SetKey:
+                text: '8'
+                font_size: '22sp'
+                on_press: root.add_digit('8')
+            SetKey:
+                text: '9'
+                font_size: '22sp'
+                on_press: root.add_digit('9')
+            SetKey:
+                text: '4'
+                font_size: '22sp'
+                on_press: root.add_digit('4')
+            SetKey:
+                text: '5'
+                font_size: '22sp'
+                on_press: root.add_digit('5')
+            SetKey:
+                text: '6'
+                font_size: '22sp'
+                on_press: root.add_digit('6')
+            SetKey:
+                text: '1'
+                font_size: '22sp'
+                on_press: root.add_digit('1')
+            SetKey:
+                text: '2'
+                font_size: '22sp'
+                on_press: root.add_digit('2')
+            SetKey:
+                text: '3'
+                font_size: '22sp'
+                on_press: root.add_digit('3')
+            SetKey:
+                text: '.'
+                font_size: '22sp'
+                on_press: root.add_dot()
+            SetKey:
+                text: '0'
+                font_size: '22sp'
+                on_press: root.add_digit('0')
+            SetKey:
+                markup: True
+                text: '[font=' + app.fa + '][size=20]\uf55a[/size][/font]'
+                on_press: root.backspace()
         SLabel:
             text: root.result_text
             font_size: '13sp'
@@ -2567,7 +2618,7 @@
     BoxLayout:
         orientation: 'vertical'
         size_hint: (None, None)
-        size: (min(root.width - 20, 460), min(root.height - 20, 420))
+        size: (min(root.width - 20, 460), min(root.height - 20, 540))
         pos_hint: {'center_x': 0.5, 'center_y': 0.5}
         padding: 10
         spacing: 6
@@ -2607,6 +2658,49 @@
                 size_hint_x: None
                 width: 44
                 on_press: app.close_sfm()
+        SLabel:
+            text: 'Material (carbide turning) - or edit the SFM below'
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 20
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        GridLayout:
+            cols: 4
+            spacing: 4
+            size_hint_y: None
+            height: 84
+            PickButton:
+                text: 'Mild steel'
+                active: root.material == 'Mild steel'
+                on_press: root.set_material('Mild steel')
+            PickButton:
+                text: 'Med carbon'
+                active: root.material == 'Medium carbon'
+                on_press: root.set_material('Medium carbon')
+            PickButton:
+                text: 'Stainless'
+                active: root.material == 'Stainless'
+                on_press: root.set_material('Stainless')
+            PickButton:
+                text: 'Cast iron'
+                active: root.material == 'Cast iron'
+                on_press: root.set_material('Cast iron')
+            PickButton:
+                text: 'Aluminum'
+                active: root.material == 'Aluminum'
+                on_press: root.set_material('Aluminum')
+            PickButton:
+                text: 'Brass'
+                active: root.material == 'Brass'
+                on_press: root.set_material('Brass')
+            PickButton:
+                text: 'Plastic'
+                active: root.material == 'Plastic'
+                on_press: root.set_material('Plastic')
+            Widget:
         PadRow:
             key: 'sfm_dia'
             label: 'Diameter'

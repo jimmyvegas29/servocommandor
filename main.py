@@ -41,7 +41,7 @@ from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
 from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage,  # noqa: F401
-                      DEFAULT_SFM, JOG_RPM_DEFAULT, JOG_RPM_MAX)
+                      DEFAULT_SFM, DEFAULT_TURN_SFM, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -2009,6 +2009,10 @@ class ServoCommanderApp(App):
         return int(self.settings.get('speed_pad', {}).get('drill_sfm', {}).get(material,
                                                                                 DEFAULT_SFM.get(material, 100)))
 
+    def turn_sfm(self, material):
+        return int(self.settings.get('speed_pad', {}).get('turn_sfm', {}).get(material,
+                                                                               DEFAULT_TURN_SFM.get(material, 300)))
+
     def open_pad_edit(self, key):
         """EDIT on a Speed Pad row (or an SFM calculator row)."""
         ov = self._show('_param_edit', ParamEditOverlay())
@@ -2027,6 +2031,11 @@ class ServoCommanderApp(App):
             ov.setup_generic(name, 'Drill surface speed for an HSS drill', 'SFM',
                              10, 2000, '%d SFM' % self.drill_sfm(name),
                              lambda v: self._set_drill_sfm(name, v), 'SAVE')
+        elif key.startswith('tsfm:'):
+            name = key[5:]
+            ov.setup_generic(name, 'Turning surface speed (SFM popup button)', 'SFM',
+                             10, 3000, '%d SFM' % self.turn_sfm(name),
+                             lambda v: self._set_turn_sfm(name, v), 'SAVE')
         elif key == 'sfm_dia':
             o = self._sfm
             ov.setup_generic('Diameter', 'Work or tool diameter', 'in' if o.unit == 'inch' else 'mm',
@@ -2061,6 +2070,12 @@ class ServoCommanderApp(App):
         self._save_settings()
         self._refresh_speedpad_page()
 
+    def _set_turn_sfm(self, name, value):
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.setdefault('turn_sfm', {})[name] = int(value)
+        self._save_settings()
+        self._refresh_speedpad_page()
+
     # drill / sfm popups
     def open_drill(self):
         if not self._drive_ready():
@@ -2070,15 +2085,6 @@ class ServoCommanderApp(App):
 
     def close_drill(self):
         self._hide('_drill')
-
-    def open_drill_custom(self):
-        d = self._drill
-        if d is None:
-            return
-        ov = self._show('_param_edit', ParamEditOverlay())
-        unit = 'in' if d.unit == 'inch' else 'mm'
-        ov.setup_generic('Custom drill size', 'Diameter of the drill', unit, 0.01, 99,
-                         d.size_text or '-', d.custom_size, 'USE', allow_dot=True)
 
     def open_sfm(self):
         if not self._drive_ready():
@@ -2107,6 +2113,7 @@ class ServoCommanderApp(App):
         self._gui_cmd_until = time.monotonic() + 3600     # the poller must not fight the jog
         self._jog_evt = Clock.schedule_interval(self._jog_tick, 0.2)
         self._jog_tick(0)
+        self.update_rpm_display()
         log.info('JOG start: %d rpm %s (motor %d)', self.jog_rpm(), self.direction, self._jog_speed)
         return True
 
@@ -2179,14 +2186,18 @@ class ServoCommanderApp(App):
         log.info('Servo state: %s (%s)', self.servo_state, source)
 
     def update_rpm_display(self):
-        speed = self.current_speed if self.servo_state == 'enabled' else self.command_speed
+        if self.jogging:
+            # JOG held: show the jog speed, lit; the setpoint comes back on release
+            speed = self.jog_rpm() * self.ratio
+        else:
+            speed = self.current_speed if self.servo_state == 'enabled' else self.command_speed
         if self.mode == 'rpm':
             shown = round(speed / self.ratio)
         else:
             shown = round(self.ss_convert(speed))
         shown = max(0, min(9999, int(shown)))
         s = str(shown).zfill(4)
-        lit = WHITE if self.servo_state == 'enabled' else DIM
+        lit = WHITE if (self.servo_state == 'enabled' or self.jogging) else DIM
         cols = []
         for i, thresh in enumerate((1000, 100, 10, 1)):
             cols.append(GHOST if (shown < thresh and i < 3) else lit)

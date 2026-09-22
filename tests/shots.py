@@ -133,7 +133,7 @@ def s_sfm():
     app.open_sfm()
     app._sfm.set_unit('inch')
     app._sfm.set_diameter(2.125)
-    app._sfm.set_sfm(445)
+    app._sfm.set_material('Mild steel')
 
 
 def s_sfm_done():

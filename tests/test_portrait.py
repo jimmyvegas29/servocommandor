@@ -711,8 +711,18 @@ def after_layout(dt):
     d.choose('1/8', 0.125)
     check('drill capped at spindle max', (d.rpm, d.rpm_set, d.capped), (2750, app.max_spindle_rpm(), True))
     d.set_unit('mm')
-    d.custom_size(6.5)
-    check('drill custom mm', (d.size_text, d.rpm), ('6.5 mm', round(speedpad.rpm_for(90, 6.5 / 25.4))))
+    check('mm presets 6..20', [b.text for b in d.ids.sizes.children][::-1][:3] + [d.ids.sizes.children[0].text],
+          ['6', '7', '8', '20'])
+    for ch in '6.5':
+        d.add_dot() if ch == '.' else d.add_digit(ch)
+    check('drill typed mm', (d.entry, d.size_text, d.rpm), ('6.5', '6.5 mm', round(speedpad.rpm_for(90, 6.5 / 25.4))))
+    d.backspace()
+    d.backspace()
+    check('drill backspace', (d.entry, d.size_text), ('6', '6 mm'))
+    d.choose('8', 8 / 25.4)
+    check('picking a preset clears the entry', (d.entry, d.size_text), ('', '8 mm'))
+    for ch in '6.5':
+        d.add_dot() if ch == '.' else d.add_digit(ch)
     d.accept()
     check('drill set speed and closed', (app.command_speed, app._drill),
           (round(round(speedpad.rpm_for(90, 6.5 / 25.4)) * app.ratio), None))
@@ -724,8 +734,10 @@ def after_layout(dt):
     o = app._sfm
     o.set_unit('inch')
     o.set_diameter(2.125)
+    o.set_material('Mild steel')
+    check('sfm material button', (o.sfm, o.rpm), (400, 719))
     o.set_sfm(445)
-    check('sfm rpm', o.rpm, 800)
+    check('sfm rpm', (o.rpm, o.material), (800, ''))
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
 
@@ -737,10 +749,12 @@ def after_layout(dt):
     before = app.servo.jog_calls if hasattr(app.servo, 'jog_calls') else 0
     check('jog press', app.jog_press(), True)
     check('jog running', (app.jogging, app.servo.servostate, app.servo.rpm), (True, 'enabled', round(12 * app.ratio)))
+    check('jog readout shows jog rpm lit', (app.rpm_str, app.rpm_colors[3]), ('0012', m.WHITE))
     app._jog_tick(0)
     check('jog keep-alives', app.servo.jog_calls - before, 2)
     app.jog_release()
     check('jog stopped', (app.jogging, app.servo.servostate, app.servo_state), (False, 'disabled', 'disabled'))
+    check('readout back to the setpoint, dim', (app.rpm_str, app.rpm_colors[3]), ('0600', m.DIM))
     app.toggle_enable()
     app._poll_ui(0)
     check('no jog while enabled', (app.jog_ok, app.jog_press()), (False, False))
