@@ -154,16 +154,14 @@ class DrillOverlay(ModalTouch, FloatLayout):
 
 
 class SfmOverlay(ModalTouch, FloatLayout):
-    """Diameter + surface speed -> spindle rpm (+ feed rate if a feed is given)."""
+    """Diameter + surface speed -> spindle rpm."""
     unit = StringProperty('inch')            # diameter unit
     diameter = NumericProperty(0.0)          # in the chosen unit
     sfm = NumericProperty(100)
-    feed = NumericProperty(0.0)              # in/rev, optional
     rpm = NumericProperty(0)
     rpm_set = NumericProperty(0)
     capped = BooleanProperty(False)
     result_text = StringProperty('')
-    feed_text = StringProperty('')
     dia_label = StringProperty('-')
 
     def populate(self):
@@ -172,7 +170,6 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self.unit = sp.get('sfm_unit', 'inch')
         self.diameter = float(sp.get('sfm_diameter', 0.0))
         self.sfm = int(sp.get('sfm_sfm', 100))
-        self.feed = float(sp.get('sfm_feed', 0.0))
         self._compute()
 
     def set_unit(self, unit):
@@ -193,11 +190,6 @@ class SfmOverlay(ModalTouch, FloatLayout):
         App.get_running_app().save_speed_pad(sfm_sfm=self.sfm)
         self._compute()
 
-    def set_feed(self, v):
-        self.feed = float(v)
-        App.get_running_app().save_speed_pad(sfm_feed=self.feed)
-        self._compute()
-
     def dia_text(self):
         return (fmt_num(self.diameter) + (' in' if self.unit == 'inch' else ' mm')) if self.diameter > 0 else '-'
 
@@ -209,7 +201,6 @@ class SfmOverlay(ModalTouch, FloatLayout):
             self.rpm = self.rpm_set = 0
             self.capped = False
             self.result_text = 'Enter a diameter and a surface speed'
-            self.feed_text = ''
             return
         self.rpm = int(round(rpm_for(self.sfm, dia_in)))
         top = app.max_spindle_rpm()
@@ -217,12 +208,6 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self.rpm_set = min(self.rpm, top)
         note = '  (capped at %d, spindle max)' % top if self.capped else ''
         self.result_text = '%d SFM on %s  ->  %d rpm%s' % (self.sfm, self.dia_text(), self.rpm, note)
-        if self.feed > 0:
-            ipm = self.feed * self.rpm_set
-            self.feed_text = '%s in/rev at %d rpm = %s in/min (%s mm/min)' % (
-                fmt_num(self.feed, 4), self.rpm_set, fmt_num(ipm, 2), fmt_num(ipm * 25.4, 1))
-        else:
-            self.feed_text = ''
 
     def accept(self):
         if self.rpm_set > 0:

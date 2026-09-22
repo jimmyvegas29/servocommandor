@@ -134,7 +134,6 @@ def s_sfm():
     app._sfm.set_unit('inch')
     app._sfm.set_diameter(2.125)
     app._sfm.set_sfm(445)
-    app._sfm.set_feed(0.0063)
 
 
 def s_sfm_done():

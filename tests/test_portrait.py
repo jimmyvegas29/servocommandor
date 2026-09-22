@@ -726,8 +726,6 @@ def after_layout(dt):
     o.set_diameter(2.125)
     o.set_sfm(445)
     check('sfm rpm', o.rpm, 800)
-    o.set_feed(0.0063)
-    check('sfm feed line', '5.04 in/min' in o.feed_text, True)
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
 

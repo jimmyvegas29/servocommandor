@@ -2035,11 +2035,6 @@ class ServoCommanderApp(App):
             o = self._sfm
             ov.setup_generic('Surface speed', 'Feet per minute', 'SFM', 10, 5000,
                              '%d SFM' % o.sfm, o.set_sfm, 'SET')
-        elif key == 'sfm_feed':
-            o = self._sfm
-            ov.setup_generic('Feed', 'Inches per revolution (0 to clear)', 'in/rev', 0, 0.5,
-                             ('%.4f' % o.feed).rstrip('0').rstrip('.') if o.feed else '-',
-                             o.set_feed, 'SET', allow_dot=True)
         else:
             self._hide('_param_edit')
 
