@@ -323,7 +323,7 @@ class SpeedPadPage(BoxLayout):
         r = Factory.PadRow()
         r.key = 'step'
         r.label = 'Step buttons'
-        r.hint = '+ / - button size'
+        r.hint = '+/- speed'
         r.value = '%d %s' % (app.step_value(), unit)
         rows.add_widget(r)
         for pos in range(1, 7):
