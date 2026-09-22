@@ -20,12 +20,14 @@ from portrait_ui import ModalTouch
 # HSS drilling surface speeds (ft/min) - the user can change these on the
 # Speed Pad page; these are the defaults.
 DRILL_MATERIALS = [('Mild steel', 90), ('Medium carbon', 70), ('Stainless', 50),
-                   ('Cast iron', 70), ('Aluminum', 250), ('Brass', 200), ('Plastic', 150)]
+                   ('Cast iron', 70), ('Aluminum', 250), ('Brass', 200), ('Plastic', 150),
+                   ('High carbon', 60)]           # 4130 / 4140 alloy steels
 DEFAULT_SFM = dict(DRILL_MATERIALS)
 # turning surface speeds (ft/min) for coated carbide inserts, for the SFM
 # popup's material buttons; editable on the Speed Pad page too
 TURN_MATERIALS = [('Mild steel', 400), ('Medium carbon', 350), ('Stainless', 250),
-                  ('Cast iron', 300), ('Aluminum', 800), ('Brass', 500), ('Plastic', 600)]
+                  ('Cast iron', 300), ('Aluminum', 800), ('Brass', 500), ('Plastic', 600),
+                  ('High carbon', 300)]
 DEFAULT_TURN_SFM = dict(TURN_MATERIALS)
 
 # drill size lists: 15 each - inch 1/8 .. 1 in 1/16 steps, metric 6 .. 20 mm

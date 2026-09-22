@@ -2515,13 +2515,10 @@
                 text: 'Plastic'
                 active: root.material == 'Plastic'
                 on_press: root.set_material('Plastic')
-            SLabel:
-                text: ('Custom: ' + root.entry + (' in' if root.unit == 'inch' else ' mm')) if root.entry else 'type a size below'
-                font_size: '12sp'
-                color: ACCENT if root.entry else (0.45, 0.45, 0.45, 1)
-                text_size: self.size
-                halign: 'center'
-                valign: 'middle'
+            PickButton:
+                text: 'High carbon'
+                active: root.material == 'High carbon'
+                on_press: root.set_material('High carbon')
         SLabel:
             text: 'Drill size' + ('  (inch)' if root.unit == 'inch' else '  (mm)')
             font_size: '12sp'
@@ -2537,10 +2534,35 @@
             spacing: 4
             size_hint_y: None
             height: self.minimum_height
+        BoxLayout:
+            size_hint_y: None
+            height: 50
+            padding: [12, 0]
+            canvas.before:
+                Color:
+                    rgba: (0.05, 0.05, 0.05, 1)
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(7, 7)] * 4
+            SLabel:
+                text: 'Custom size'
+                font_size: '13sp'
+                color: (0.6, 0.6, 0.6, 1)
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            SLabel:
+                text: (root.entry if root.entry else '0') + (' in' if root.unit == 'inch' else ' mm')
+                font_size: '30sp'
+                color: (1, 1, 1, 1) if root.entry else (0.35, 0.35, 0.35, 1)
+                text_size: self.size
+                halign: 'right'
+                valign: 'middle'
         GridLayout:
             cols: 3
             spacing: 4
-            padding: [40, 4, 40, 0]
+            padding: [40, 0, 40, 0]
             SetKey:
                 text: '7'
                 font_size: '22sp'
@@ -2700,7 +2722,10 @@
                 text: 'Plastic'
                 active: root.material == 'Plastic'
                 on_press: root.set_material('Plastic')
-            Widget:
+            PickButton:
+                text: 'High carbon'
+                active: root.material == 'High carbon'
+                on_press: root.set_material('High carbon')
         PadRow:
             key: 'sfm_dia'
             label: 'Diameter'
