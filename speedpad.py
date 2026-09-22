@@ -17,18 +17,18 @@ from kivy.clock import Clock
 
 from portrait_ui import ModalTouch
 
-# HSS drilling surface speeds (ft/min) - the user can change these on the
-# Speed Pad page; these are the defaults.
-DRILL_MATERIALS = [('Mild steel', 90), ('Medium carbon', 70), ('Stainless', 50),
-                   ('Cast iron', 70), ('Aluminum', 250), ('Brass', 200), ('Plastic', 150),
-                   ('High carbon', 60)]           # 4130 / 4140 alloy steels
-DEFAULT_SFM = dict(DRILL_MATERIALS)
-# turning surface speeds (ft/min) for coated carbide inserts, for the SFM
-# popup's material buttons; editable on the Speed Pad page too
-TURN_MATERIALS = [('Mild steel', 400), ('Medium carbon', 350), ('Stainless', 250),
-                  ('Cast iron', 300), ('Aluminum', 800), ('Brass', 500), ('Plastic', 600),
-                  ('High carbon', 300)]
-DEFAULT_TURN_SFM = dict(TURN_MATERIALS)
+# Surface speeds (ft/min) per material, one table per tool: HSS and coated
+# carbide (CBD).  Both popups use them; the user can change every value on
+# the Speed Pad page.  High carbon = 4130 / 4140 alloy steels.
+MATERIALS = ['Mild steel', 'Medium carbon', 'High carbon', 'Stainless', 'Cast iron',
+             'Aluminum', 'Brass', 'Plastic']
+DEFAULT_SFM = {
+    'hss': {'Mild steel': 90, 'Medium carbon': 70, 'High carbon': 60, 'Stainless': 50,
+            'Cast iron': 70, 'Aluminum': 250, 'Brass': 200, 'Plastic': 150},
+    'cbd': {'Mild steel': 400, 'Medium carbon': 350, 'High carbon': 300, 'Stainless': 250,
+            'Cast iron': 300, 'Aluminum': 800, 'Brass': 500, 'Plastic': 600},
+}
+TOOL_NAMES = {'hss': 'HSS', 'cbd': 'carbide'}
 
 # drill size lists: 15 each - inch 1/8 .. 1 in 1/16 steps, metric 6 .. 20 mm
 INCH_SIZES = [(n, 16) for n in range(2, 17)]
@@ -59,6 +59,7 @@ def fmt_num(v, places=3):
 class DrillOverlay(ModalTouch, FloatLayout):
     """Pick a drill size and material -> recommended spindle rpm -> SET."""
     unit = StringProperty('inch')            # 'inch' | 'mm'
+    tool = StringProperty('hss')             # 'hss' | 'cbd'
     material = StringProperty('Mild steel')
     size_text = StringProperty('')           # label of the chosen size
     dia_in = NumericProperty(0.0)            # chosen diameter in inches
@@ -71,10 +72,17 @@ class DrillOverlay(ModalTouch, FloatLayout):
 
     def populate(self):
         app = App.get_running_app()
-        self.material = app.settings.get('speed_pad', {}).get('drill_material', self.material)
-        self.unit = app.settings.get('speed_pad', {}).get('drill_unit', self.unit)
+        sp = app.settings.get('speed_pad', {})
+        self.material = sp.get('drill_material', self.material)
+        self.unit = sp.get('drill_unit', self.unit)
+        self.tool = sp.get('drill_tool', 'hss')
         self._fill_sizes()
         self._compute()
+
+    def set_tool(self, tool):
+        self.tool = tool
+        self._compute()
+        App.get_running_app().save_speed_pad(drill_tool=tool)
 
     def _fill_sizes(self):
         grid = self.ids.sizes
@@ -170,7 +178,7 @@ class DrillOverlay(ModalTouch, FloatLayout):
 
     def _compute(self):
         app = App.get_running_app()
-        self.sfm = int(app.drill_sfm(self.material))
+        self.sfm = int(app.sfm_for(self.tool, self.material))
         if self.dia_in <= 0:
             self.rpm = 0
             self.rpm_set = 0
@@ -182,8 +190,8 @@ class DrillOverlay(ModalTouch, FloatLayout):
         self.capped = self.rpm > top
         self.rpm_set = min(self.rpm, top)
         note = '  (capped at %d, spindle max)' % top if self.capped else ''
-        self.result_text = '%s  in %s at %d SFM  ->  %d rpm%s' % (
-            self.size_text, self.material.lower(), self.sfm, self.rpm, note)
+        self.result_text = '%s, %s drill, %s at %d SFM  ->  %d rpm%s' % (
+            self.size_text, TOOL_NAMES[self.tool], self.material.lower(), self.sfm, self.rpm, note)
 
     def accept(self):
         if self.rpm_set > 0:
@@ -196,6 +204,7 @@ class SfmOverlay(ModalTouch, FloatLayout):
     unit = StringProperty('inch')            # diameter unit
     diameter = NumericProperty(0.0)          # in the chosen unit
     sfm = NumericProperty(100)
+    tool = StringProperty('cbd')             # 'hss' | 'cbd'
     material = StringProperty('')            # last material button pressed, '' = custom SFM
     rpm = NumericProperty(0)
     rpm_set = NumericProperty(0)
@@ -210,15 +219,24 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self.diameter = float(sp.get('sfm_diameter', 0.0))
         self.sfm = int(sp.get('sfm_sfm', 100))
         self.material = sp.get('sfm_material', '')
+        self.tool = sp.get('sfm_tool', 'cbd')
         self._compute()
 
     def set_material(self, name):
-        """Material hot button: load that material's turning surface speed."""
+        """Material hot button: load that material's surface speed for the tool."""
         app = App.get_running_app()
         self.material = name
-        self.sfm = int(app.turn_sfm(name))
+        self.sfm = int(app.sfm_for(self.tool, name))
         app.save_speed_pad(sfm_material=name, sfm_sfm=self.sfm)
         self._compute()
+
+    def set_tool(self, tool):
+        self.tool = tool
+        App.get_running_app().save_speed_pad(sfm_tool=tool)
+        if self.material:
+            self.set_material(self.material)     # reload the SFM for the new tool
+        else:
+            self._compute()
 
     def set_unit(self, unit):
         if unit != self.unit:
@@ -315,17 +333,11 @@ class SpeedPadPage(BoxLayout):
         r.hint = 'button 9, hold to turn the spindle'
         r.value = '%d rpm' % app.jog_rpm()
         rows.add_widget(r)
-        for name, _default in DRILL_MATERIALS:
-            r = Factory.PadRow()
-            r.key = 'sfm:' + name
-            r.label = name
-            r.hint = 'drill surface speed, HSS'
-            r.value = '%d SFM' % app.drill_sfm(name)
-            rows.add_widget(r)
-        for name, _default in TURN_MATERIALS:
-            r = Factory.PadRow()
-            r.key = 'tsfm:' + name
-            r.label = name
-            r.hint = 'turning surface speed, carbide (SFM popup)'
-            r.value = '%d SFM' % app.turn_sfm(name)
-            rows.add_widget(r)
+        for tool in ('hss', 'cbd'):
+            for name in MATERIALS:
+                r = Factory.PadRow()
+                r.key = 'sfm:%s:%s' % (tool, name)
+                r.label = name
+                r.hint = '%s surface speed' % TOOL_NAMES[tool]
+                r.value = '%d SFM' % app.sfm_for(tool, name)
+                rows.add_widget(r)

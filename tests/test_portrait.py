@@ -685,8 +685,8 @@ def after_layout(dt):
     app.open_settings('speedpad')
     page = app._settings_overlay.ids.content.children[0]
     labels = [r.label for r in page.ids.rows.children][::-1]
-    check('speed pad rows', (labels[0], labels[5], labels[6], labels[7]),
-          ('Button 1', 'Button 6', 'Jog speed', 'Mild steel'))
+    check('speed pad rows', (labels[0], labels[5], labels[6], labels[7], labels[9], len(labels)),
+          ('Button 1', 'Button 6', 'Jog speed', 'Mild steel', 'High carbon', 7 + 16))
     app.open_pad_edit('preset:1')
     ed = app._param_edit
     check('pad editor generic', (ed.title, ed.accept_text, ed.current), ('Button 1', 'SAVE', '75 rpm'))
@@ -705,9 +705,13 @@ def after_layout(dt):
     check('rpm_for', round(speedpad.rpm_for(90, 0.25)), 1375)
     app.open_drill()
     d = app._drill
+    d.set_tool('hss')
     d.set_material('Mild steel')
     d.choose('1/4', 0.25)
     check('drill rpm', (d.rpm, d.capped), (1375, False))
+    d.set_tool('cbd')
+    check('drill carbide capped', (d.rpm, d.capped), (6112, True))
+    d.set_tool('hss')
     d.choose('1/8', 0.125)
     check('drill capped at spindle max', (d.rpm, d.rpm_set, d.capped), (2750, app.max_spindle_rpm(), True))
     d.set_unit('mm')
@@ -734,8 +738,12 @@ def after_layout(dt):
     o = app._sfm
     o.set_unit('inch')
     o.set_diameter(2.125)
+    o.set_tool('cbd')
     o.set_material('Mild steel')
     check('sfm material button', (o.sfm, o.rpm), (400, 719))
+    o.set_tool('hss')
+    check('sfm tool switch reloads', (o.sfm, o.rpm), (90, 162))
+    o.set_tool('cbd')
     o.set_sfm(445)
     check('sfm rpm', (o.rpm, o.material), (800, ''))
     o.accept()

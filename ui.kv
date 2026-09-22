@@ -2447,23 +2447,41 @@
             size_hint_y: None
             height: 40
             SLabel:
-                text: 'Drill speed'
+                text: 'Drill'
                 font_size: '19sp'
                 text_size: self.size
                 halign: 'left'
                 valign: 'middle'
             BoxLayout:
                 size_hint_x: None
-                width: 150
+                width: 112
+                SegButton:
+                    text: 'HSS'
+                    font_size: '12sp'
+                    active: root.tool == 'hss'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_tool('hss')
+                SegButton:
+                    text: 'CBD'
+                    font_size: '12sp'
+                    active: root.tool == 'cbd'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_tool('cbd')
+            Widget:
+                size_hint_x: None
+                width: 6
+            BoxLayout:
+                size_hint_x: None
+                width: 112
                 SegButton:
                     text: 'INCH'
-                    font_size: '14sp'
+                    font_size: '12sp'
                     active: root.unit == 'inch'
                     corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
                     on_press: root.set_unit('inch')
                 SegButton:
                     text: 'MM'
-                    font_size: '14sp'
+                    font_size: '12sp'
                     active: root.unit == 'mm'
                     corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
                     on_press: root.set_unit('mm')
@@ -2473,7 +2491,7 @@
                 width: 44
                 on_press: app.close_drill()
         SLabel:
-            text: 'Material (HSS drill)'
+            text: 'Material'
             font_size: '12sp'
             color: (0.6, 0.6, 0.6, 1)
             size_hint_y: None
@@ -2496,6 +2514,10 @@
                 active: root.material == 'Medium carbon'
                 on_press: root.set_material('Medium carbon')
             PickButton:
+                text: 'High carbon'
+                active: root.material == 'High carbon'
+                on_press: root.set_material('High carbon')
+            PickButton:
                 text: 'Stainless'
                 active: root.material == 'Stainless'
                 on_press: root.set_material('Stainless')
@@ -2515,10 +2537,6 @@
                 text: 'Plastic'
                 active: root.material == 'Plastic'
                 on_press: root.set_material('Plastic')
-            PickButton:
-                text: 'High carbon'
-                active: root.material == 'High carbon'
-                on_press: root.set_material('High carbon')
         SLabel:
             text: 'Drill size' + ('  (inch)' if root.unit == 'inch' else '  (mm)')
             font_size: '12sp'
@@ -2655,23 +2673,41 @@
             size_hint_y: None
             height: 40
             SLabel:
-                text: 'Surface speed'
+                text: 'SFM'
                 font_size: '19sp'
                 text_size: self.size
                 halign: 'left'
                 valign: 'middle'
             BoxLayout:
                 size_hint_x: None
-                width: 150
+                width: 112
+                SegButton:
+                    text: 'HSS'
+                    font_size: '12sp'
+                    active: root.tool == 'hss'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_tool('hss')
+                SegButton:
+                    text: 'CBD'
+                    font_size: '12sp'
+                    active: root.tool == 'cbd'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_tool('cbd')
+            Widget:
+                size_hint_x: None
+                width: 6
+            BoxLayout:
+                size_hint_x: None
+                width: 112
                 SegButton:
                     text: 'INCH'
-                    font_size: '14sp'
+                    font_size: '12sp'
                     active: root.unit == 'inch'
                     corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
                     on_press: root.set_unit('inch')
                 SegButton:
                     text: 'MM'
-                    font_size: '14sp'
+                    font_size: '12sp'
                     active: root.unit == 'mm'
                     corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
                     on_press: root.set_unit('mm')
@@ -2681,7 +2717,7 @@
                 width: 44
                 on_press: app.close_sfm()
         SLabel:
-            text: 'Material (carbide turning) - or edit the SFM below'
+            text: 'Material - or edit the SFM below'
             font_size: '12sp'
             color: (0.6, 0.6, 0.6, 1)
             size_hint_y: None
@@ -2703,6 +2739,10 @@
                 active: root.material == 'Medium carbon'
                 on_press: root.set_material('Medium carbon')
             PickButton:
+                text: 'High carbon'
+                active: root.material == 'High carbon'
+                on_press: root.set_material('High carbon')
+            PickButton:
                 text: 'Stainless'
                 active: root.material == 'Stainless'
                 on_press: root.set_material('Stainless')
@@ -2722,10 +2762,6 @@
                 text: 'Plastic'
                 active: root.material == 'Plastic'
                 on_press: root.set_material('Plastic')
-            PickButton:
-                text: 'High carbon'
-                active: root.material == 'High carbon'
-                on_press: root.set_material('High carbon')
         PadRow:
             key: 'sfm_dia'
             label: 'Diameter'

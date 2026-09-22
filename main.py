@@ -41,7 +41,7 @@ from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
 from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage,  # noqa: F401
-                      DEFAULT_SFM, DEFAULT_TURN_SFM, JOG_RPM_DEFAULT, JOG_RPM_MAX)
+                      DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -2005,13 +2005,14 @@ class ServoCommanderApp(App):
     def jog_rpm(self):
         return int(self.settings.get('speed_pad', {}).get('jog_rpm', JOG_RPM_DEFAULT))
 
-    def drill_sfm(self, material):
-        return int(self.settings.get('speed_pad', {}).get('drill_sfm', {}).get(material,
-                                                                                DEFAULT_SFM.get(material, 100)))
+    def sfm_for(self, tool, material):
+        """Surface speed (ft/min) for a tool ('hss' / 'cbd') and material:
+        the user's value if set, else the default table."""
+        table = self.settings.get('speed_pad', {}).get('sfm_' + tool, {})
+        return int(table.get(material, DEFAULT_SFM[tool].get(material, 100)))
 
-    def turn_sfm(self, material):
-        return int(self.settings.get('speed_pad', {}).get('turn_sfm', {}).get(material,
-                                                                               DEFAULT_TURN_SFM.get(material, 300)))
+    def drill_sfm(self, material):          # kept for older callers / tests
+        return self.sfm_for('hss', material)
 
     def open_pad_edit(self, key):
         """EDIT on a Speed Pad row (or an SFM calculator row)."""
@@ -2027,15 +2028,10 @@ class ServoCommanderApp(App):
                              1, JOG_RPM_MAX, '%d rpm' % self.jog_rpm(),
                              lambda v: self._set_jog_rpm(v), 'SAVE')
         elif key.startswith('sfm:'):
-            name = key[4:]
-            ov.setup_generic(name, 'Drill surface speed for an HSS drill', 'SFM',
-                             10, 2000, '%d SFM' % self.drill_sfm(name),
-                             lambda v: self._set_drill_sfm(name, v), 'SAVE')
-        elif key.startswith('tsfm:'):
-            name = key[5:]
-            ov.setup_generic(name, 'Turning surface speed (SFM popup button)', 'SFM',
-                             10, 3000, '%d SFM' % self.turn_sfm(name),
-                             lambda v: self._set_turn_sfm(name, v), 'SAVE')
+            _, tool, name = key.split(':', 2)
+            ov.setup_generic(name, '%s surface speed, used by DRILL and SFM' % TOOL_NAMES[tool].capitalize(),
+                             'SFM', 10, 3000, '%d SFM' % self.sfm_for(tool, name),
+                             lambda v: self._set_sfm(tool, name, v), 'SAVE')
         elif key == 'sfm_dia':
             o = self._sfm
             ov.setup_generic('Diameter', 'Work or tool diameter', 'in' if o.unit == 'inch' else 'mm',
@@ -2064,15 +2060,9 @@ class ServoCommanderApp(App):
         self.save_speed_pad(jog_rpm=int(value))
         self._refresh_speedpad_page()
 
-    def _set_drill_sfm(self, name, value):
+    def _set_sfm(self, tool, name, value):
         sp = self.settings.setdefault('speed_pad', {})
-        sp.setdefault('drill_sfm', {})[name] = int(value)
-        self._save_settings()
-        self._refresh_speedpad_page()
-
-    def _set_turn_sfm(self, name, value):
-        sp = self.settings.setdefault('speed_pad', {})
-        sp.setdefault('turn_sfm', {})[name] = int(value)
+        sp.setdefault('sfm_' + tool, {})[name] = int(value)
         self._save_settings()
         self._refresh_speedpad_page()
 
