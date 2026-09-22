@@ -1,0 +1,290 @@
+"""Speed pad: adjustable presets 1-6, DRILL / SFM calculators, hold-to-JOG.
+
+Positions on the 3x3 speed grid run left to right, top to bottom:
+1-6 are user presets (spindle rpm, or surface speed in that mode), 7 is
+DRILL, 8 is SFM and 9 is JOG.  The values live in settings.json under
+'speed_pad'; servo.ini keeps the factory defaults.
+"""
+import math
+
+from kivy.app import App
+from kivy.properties import (StringProperty, NumericProperty, BooleanProperty,
+                             ListProperty)
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.floatlayout import FloatLayout
+from kivy.clock import Clock
+
+from portrait_ui import ModalTouch
+
+# HSS drilling surface speeds (ft/min) - the user can change these on the
+# Speed Pad page; these are the defaults.
+DRILL_MATERIALS = [('Mild steel', 90), ('Medium carbon', 70), ('Stainless', 50),
+                   ('Cast iron', 70), ('Aluminum', 250), ('Brass', 200), ('Plastic', 150)]
+DEFAULT_SFM = dict(DRILL_MATERIALS)
+
+# drill size lists: inch 1/8 .. 1 in 1/16 steps, metric 3 .. 25 mm in 1 mm steps
+INCH_SIZES = [(n, 16) for n in range(2, 17)]
+MM_SIZES = list(range(3, 26))
+JOG_RPM_DEFAULT = 5
+JOG_RPM_MAX = 60
+
+
+def frac_label(n, d):
+    while n % 2 == 0 and d % 2 == 0:
+        n //= 2
+        d //= 2
+    return '%d' % n if d == 1 else '%d/%d' % (n, d)
+
+
+def rpm_for(sfm, dia_in):
+    """Spindle rpm for a surface speed (ft/min) and a diameter (inches)."""
+    if dia_in <= 0:
+        return 0
+    return sfm * 12.0 / (math.pi * dia_in)
+
+
+def fmt_num(v, places=3):
+    s = ('%.*f' % (places, v)).rstrip('0').rstrip('.')
+    return s if s else '0'
+
+
+class DrillOverlay(ModalTouch, FloatLayout):
+    """Pick a drill size and material -> recommended spindle rpm -> SET."""
+    unit = StringProperty('inch')            # 'inch' | 'mm'
+    material = StringProperty('Mild steel')
+    size_text = StringProperty('')           # label of the chosen size
+    dia_in = NumericProperty(0.0)            # chosen diameter in inches
+    sfm = NumericProperty(0)
+    rpm = NumericProperty(0)                 # recommended, uncapped
+    rpm_set = NumericProperty(0)             # what SET will command (capped)
+    capped = BooleanProperty(False)
+    result_text = StringProperty('Pick a size')
+
+    def populate(self):
+        app = App.get_running_app()
+        self.material = app.settings.get('speed_pad', {}).get('drill_material', self.material)
+        self.unit = app.settings.get('speed_pad', {}).get('drill_unit', self.unit)
+        self._fill_sizes()
+        self._compute()
+
+    def _fill_sizes(self):
+        grid = self.ids.sizes
+        grid.clear_widgets()
+        app = App.get_running_app()
+        if self.unit == 'inch':
+            items = [(frac_label(n, d), n / float(d)) for n, d in INCH_SIZES]
+        else:
+            items = [('%d' % mm, mm / 25.4) for mm in MM_SIZES]
+        for label, dia in items:
+            b = Button(text=label, font_name=app.font, font_size='18sp',
+                       background_color=(0, 0, 0, 0), background_normal='',
+                       size_hint_y=None, height=48)
+            b.dia_in = dia
+            b.bind(on_press=lambda btn: self.choose(btn.text, btn.dia_in))
+            grid.add_widget(b)
+        self._restyle()
+
+    def _restyle(self):
+        for b in self.ids.sizes.children:
+            b.selected = (b.text == self.size_text)
+            b.canvas.before.clear()
+            from kivy.graphics import Color, RoundedRectangle
+            with b.canvas.before:
+                Color(0, 0.5, 1, 1) if b.selected else Color(0.16, 0.16, 0.16, 1)
+                b._rr = RoundedRectangle(pos=b.pos, size=b.size, radius=[(6, 6)] * 4)
+            b.bind(pos=self._sync_rr, size=self._sync_rr)
+
+    @staticmethod
+    def _sync_rr(btn, *a):
+        rr = getattr(btn, '_rr', None)
+        if rr is not None:
+            rr.pos, rr.size = btn.pos, btn.size
+
+    def set_unit(self, unit):
+        if unit != self.unit:
+            self.unit = unit
+            self.size_text = ''
+            self.dia_in = 0.0
+            self._fill_sizes()
+            self._compute()
+            App.get_running_app().save_speed_pad(drill_unit=unit)
+
+    def set_material(self, name):
+        self.material = name
+        self._compute()
+        App.get_running_app().save_speed_pad(drill_material=name)
+
+    def choose(self, label, dia_in):
+        self.size_text = label + (' in' if self.unit == 'inch' else ' mm')
+        self.dia_in = dia_in
+        self._restyle()
+        self._compute()
+
+    def custom_size(self, value):
+        """Numpad result: inches or mm depending on the unit toggle."""
+        if value <= 0:
+            return
+        self.size_text = fmt_num(value) + (' in' if self.unit == 'inch' else ' mm')
+        self.dia_in = value if self.unit == 'inch' else value / 25.4
+        self._restyle()
+        self._compute()
+
+    def _compute(self):
+        app = App.get_running_app()
+        self.sfm = int(app.drill_sfm(self.material))
+        if self.dia_in <= 0:
+            self.rpm = 0
+            self.rpm_set = 0
+            self.capped = False
+            self.result_text = 'Pick a size'
+            return
+        self.rpm = int(round(rpm_for(self.sfm, self.dia_in)))
+        top = app.max_spindle_rpm()
+        self.capped = self.rpm > top
+        self.rpm_set = min(self.rpm, top)
+        note = '  (capped at %d, spindle max)' % top if self.capped else ''
+        self.result_text = '%s  in %s at %d SFM  ->  %d rpm%s' % (
+            self.size_text, self.material.lower(), self.sfm, self.rpm, note)
+
+    def accept(self):
+        if self.rpm_set > 0:
+            App.get_running_app().set_spindle_rpm(self.rpm_set, 'drill %s' % self.size_text)
+            App.get_running_app().close_drill()
+
+
+class SfmOverlay(ModalTouch, FloatLayout):
+    """Diameter + surface speed -> spindle rpm (+ feed rate if a feed is given)."""
+    unit = StringProperty('inch')            # diameter unit
+    diameter = NumericProperty(0.0)          # in the chosen unit
+    sfm = NumericProperty(100)
+    feed = NumericProperty(0.0)              # in/rev, optional
+    rpm = NumericProperty(0)
+    rpm_set = NumericProperty(0)
+    capped = BooleanProperty(False)
+    result_text = StringProperty('')
+    feed_text = StringProperty('')
+    dia_label = StringProperty('-')
+
+    def populate(self):
+        app = App.get_running_app()
+        sp = app.settings.get('speed_pad', {})
+        self.unit = sp.get('sfm_unit', 'inch')
+        self.diameter = float(sp.get('sfm_diameter', 0.0))
+        self.sfm = int(sp.get('sfm_sfm', 100))
+        self.feed = float(sp.get('sfm_feed', 0.0))
+        self._compute()
+
+    def set_unit(self, unit):
+        if unit != self.unit:
+            # convert the entered diameter so the number keeps its meaning
+            self.diameter = self.diameter * 25.4 if unit == 'mm' else self.diameter / 25.4
+            self.unit = unit
+            self._compute()
+            App.get_running_app().save_speed_pad(sfm_unit=unit, sfm_diameter=self.diameter)
+
+    def set_diameter(self, v):
+        self.diameter = float(v)
+        App.get_running_app().save_speed_pad(sfm_diameter=self.diameter)
+        self._compute()
+
+    def set_sfm(self, v):
+        self.sfm = int(v)
+        App.get_running_app().save_speed_pad(sfm_sfm=self.sfm)
+        self._compute()
+
+    def set_feed(self, v):
+        self.feed = float(v)
+        App.get_running_app().save_speed_pad(sfm_feed=self.feed)
+        self._compute()
+
+    def dia_text(self):
+        return (fmt_num(self.diameter) + (' in' if self.unit == 'inch' else ' mm')) if self.diameter > 0 else '-'
+
+    def _compute(self):
+        app = App.get_running_app()
+        self.dia_label = self.dia_text()
+        dia_in = self.diameter if self.unit == 'inch' else self.diameter / 25.4
+        if dia_in <= 0 or self.sfm <= 0:
+            self.rpm = self.rpm_set = 0
+            self.capped = False
+            self.result_text = 'Enter a diameter and a surface speed'
+            self.feed_text = ''
+            return
+        self.rpm = int(round(rpm_for(self.sfm, dia_in)))
+        top = app.max_spindle_rpm()
+        self.capped = self.rpm > top
+        self.rpm_set = min(self.rpm, top)
+        note = '  (capped at %d, spindle max)' % top if self.capped else ''
+        self.result_text = '%d SFM on %s  ->  %d rpm%s' % (self.sfm, self.dia_text(), self.rpm, note)
+        if self.feed > 0:
+            ipm = self.feed * self.rpm_set
+            self.feed_text = '%s in/rev at %d rpm = %s in/min (%s mm/min)' % (
+                fmt_num(self.feed, 4), self.rpm_set, fmt_num(ipm, 2), fmt_num(ipm * 25.4, 1))
+        else:
+            self.feed_text = ''
+
+    def accept(self):
+        if self.rpm_set > 0:
+            App.get_running_app().set_spindle_rpm(self.rpm_set, 'sfm calc')
+            App.get_running_app().close_sfm()
+
+
+class JogButton(Button):
+    """Hold to jog: the app sends a jog command every 200 ms while the
+    finger is down and a stop the moment it lifts (the node also stops on
+    its own if the stream stops)."""
+    active = BooleanProperty(False)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            touch.grab(self)
+            self.state = 'down'
+            self.active = App.get_running_app().jog_press()
+            return True
+        return super(JogButton, self).on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            self.state = 'normal'
+            if self.active:
+                App.get_running_app().jog_release()
+            self.active = False
+            return True
+        return super(JogButton, self).on_touch_up(touch)
+
+
+class SpeedPadPage(BoxLayout):
+    """Settings > Speed Pad: presets 1-6, jog speed, drill surface speeds."""
+
+    def __init__(self, **kw):
+        super(SpeedPadPage, self).__init__(**kw)
+        self.refresh()
+
+    def refresh(self):
+        from kivy.factory import Factory
+        app = App.get_running_app()
+        rows = self.ids.rows
+        rows.clear_widgets()
+        unit = 'rpm' if app.mode == 'rpm' else ('sfm' if app.unit == 'inch' else 'm/min')
+        for pos in range(1, 7):
+            r = Factory.PadRow()
+            r.key = 'preset:%d' % pos
+            r.label = 'Button %d' % pos
+            r.hint = 'speed preset, %s' % unit
+            r.value = '%s %s' % (app.preset_value(pos), unit)
+            rows.add_widget(r)
+        r = Factory.PadRow()
+        r.key = 'jog'
+        r.label = 'Jog speed'
+        r.hint = 'button 9, hold to turn the spindle'
+        r.value = '%d rpm' % app.jog_rpm()
+        rows.add_widget(r)
+        for name, _default in DRILL_MATERIALS:
+            r = Factory.PadRow()
+            r.key = 'sfm:' + name
+            r.label = name
+            r.hint = 'drill surface speed, HSS'
+            r.value = '%d SFM' % app.drill_sfm(name)
+            rows.add_widget(r)

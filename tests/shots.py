@@ -117,6 +117,30 @@ def s_settings_conn():
     app._settings_overlay.select('connection')
 
 
+def s_settings_speedpad():
+    app._settings_overlay.select('speedpad')
+
+
+def s_drill():
+    app.close_settings()
+    app.open_drill()
+    app._drill.set_material('Mild steel')
+    app._drill.choose('1/4', 0.25)
+
+
+def s_sfm():
+    app.close_drill()
+    app.open_sfm()
+    app._sfm.set_unit('inch')
+    app._sfm.set_diameter(2.125)
+    app._sfm.set_sfm(445)
+    app._sfm.set_feed(0.0063)
+
+
+def s_sfm_done():
+    app.close_sfm()
+
+
 def s_settings_drive():
     app.set_enabled(False)
     app._settings_overlay.select('drive')
@@ -196,6 +220,10 @@ plan = [
     (0.2, s_settings_system), (0.4, lambda: cap('settings_system')),
     (0.2, s_settings_dro), (0.4, lambda: cap('settings_dro')),
     (0.2, s_settings_conn), (0.4, lambda: cap('settings_connection')),
+    (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
+    (0.2, s_drill), (0.6, lambda: cap('drill')),
+    (0.2, s_sfm), (0.6, lambda: cap('sfm')), (0.2, s_sfm_done),
+    (0.2, lambda: app.open_settings()),
     (0.2, s_settings_drive), (0.6, lambda: cap('settings_drive')),
     (0.2, s_param_edit), (0.4, lambda: cap('param_edit')),
     (0.2, s_param_dirty), (0.6, lambda: cap('settings_drive_dirty')),

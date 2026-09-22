@@ -95,6 +95,19 @@ class ServoCommunicator:
         self.rpm = speed
         print(f"Mock servo speed set to {speed}")
 
+    def jog(self, speed):
+        self._jog_saved = getattr(self, '_jog_saved', self.rpm)
+        self.rpm = speed
+        self.servostate = 'enabled'
+        self.jog_calls = getattr(self, 'jog_calls', 0) + 1
+        return True
+
+    def jog_stop(self):
+        self.servostate = 'disabled'
+        self.rpm = getattr(self, '_jog_saved', 0)
+        self._jog_saved = None
+        return True
+
     def get_rpm(self):
         # same shape as the real one: [alarm_code, speed in 0.1 rpm] with the
         # drive's 16-bit two's-complement for negative speeds, or None offline

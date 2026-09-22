@@ -31,6 +31,12 @@ BLE service 5e7a0001-... :
                       (06H); only the PARAM_WRITABLE set, only while disabled
                 b'V' save parameters to EEPROM (41H); the drive poll pauses
                       for 5 s afterwards while the drive is busy
+                b'J' + int16 LE signed motor rpm: jog keep-alive.  Runs the
+                      drive at that speed while these keep arriving (the
+                      panel sends one every 200 ms); the node stops the
+                      drive by itself 600 ms after the last one.  Refused
+                      while the lever is not OFF or the drive is enabled
+                      for any other reason.  b'j' stops a jog at once.
                 b'I' info: ack payload is the firmware VERSION string
                 b'F' + uint32 LE size + uint32 LE crc32: begin a firmware
                       update (the new node.py), b'f' + bytes: append a chunk,
@@ -59,7 +65,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.12'         # shown on the panel; bump on every change
+VERSION = 'node 3.13'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -318,6 +324,8 @@ state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0, 'avg_load': 0,
          'switch': 'neutral', 'enabled': False, 'cmd_ok': True, 'last_speed': 0,
          'armed': False,          # switch interlock: must pass through neutral first
          'save_until': None,      # ticks_ms until which the drive is busy saving
+         'jogging': False,        # hold-to-jog in progress
+         'jog_until': None,       # ticks_ms deadline for the next jog keep-alive
          'linked': False,         # a panel is connected over BLE
          'boot_disable': False,   # drive was told 'disable' once after coming online
          'poll_errors': 0}        # failed drive polls since boot (RS-485 noise indicator)
@@ -330,6 +338,8 @@ def safe_disable(why, zero_speed=False):
     ok = write_reg(0x0062, 0)
     if ok:
         state['enabled'] = False
+    state['jogging'] = False
+    state['jog_until'] = None
     if zero_speed:
         state['last_speed'] = 0
         ok = write_reg(0x0089, 0) and ok
@@ -358,11 +368,50 @@ def ota_abort():
         os.remove(OTA_TMP)
 
 
+JOG_MAX = 300                # motor rpm, hard cap for jog
+JOG_TIMEOUT_MS = 600
+
+
+def jog_end(why):
+    if not state['jogging']:
+        return
+    state['jogging'] = False
+    state['jog_until'] = None
+    ok = write_reg(0x0062, 0)
+    if ok:
+        state['enabled'] = False
+    apply_speed(state['last_speed'])            # setpoint back to the panel's speed
+    print('JOG end (%s):' % why, 'ok' if ok else 'disable FAILED')
+
+
 def handle_cmd(data):
     """Execute one panel command; returns the ack payload."""
     ok = False
     payload = b''
-    if data[:1] == b'I':
+    if data[:1] == b'J' and len(data) >= 3:
+        speed = struct.unpack('<h', data[1:3])[0]
+        speed = max(-JOG_MAX, min(JOG_MAX, speed))
+        if state['switch'] != 'neutral':
+            print('CMD J refused: lever not OFF')
+        elif state['enabled'] and not state['jogging']:
+            print('CMD J refused: drive already enabled')
+        elif not state['online']:
+            print('CMD J refused: drive offline')
+        else:
+            wire = -speed if INVERT_DIRECTION else speed
+            ok = write_reg(0x0089, wire)
+            if ok and not state['jogging']:
+                ok = write_reg(0x0062, 1)
+                if ok:
+                    state['enabled'] = True
+                    state['jogging'] = True
+                    print('JOG start', speed)
+            if ok:
+                state['jog_until'] = time.ticks_add(time.ticks_ms(), JOG_TIMEOUT_MS)
+    elif data[:1] == b'j':
+        jog_end('panel')
+        ok = True
+    elif data[:1] == b'I':
         ok = True
         payload = VERSION.encode()
     elif data[:1] == b'L':
@@ -500,6 +549,8 @@ async def drive_poller():
                 await asyncio.sleep_ms(POLL_MS)      # drive busy writing EEPROM
                 continue
             state['save_until'] = None
+        if state['jogging'] and time.ticks_diff(time.ticks_ms(), state['jog_until']) > 0:
+            jog_end('keep-alive timeout')
         regs = read_input_regs(0x0009, 19)
         if regs is None:
             regs = read_input_regs(0x0009, 19)     # one immediate retry (noise)
@@ -537,6 +588,8 @@ async def switch_task():
             state['switch'] = cur
             print('SWITCH', cur)
             if CONTROL_ALLOWED:
+                if state['jogging']:
+                    jog_end('lever moved')
                 if cur == 'neutral':
                     safe_disable('switch neutral')
                     if not state['armed']:

@@ -40,6 +40,8 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
+from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage,  # noqa: F401
+                      DEFAULT_SFM, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 USE_MOCK = bool(os.environ.get('SERVOCOM_MOCK'))
@@ -72,7 +74,10 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      # panel re-applies these every time the drive comes up.
                      'drive_params': {},
                      # folder name for diagnostic uploads ('' = the Pi's serial)
-                     'panel_name': ''}
+                     'panel_name': '',
+                     # speed pad: preset overrides per speed mode, jog speed,
+                     # drill surface speeds, last calculator inputs
+                     'speed_pad': {}}
 RED_MARGIN = 20               # load turns red this many % points under the alarm level
 ServoCommunicator = None      # imported in _start_servo() once the drive link is known
 
@@ -150,6 +155,15 @@ class NodeServo:
     def clear_alarm(self):
         self._send(b'C', 'clear alarm')
         return True
+
+    def jog(self, speed):
+        """Keep-alive jog: the node runs at this signed motor speed and stops
+        by itself if these stop arriving."""
+        import struct as _st
+        return self._send(b'J' + _st.pack('<h', int(speed)), 'jog %d' % speed)
+
+    def jog_stop(self):
+        return self._send(b'j', 'jog stop')
 
     # drive parameters: the node answers on the CMD notify, DroBle caches them
     @property
@@ -325,6 +339,10 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
     hi = NumericProperty(0)
     over = BooleanProperty(False)
 
+    accept_text = StringProperty('WRITE TO DRIVE')
+    allow_dot = BooleanProperty(False)
+    callback = None
+
     def setup(self, key):
         spec = DRIVE_PARAM_BY_KEY[key]
         app = App.get_running_app()
@@ -336,14 +354,37 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
         v = app.servo.params.get(spec['addr']) if hasattr(app.servo, 'params') else None
         self.current = '-' if v is None else '%d %s' % (v, spec['unit'])
 
+    def setup_generic(self, title, hint, unit, lo, hi, current, callback, accept_text='SET',
+                      allow_dot=False):
+        """Any number, not a drive parameter: callback(value) on accept."""
+        self.key = ''
+        self.title, self.hint, self.unit = title, hint, unit
+        self.lo, self.hi = lo, hi
+        self.current = current
+        self.callback = callback
+        self.accept_text = accept_text
+        self.allow_dot = allow_dot
+
+    def _value(self):
+        try:
+            return float(self.entry) if self.allow_dot else int(self.entry)
+        except ValueError:
+            return None
+
     def _check(self):
-        self.over = bool(self.entry) and not (self.lo <= int(self.entry) <= self.hi)
+        v = self._value()
+        self.over = bool(self.entry) and (v is None or not (self.lo <= v <= self.hi))
 
     def add_digit(self, d):
-        if len(self.entry) >= 5:
+        if len(self.entry) >= (7 if self.allow_dot else 5):
             return
         self.entry = d if self.entry == '0' else self.entry + d
         self._check()
+
+    def add_dot(self):
+        if self.allow_dot and '.' not in self.entry:
+            self.entry = (self.entry or '0') + '.'
+            self._check()
 
     def backspace(self):
         self.entry = self.entry[:-1]
@@ -355,6 +396,11 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
 
     def accept(self):
         if not self.entry or self.over:
+            return
+        if self.callback is not None:
+            v = self._value()
+            App.get_running_app().close_param_edit()
+            self.callback(v)
             return
         App.get_running_app().apply_drive_param(self.key, int(self.entry))
 
@@ -512,6 +558,7 @@ class SettingsOverlay(ModalTouch, FloatLayout):
              ('connection', 'Connection', 'ConnectionPage'),
              ('dro', 'DRO', 'DroPage'),
              ('drive', 'Drive', 'DrivePage'),
+             ('speedpad', 'Speed Pad', 'SpeedPadPage'),
              ('system', 'System', 'SystemPage')]
     page = StringProperty('')
 
@@ -737,6 +784,8 @@ class ServoCommanderApp(App):
         self._alarm = None
         self._ratio_cal = None
         self._param_edit = None
+        self._drill = None
+        self._sfm = None
         self._copy_overlay = None
         self._ble_picker = None
 
@@ -824,7 +873,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker'):
+                     '_copy_overlay', '_ble_picker', '_drill', '_sfm'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -1292,10 +1341,14 @@ class ServoCommanderApp(App):
         sp_btn = dict(self.config.items(self.mode))
         match_custom = re.compile(r"\((\w+)\s*,\s*(\d{1,4})\)")
         controls = root.ids.controls.ids if 'controls' in root.ids else root.ids
+        overrides = self.settings.get('speed_pad', {}).get(self.mode, {})
         for key, val in sp_btn.items():
             btn = controls.get(key)
-            if btn is None:
-                continue
+            if btn is None or key in ('sp_btn7', 'sp_btn8', 'sp_btn9'):
+                continue                 # 7-9 are DRILL / SFM / JOG now
+            pos = key[6:] if key.startswith('sp_btn') else ''
+            if pos in overrides:
+                val = str(int(overrides[pos]))
             m = match_custom.match(val.strip())
             if m and key.startswith('sp_btn'):
                 name, speed = m.group(1)[:10].upper(), int(m.group(2))
@@ -1917,6 +1970,168 @@ class ServoCommanderApp(App):
         log.info('GUI adjust_speed: %+d -> %s (direction=%s)',
                  amount, self.command_speed, self.direction)
 
+    # ---- speed pad ------------------------------------------------------
+    jog_ok = BooleanProperty(False)
+    jogging = BooleanProperty(False)
+
+    def max_spindle_rpm(self):
+        return int(self.max_rpm / self.ratio)
+
+    def set_spindle_rpm(self, rpm, why=''):
+        """Command a spindle rpm regardless of the display mode (rpm or
+        surface speed).  Sets the speed only; never enables."""
+        if not self._drive_ready():
+            return False
+        motor = int(round(rpm * self.ratio))
+        self.command_speed = max(0, min(self.max_rpm, motor))
+        self._send_speed()
+        log.info('GUI set_spindle_rpm: %s rpm -> motor %s (%s)', rpm, self.command_speed, why)
+        return True
+
+    def save_speed_pad(self, **kw):
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.update(kw)
+        self._save_settings()
+
+    def preset_value(self, pos):
+        sp = self.settings.get('speed_pad', {})
+        v = sp.get(self.mode, {}).get(str(pos))
+        if v is not None:
+            return int(v)
+        raw = self.config.get(self.mode, 'sp_btn%d' % pos, fallback='0')
+        m = re.match(r"\((\w+)\s*,\s*(\d{1,4})\)", raw.strip())
+        return int(m.group(2)) if m else int(raw.strip() or 0)
+
+    def jog_rpm(self):
+        return int(self.settings.get('speed_pad', {}).get('jog_rpm', JOG_RPM_DEFAULT))
+
+    def drill_sfm(self, material):
+        return int(self.settings.get('speed_pad', {}).get('drill_sfm', {}).get(material,
+                                                                                DEFAULT_SFM.get(material, 100)))
+
+    def open_pad_edit(self, key):
+        """EDIT on a Speed Pad row (or an SFM calculator row)."""
+        ov = self._show('_param_edit', ParamEditOverlay())
+        if key.startswith('preset:'):
+            pos = int(key.split(':')[1])
+            unit = 'rpm' if self.mode == 'rpm' else ('sfm' if self.unit == 'inch' else 'm/min')
+            ov.setup_generic('Button %d' % pos, 'Speed preset in the current mode', unit,
+                             1, self.display_max(), '%s %s' % (self.preset_value(pos), unit),
+                             lambda v: self._set_preset(pos, v), 'SAVE')
+        elif key == 'jog':
+            ov.setup_generic('Jog speed', 'Spindle rpm while JOG is held', 'rpm',
+                             1, JOG_RPM_MAX, '%d rpm' % self.jog_rpm(),
+                             lambda v: self._set_jog_rpm(v), 'SAVE')
+        elif key.startswith('sfm:'):
+            name = key[4:]
+            ov.setup_generic(name, 'Drill surface speed for an HSS drill', 'SFM',
+                             10, 2000, '%d SFM' % self.drill_sfm(name),
+                             lambda v: self._set_drill_sfm(name, v), 'SAVE')
+        elif key == 'sfm_dia':
+            o = self._sfm
+            ov.setup_generic('Diameter', 'Work or tool diameter', 'in' if o.unit == 'inch' else 'mm',
+                             0.01, 99, o.dia_text(), o.set_diameter, 'SET', allow_dot=True)
+        elif key == 'sfm_sfm':
+            o = self._sfm
+            ov.setup_generic('Surface speed', 'Feet per minute', 'SFM', 10, 5000,
+                             '%d SFM' % o.sfm, o.set_sfm, 'SET')
+        elif key == 'sfm_feed':
+            o = self._sfm
+            ov.setup_generic('Feed', 'Inches per revolution (0 to clear)', 'in/rev', 0, 0.5,
+                             ('%.4f' % o.feed).rstrip('0').rstrip('.') if o.feed else '-',
+                             o.set_feed, 'SET', allow_dot=True)
+        else:
+            self._hide('_param_edit')
+
+    def _refresh_speedpad_page(self):
+        ov = self._settings_overlay
+        if ov is not None and ov.page == 'speedpad':
+            ov.ids.content.children[0].refresh()
+
+    def _set_preset(self, pos, value):
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.setdefault(self.mode, {})[str(pos)] = int(value)
+        self._save_settings()
+        self._apply_presets(self.root_layout)
+        self._refresh_speedpad_page()
+        log.info('Speed preset %d (%s) -> %s', pos, self.mode, value)
+
+    def _set_jog_rpm(self, value):
+        self.save_speed_pad(jog_rpm=int(value))
+        self._refresh_speedpad_page()
+
+    def _set_drill_sfm(self, name, value):
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.setdefault('drill_sfm', {})[name] = int(value)
+        self._save_settings()
+        self._refresh_speedpad_page()
+
+    # drill / sfm popups
+    def open_drill(self):
+        if not self._drive_ready():
+            return
+        ov = self._show('_drill', DrillOverlay())
+        ov.populate()
+
+    def close_drill(self):
+        self._hide('_drill')
+
+    def open_drill_custom(self):
+        d = self._drill
+        if d is None:
+            return
+        ov = self._show('_param_edit', ParamEditOverlay())
+        unit = 'in' if d.unit == 'inch' else 'mm'
+        ov.setup_generic('Custom drill size', 'Diameter of the drill', unit, 0.01, 99,
+                         d.size_text or '-', d.custom_size, 'USE', allow_dot=True)
+
+    def open_sfm(self):
+        if not self._drive_ready():
+            return
+        ov = self._show('_sfm', SfmOverlay())
+        ov.populate()
+
+    def close_sfm(self):
+        self._hide('_sfm')
+
+    # jog: hold button 9
+    def _update_jog_ok(self):
+        ok = (not self.offline_flag and self.servo_state != 'enabled'
+              and getattr(self.servo, 'get_hw_direction', lambda: None)() is None
+              and hasattr(self.servo, 'jog'))
+        if ok != self.jog_ok:
+            self.jog_ok = ok
+
+    def jog_press(self):
+        self._update_jog_ok()
+        if not self.jog_ok or not self._drive_ready():
+            return False
+        motor = int(round(self.jog_rpm() * self.ratio))
+        self._jog_speed = -motor if self.direction == 'rev' else motor
+        self.jogging = True
+        self._gui_cmd_until = time.monotonic() + 3600     # the poller must not fight the jog
+        self._jog_evt = Clock.schedule_interval(self._jog_tick, 0.2)
+        self._jog_tick(0)
+        log.info('JOG start: %d rpm %s (motor %d)', self.jog_rpm(), self.direction, self._jog_speed)
+        return True
+
+    def _jog_tick(self, dt):
+        if self.jogging:
+            self.servo.jog(self._jog_speed)
+
+    def jog_release(self):
+        if not self.jogging:
+            return
+        self.jogging = False
+        evt = getattr(self, '_jog_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self.servo.jog_stop()
+        self._gui_cmd_until = time.monotonic() + 0.75
+        self.servo_state = 'disabled'
+        self.update_rpm_display()
+        log.info('JOG stop')
+
     def preset_press(self, btn):
         speed = getattr(btn, 'custom_speed', None)
         if speed is None:
@@ -1988,6 +2203,7 @@ class ServoCommanderApp(App):
         hw_state = self.servo.get_servo_state()
         if hw_state != self.servo_state and time.monotonic() > self._gui_cmd_until:
             self.set_enabled(hw_state == 'enabled', source='switch')
+        self._update_jog_ok()
         hw_dir = self.servo.get_hw_direction()
         if hw_dir is not None and hw_dir != self.direction:
             self.sync_direction(hw_dir)

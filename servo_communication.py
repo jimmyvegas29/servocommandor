@@ -265,6 +265,26 @@ class ServoCommunicator:
         self.last_save = (ok, time.time())
         return ok
 
+    # ---------------- jog (hold-to-run at a small speed) ----------------
+
+    def jog(self, speed):
+        """Run at a signed motor speed without touching the remembered
+        setpoint; the panel calls this every 200 ms while the button is held."""
+        wire = -speed if self.invert_direction else speed
+        if wire < 0:
+            wire = self.neg_speed(wire)
+        self._write(0x0089, wire)
+        if self.servostate != 'enabled':
+            self._write(0x0062, 1)
+            self.servostate = 'enabled'
+        return True
+
+    def jog_stop(self):
+        self._write(0x0062, 0)
+        self.servostate = 'disabled'
+        self.set_speed(self._last_speed)          # setpoint back to the panel's speed
+        return True
+
     def clear_alarm(self):
         #Sends a custom Modbus command 0x43 to clear alarms on the servo drive.
         log.info('clear_alarm (function 0x43)')

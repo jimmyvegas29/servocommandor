@@ -44,7 +44,7 @@ def run(dt):
     ids = app.root_layout.ids.controls.ids
     servo = app.servo
     # presets come from [rpm] in servo.ini
-    check('preset 8 from ini', ids.sp_btn8.text, '1250')
+    check('preset 8 is SFM', ids.sp_btn8.text, 'SFM')
     check('inc buttons from ini', (ids.inc_btnp.text, ids.inc_btnn.text), ('+50', '-50'))
     check('start disabled', app.servo_state, 'disabled')
     check('start rpm readout', app.rpm_str, '0000')
@@ -245,7 +245,7 @@ def after_alarm(dt):
     app.open_settings()
     ov = app._settings_overlay
     check('settings opens on display page', ov.page, 'display')
-    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'drive', 'dro', 'system'])
+    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'drive', 'dro', 'speedpad', 'system'])
     ov.select('system')
     check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
     check('display button inactive', ov._buttons['display'].active, False)
@@ -273,7 +273,7 @@ def after_alarm(dt):
     check('landscape root', type(app.root_layout).__name__, 'RootLandscape')
     check('stage 800x480', tuple(app.stage.size), (800, 480))
     check('history carried over', len(app.graph.hist), hist_len)
-    check('presets re-applied', app.control_ids().sp_btn8.text, '1250')
+    check('presets re-applied', app.control_ids().sp_btn6.text, '800')
     check('rpm readout kept', app.rpm_str, '0800')
     check('settings reopened after rebuild', app._settings_overlay is not None, True)
     check('landscape has no dro id', 'dro' in app.root_layout.ids, False)
@@ -284,7 +284,7 @@ def after_alarm(dt):
     app.settings['landscape_style'] = 'cards'
     app._build_stage()
     check('cards landscape root', type(app.root_layout).__name__, 'RootLandscapeCards')
-    check('cards presets', app.control_ids().sp_btn8.text, '1250')
+    check('cards presets', app.control_ids().sp_btn6.text, '800')
     app.settings['landscape_style'] = 'classic'
     app._build_stage()
     check('classic landscape again', type(app.root_layout).__name__, 'RootLandscape')
@@ -670,6 +670,87 @@ def after_layout(dt):
     app._save_settings()
     app.dro = None
     app.dro_stale = False
+
+    # speed pad: presets 1-6 editable, 7-9 are DRILL / SFM / JOG
+    import speedpad
+    ids = app.control_ids()
+    check('buttons 7-9 relabelled', (ids['sp_btn7'].text, ids['sp_btn8'].text, ids['sp_btn9'].text),
+          ('DRILL', 'SFM', 'JOG'))
+    check('preset 1 default from ini', app.preset_value(1), 50)
+    app._set_preset(1, 75)
+    check('preset 1 override applied', (ids['sp_btn1'].text, app.preset_value(1),
+                                         app.settings['speed_pad']['rpm']['1']), ('75', 75, 75))
+    app.preset_press(ids['sp_btn1'])
+    check('override preset sets speed', app.command_speed, round(75 * app.ratio))
+    app.open_settings('speedpad')
+    page = app._settings_overlay.ids.content.children[0]
+    labels = [r.label for r in page.ids.rows.children][::-1]
+    check('speed pad rows', (labels[0], labels[5], labels[6], labels[7]),
+          ('Button 1', 'Button 6', 'Jog speed', 'Mild steel'))
+    app.open_pad_edit('preset:1')
+    ed = app._param_edit
+    check('pad editor generic', (ed.title, ed.accept_text, ed.current), ('Button 1', 'SAVE', '75 rpm'))
+    for ch in '50':
+        ed.add_digit(ch)
+    ed.accept()
+    check('pad editor saved and closed', (app.preset_value(1), app._param_edit), (50, None))
+    app.open_pad_edit('jog')
+    for ch in '12':
+        app._param_edit.add_digit(ch)
+    app._param_edit.accept()
+    check('jog rpm saved', app.jog_rpm(), 12)
+    app.close_settings()
+
+    # drill: 1/4 in mild steel at 90 SFM -> 1375 rpm
+    check('rpm_for', round(speedpad.rpm_for(90, 0.25)), 1375)
+    app.open_drill()
+    d = app._drill
+    d.set_material('Mild steel')
+    d.choose('1/4', 0.25)
+    check('drill rpm', (d.rpm, d.capped), (1375, False))
+    d.choose('1/8', 0.125)
+    check('drill capped at spindle max', (d.rpm, d.rpm_set, d.capped), (2750, app.max_spindle_rpm(), True))
+    d.set_unit('mm')
+    d.custom_size(6.5)
+    check('drill custom mm', (d.size_text, d.rpm), ('6.5 mm', round(speedpad.rpm_for(90, 6.5 / 25.4))))
+    d.accept()
+    check('drill set speed and closed', (app.command_speed, app._drill),
+          (round(round(speedpad.rpm_for(90, 6.5 / 25.4)) * app.ratio), None))
+    d_unit = app.settings['speed_pad']['drill_unit']
+    check('drill unit remembered', d_unit, 'mm')
+
+    # sfm calculator: 2.125 in at 445 SFM -> 800 rpm, feed line
+    app.open_sfm()
+    o = app._sfm
+    o.set_unit('inch')
+    o.set_diameter(2.125)
+    o.set_sfm(445)
+    check('sfm rpm', o.rpm, 800)
+    o.set_feed(0.0063)
+    check('sfm feed line', '5.04 in/min' in o.feed_text, True)
+    o.accept()
+    check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
+
+    # jog: hold sends keep-alives at the jog speed, release stops and restores
+    app.set_speed(600)
+    app.servo.hw_direction = None            # lever OFF (an earlier check left it in FWD)
+    app._poll_ui(0)
+    check('jog allowed while disabled', app.jog_ok, True)
+    before = app.servo.jog_calls if hasattr(app.servo, 'jog_calls') else 0
+    check('jog press', app.jog_press(), True)
+    check('jog running', (app.jogging, app.servo.servostate, app.servo.rpm), (True, 'enabled', round(12 * app.ratio)))
+    app._jog_tick(0)
+    check('jog keep-alives', app.servo.jog_calls - before, 2)
+    app.jog_release()
+    check('jog stopped', (app.jogging, app.servo.servostate, app.servo_state), (False, 'disabled', 'disabled'))
+    app.toggle_enable()
+    app._poll_ui(0)
+    check('no jog while enabled', (app.jog_ok, app.jog_press()), (False, False))
+    app.toggle_enable()
+    app.settings['speed_pad'] = {}
+    app._save_settings()
+    app._apply_presets(app.root_layout)
+
 
     # machine node: drive data and commands through the Bluetooth packet
     from dro_ble import parse_packet as _pp, F_ONLINE, F_FWD, F_ENABLED, F_CONTROL, F_CMD_OK

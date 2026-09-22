@@ -434,19 +434,29 @@
             spacing: 5
             SButtonL:
                 id: sp_btn7
-                text: '1000'
-                font_size: root.btn_font
-                on_press: app.preset_press(self)
+                text: 'DRILL'
+                font_size: root.btn_font * 0.78
+                on_press: app.open_drill()
             SButtonN:
                 id: sp_btn8
-                text: '1250'
-                font_size: root.btn_font
-                on_press: app.preset_press(self)
-            SButtonR:
+                text: 'SFM'
+                font_size: root.btn_font * 0.78
+                on_press: app.open_sfm()
+            JogButton:
                 id: sp_btn9
-                text: '1500'
-                font_size: root.btn_font
-                on_press: app.preset_press(self)
+                text: 'JOG'
+                font_name: app.font
+                font_size: root.btn_font * 0.78
+                color: (1, 1, 1, 1) if app.jog_ok else (0.4, 0.4, 0.4, 1)
+                background_color: (0, 0, 0, 0)
+                background_normal: ''
+                canvas.before:
+                    Color:
+                        rgba: (0.95, 0.55, 0.15, 1) if self.active else PANEL
+                    RoundedRectangle:
+                        size: self.size
+                        pos: self.pos
+                        radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
     BoxLayout:
         orientation: 'vertical'
         size_hint_x: 0.36
@@ -816,16 +826,29 @@
                 spacing: 5
                 LsButtonL:
                     id: sp_btn7
-                    text: '1000'
-                    on_press: app.preset_press(self)
+                    text: 'DRILL'
+                    font_size: '30sp'
+                    on_press: app.open_drill()
                 LsButtonN:
                     id: sp_btn8
-                    text: '1500'
-                    on_press: app.preset_press(self)
-                LsButtonR:
+                    text: 'SFM'
+                    font_size: '30sp'
+                    on_press: app.open_sfm()
+                JogButton:
                     id: sp_btn9
-                    text: '2000'
-                    on_press: app.preset_press(self)
+                    text: 'JOG'
+                    font_name: app.font
+                    font_size: '30sp'
+                    color: (1, 1, 1, 1) if app.jog_ok else (0.4, 0.4, 0.4, 1)
+                    background_color: (0, 0, 0, 0)
+                    background_normal: ''
+                    canvas.before:
+                        Color:
+                            rgba: (0.95, 0.55, 0.15, 1) if self.active else PANEL
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
         BoxLayout:
             orientation: 'vertical'
             size_hint_x: 0.3275
@@ -2276,9 +2299,9 @@
                 font_size: '26sp'
                 on_press: root.add_digit('3')
             SetKey:
-                text: 'C'
+                text: '.' if root.allow_dot else 'C'
                 font_size: '26sp'
-                on_press: root.clear()
+                on_press: root.add_dot() if root.allow_dot else root.clear()
             SetKey:
                 text: '0'
                 font_size: '26sp'
@@ -2297,11 +2320,336 @@
                 on_press: app.close_param_edit()
             SetKey:
                 markup: True
-                text: '[font=' + app.fa + '][size=14]\uf00c[/size][/font]  WRITE TO DRIVE'
+                text: '[font=' + app.fa + '][size=14]\uf00c[/size][/font]  ' + root.accept_text
                 font_size: '17sp'
                 color: (0.4, 0.85, 0.5, 1) if (root.entry and not root.over) else (0.35, 0.35, 0.35, 1)
                 disabled: not root.entry or root.over
                 on_press: root.accept()
+
+<PadRow@BoxLayout>:
+    key: ''
+    label: ''
+    hint: ''
+    value: '-'
+    size_hint_y: None
+    height: 46
+    padding: [8, 3]
+    spacing: 6
+    canvas.before:
+        Color:
+            rgba: (1, 1, 1, 0.04)
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(4, 4)] * 4
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: 0.5
+        SLabel:
+            text: root.label
+            font_size: '14sp'
+            text_size: self.size
+            halign: 'left'
+            valign: 'bottom'
+        SLabel:
+            text: root.hint
+            font_size: '10sp'
+            color: (0.5, 0.5, 0.5, 1)
+            text_size: self.size
+            halign: 'left'
+            valign: 'top'
+            shorten: True
+            shorten_from: 'right'
+    SLabel:
+        text: root.value
+        font_size: '14sp'
+        size_hint_x: 0.32
+        text_size: self.size
+        halign: 'right'
+        valign: 'middle'
+        shorten: True
+        shorten_from: 'left'
+    SetKey:
+        text: 'EDIT'
+        font_size: '13sp'
+        size_hint_x: None
+        width: 52
+        color: ACCENT
+        on_press: app.open_pad_edit(root.key)
+
+<SpeedPadPage>:
+    orientation: 'vertical'
+    spacing: 6
+    SLabel:
+        text: 'Speed Pad'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 32
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+    ScrollView:
+        do_scroll_x: False
+        bar_width: 4
+        GridLayout:
+            id: rows
+            cols: 1
+            spacing: 4
+            size_hint_y: None
+            height: self.minimum_height
+    SLabel:
+        text: 'Buttons 1-6 are presets in the current speed mode. 7 DRILL and 8 SFM work out an rpm and set it. 9 JOG turns the spindle at the jog speed while held (servo must be disabled, lever OFF).'
+        font_size: '11sp'
+        color: (0.55, 0.55, 0.55, 1)
+        size_hint_y: None
+        height: 56
+        text_size: self.size
+        halign: 'left'
+        valign: 'top'
+
+<PickButton@Button>:
+    active: False
+    font_name: app.font
+    font_size: '15sp'
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+    color: (1, 1, 1, 1) if self.active else (0.75, 0.75, 0.75, 1)
+    canvas.before:
+        Color:
+            rgba: ACCENT if self.active else PANEL
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(6, 6)] * 4
+
+<DrillOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), root.height - 20)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 6
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Drill speed'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_x: None
+                width: 150
+                SegButton:
+                    text: 'INCH'
+                    font_size: '14sp'
+                    active: root.unit == 'inch'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_unit('inch')
+                SegButton:
+                    text: 'MM'
+                    font_size: '14sp'
+                    active: root.unit == 'mm'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_unit('mm')
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_drill()
+        SLabel:
+            text: 'Material (HSS drill)'
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 20
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        GridLayout:
+            id: materials
+            cols: 4
+            spacing: 4
+            size_hint_y: None
+            height: 84
+            PickButton:
+                text: 'Mild steel'
+                active: root.material == 'Mild steel'
+                on_press: root.set_material('Mild steel')
+            PickButton:
+                text: 'Med carbon'
+                active: root.material == 'Medium carbon'
+                on_press: root.set_material('Medium carbon')
+            PickButton:
+                text: 'Stainless'
+                active: root.material == 'Stainless'
+                on_press: root.set_material('Stainless')
+            PickButton:
+                text: 'Cast iron'
+                active: root.material == 'Cast iron'
+                on_press: root.set_material('Cast iron')
+            PickButton:
+                text: 'Aluminum'
+                active: root.material == 'Aluminum'
+                on_press: root.set_material('Aluminum')
+            PickButton:
+                text: 'Brass'
+                active: root.material == 'Brass'
+                on_press: root.set_material('Brass')
+            PickButton:
+                text: 'Plastic'
+                active: root.material == 'Plastic'
+                on_press: root.set_material('Plastic')
+            PickButton:
+                text: 'CUSTOM SIZE'
+                font_size: '12sp'
+                color: ACCENT
+                on_press: app.open_drill_custom()
+        SLabel:
+            text: 'Drill size' + ('  (inch)' if root.unit == 'inch' else '  (mm)')
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 20
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        ScrollView:
+            do_scroll_x: False
+            bar_width: 4
+            GridLayout:
+                id: sizes
+                cols: 5
+                spacing: 4
+                size_hint_y: None
+                height: self.minimum_height
+        SLabel:
+            text: root.result_text
+            font_size: '13sp'
+            color: (0.95, 0.75, 0.3, 1) if root.capped else (1, 1, 1, 1)
+            size_hint_y: None
+            height: 40
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        SetKey:
+            markup: True
+            text: '[font=' + app.fa + '][size=14]\uf00c[/size][/font]  SET ' + (str(root.rpm_set) + ' RPM' if root.rpm_set else 'SPEED')
+            font_size: '17sp'
+            size_hint_y: None
+            height: 54
+            color: (0.4, 0.85, 0.5, 1) if root.rpm_set > 0 else (0.35, 0.35, 0.35, 1)
+            disabled: root.rpm_set <= 0
+            on_press: root.accept()
+
+<SfmOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), min(root.height - 20, 520))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 6
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Surface speed'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_x: None
+                width: 150
+                SegButton:
+                    text: 'INCH'
+                    font_size: '14sp'
+                    active: root.unit == 'inch'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_unit('inch')
+                SegButton:
+                    text: 'MM'
+                    font_size: '14sp'
+                    active: root.unit == 'mm'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_unit('mm')
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_sfm()
+        PadRow:
+            key: 'sfm_dia'
+            label: 'Diameter'
+            hint: 'work or tool diameter'
+            value: root.dia_label
+        PadRow:
+            key: 'sfm_sfm'
+            label: 'Surface speed'
+            hint: 'ft/min (SFM)'
+            value: str(root.sfm) + ' SFM'
+        PadRow:
+            key: 'sfm_feed'
+            label: 'Feed (optional)'
+            hint: 'in/rev, for the feed rate line'
+            value: (('%.4f' % root.feed).rstrip('0').rstrip('.') + ' in/rev') if root.feed > 0 else '-'
+        SLabel:
+            text: root.result_text
+            font_size: '14sp'
+            color: (0.95, 0.75, 0.3, 1) if root.capped else (1, 1, 1, 1)
+            size_hint_y: None
+            height: 40
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        SLabel:
+            text: root.feed_text
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 30
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        Widget:
+        SetKey:
+            markup: True
+            text: '[font=' + app.fa + '][size=14]\uf00c[/size][/font]  SET ' + (str(root.rpm_set) + ' RPM' if root.rpm_set else 'SPEED')
+            font_size: '17sp'
+            size_hint_y: None
+            height: 54
+            color: (0.4, 0.85, 0.5, 1) if root.rpm_set > 0 else (0.35, 0.35, 0.35, 1)
+            disabled: root.rpm_set <= 0
+            on_press: root.accept()
 
 <RatioCalOverlay>:
     canvas.before:
