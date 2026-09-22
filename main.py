@@ -1349,6 +1349,8 @@ class ServoCommanderApp(App):
             pos = key[6:] if key.startswith('sp_btn') else ''
             if pos in overrides:
                 val = str(int(overrides[pos]))
+            if key in ('inc_btnp', 'inc_btnn') and 'step' in overrides:
+                val = ('+%d' if key == 'inc_btnp' else '-%d') % int(overrides['step'])
             m = match_custom.match(val.strip())
             if m and key.startswith('sp_btn'):
                 name, speed = m.group(1)[:10].upper(), int(m.group(2))
@@ -1993,6 +1995,23 @@ class ServoCommanderApp(App):
         sp.update(kw)
         self._save_settings()
 
+    def step_value(self):
+        """Size of the +/- step buttons in the current mode."""
+        sp = self.settings.get('speed_pad', {})
+        v = sp.get(self.mode, {}).get('step')
+        if v is not None:
+            return int(v)
+        raw = self.config.get(self.mode, 'inc_btnp', fallback='50').strip()
+        return abs(int(raw))
+
+    def _set_step(self, value):
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.setdefault(self.mode, {})['step'] = int(value)
+        self._save_settings()
+        self._apply_presets(self.root_layout)
+        self._refresh_speedpad_page()
+        log.info('Speed step (%s) -> %s', self.mode, value)
+
     def preset_value(self, pos):
         sp = self.settings.get('speed_pad', {})
         v = sp.get(self.mode, {}).get(str(pos))
@@ -2023,6 +2042,11 @@ class ServoCommanderApp(App):
             ov.setup_generic('Button %d' % pos, 'Speed preset in the current mode', unit,
                              1, self.display_max(), '%s %s' % (self.preset_value(pos), unit),
                              lambda v: self._set_preset(pos, v), 'SAVE')
+        elif key == 'step':
+            unit = 'rpm' if self.mode == 'rpm' else ('sfm' if self.unit == 'inch' else 'm/min')
+            ov.setup_generic('Step buttons', 'How much + and - change the speed', unit,
+                             1, max(1, self.display_max() // 2), '%d %s' % (self.step_value(), unit),
+                             lambda v: self._set_step(v), 'SAVE')
         elif key == 'jog':
             ov.setup_generic('Jog speed', 'Spindle rpm while JOG is held', 'rpm',
                              1, JOG_RPM_MAX, '%d rpm' % self.jog_rpm(),

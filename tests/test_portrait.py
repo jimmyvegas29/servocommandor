@@ -685,8 +685,17 @@ def after_layout(dt):
     app.open_settings('speedpad')
     page = app._settings_overlay.ids.content.children[0]
     labels = [r.label for r in page.ids.rows.children][::-1]
-    check('speed pad rows', (labels[0], labels[5], labels[6], labels[7], labels[9], len(labels)),
-          ('Button 1', 'Button 6', 'Jog speed', 'Mild steel', 'High carbon', 7 + 16))
+    check('speed pad rows', (labels[0], labels[1], labels[6], labels[7], labels[8], labels[10], len(labels)),
+          ('Step buttons', 'Button 1', 'Button 6', 'Jog speed', 'Mild steel', 'High carbon', 8 + 16))
+    check('step default from ini', (app.step_value(), ids['inc_btnp'].text, ids['inc_btnn'].text), (50, '+50', '-50'))
+    app.open_pad_edit('step')
+    for ch in '10':
+        app._param_edit.add_digit(ch)
+    app._param_edit.accept()
+    check('step changed', (app.step_value(), ids['inc_btnp'].text, ids['inc_btnn'].text), (10, '+10', '-10'))
+    app.set_speed(600)
+    app.adjust_speed(int(ids['inc_btnp'].text))
+    check('step button adds 10', app.command_speed, round(610 * app.ratio))
     app.open_pad_edit('preset:1')
     ed = app._param_edit
     check('pad editor generic', (ed.title, ed.accept_text, ed.current), ('Button 1', 'SAVE', '75 rpm'))

@@ -320,6 +320,12 @@ class SpeedPadPage(BoxLayout):
         rows = self.ids.rows
         rows.clear_widgets()
         unit = 'rpm' if app.mode == 'rpm' else ('sfm' if app.unit == 'inch' else 'm/min')
+        r = Factory.PadRow()
+        r.key = 'step'
+        r.label = 'Step buttons'
+        r.hint = 'the + and - buttons change the speed by this much'
+        r.value = '%d %s' % (app.step_value(), unit)
+        rows.add_widget(r)
         for pos in range(1, 7):
             r = Factory.PadRow()
             r.key = 'preset:%d' % pos
