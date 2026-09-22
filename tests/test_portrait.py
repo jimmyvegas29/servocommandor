@@ -245,7 +245,7 @@ def after_alarm(dt):
     app.open_settings()
     ov = app._settings_overlay
     check('settings opens on display page', ov.page, 'display')
-    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'drive', 'dro', 'speedpad', 'system'])
+    check('menu has pages', sorted(ov._buttons), ['connection', 'display', 'drive', 'dro', 'sfm', 'speedpad', 'system'])
     ov.select('system')
     check('system page selected', (ov.page, ov._buttons['system'].active), ('system', True))
     check('display button inactive', ov._buttons['display'].active, False)
@@ -688,8 +688,15 @@ def after_layout(dt):
     app.open_settings('speedpad')
     page = app._settings_overlay.ids.content.children[0]
     labels = [r.label for r in page.ids.rows.children][::-1]
-    check('speed pad rows', (labels[0], labels[1], labels[6], labels[7], labels[8], labels[10], len(labels)),
-          ('Step buttons', 'Button 1', 'Button 6', 'Jog speed', 'Mild steel', 'High carbon', 8 + 16))
+    check('speed pad rows', (labels[0], labels[1], labels[6], labels[7], len(labels)),
+          ('Step buttons', 'Button 1', 'Button 6', 'Jog speed', 8))
+    app._settings_overlay.select('sfm')
+    sfm_page = app._settings_overlay.ids.content.children[0]
+    sfm_labels = [r.label for r in sfm_page.ids.rows.children][::-1]
+    check('sfm page rows', (sfm_labels[0], sfm_labels[2], sfm_labels[8], len(sfm_labels)),
+          ('Mild steel', 'High carbon', 'Mild steel', 16))
+    app._settings_overlay.select('speedpad')
+    page = app._settings_overlay.ids.content.children[0]
     check('step default from ini', (app.step_value(), ids['inc_btnp'].text, ids['inc_btnn'].text), (50, '+50', '-50'))
     app.open_pad_edit('step')
     for ch in '10':

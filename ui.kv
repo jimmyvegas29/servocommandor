@@ -2406,6 +2406,27 @@
             size_hint_y: None
             height: self.minimum_height
 
+<SfmPage>:
+    orientation: 'vertical'
+    spacing: 6
+    SLabel:
+        text: 'SFM'
+        font_size: '18sp'
+        size_hint_y: None
+        height: 32
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+    ScrollView:
+        do_scroll_x: False
+        bar_width: 4
+        GridLayout:
+            id: rows
+            cols: 1
+            spacing: 4
+            size_hint_y: None
+            height: self.minimum_height
+
 <PickButton@Button>:
     active: False
     font_name: app.font

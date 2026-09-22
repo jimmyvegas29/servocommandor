@@ -40,7 +40,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
-from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage,  # noqa: F401
+from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -565,6 +565,7 @@ class SettingsOverlay(ModalTouch, FloatLayout):
              ('dro', 'DRO', 'DroPage'),
              ('drive', 'Drive', 'DrivePage'),
              ('speedpad', 'Speed Pad', 'SpeedPadPage'),
+             ('sfm', 'SFM', 'SfmPage'),
              ('system', 'System', 'SystemPage')]
     page = StringProperty('')
 
@@ -2100,7 +2101,7 @@ class ServoCommanderApp(App):
 
     def _refresh_speedpad_page(self):
         ov = self._settings_overlay
-        if ov is not None and ov.page == 'speedpad':
+        if ov is not None and ov.page in ('speedpad', 'sfm'):
             ov.ids.content.children[0].refresh()
 
     def _set_preset(self, pos, value):

@@ -339,6 +339,20 @@ class SpeedPadPage(BoxLayout):
         r.hint = 'hold to enable'
         r.value = '%d rpm' % app.jog_rpm()
         rows.add_widget(r)
+
+
+class SfmPage(BoxLayout):
+    """Settings > SFM: the surface-speed tables, HSS then carbide."""
+
+    def __init__(self, **kw):
+        super(SfmPage, self).__init__(**kw)
+        self.refresh()
+
+    def refresh(self):
+        from kivy.factory import Factory
+        app = App.get_running_app()
+        rows = self.ids.rows
+        rows.clear_widgets()
         for tool in ('hss', 'cbd'):
             for name in MATERIALS:
                 r = Factory.PadRow()
