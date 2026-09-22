@@ -117,6 +117,14 @@ def s_settings_conn():
     app._settings_overlay.select('connection')
 
 
+def s_drive_info():
+    app.open_drive_info()
+
+
+def s_drive_info_close():
+    app.close_info()
+
+
 def s_settings_speedpad():
     app._settings_overlay.select('speedpad')
 
@@ -219,6 +227,7 @@ plan = [
     (0.2, s_settings_system), (0.4, lambda: cap('settings_system')),
     (0.2, s_settings_dro), (0.4, lambda: cap('settings_dro')),
     (0.2, s_settings_conn), (0.4, lambda: cap('settings_connection')),
+    (0.2, s_drive_info), (0.5, lambda: cap('drive_info')), (0.2, s_drive_info_close),
     (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
     (0.2, s_drill), (0.6, lambda: cap('drill')),
     (0.2, s_sfm), (0.6, lambda: cap('sfm')), (0.2, s_sfm_done),

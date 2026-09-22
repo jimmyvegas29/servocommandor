@@ -2137,14 +2137,21 @@
 <DrivePage>:
     orientation: 'vertical'
     spacing: 6
-    SLabel:
-        text: 'Drive'
-        font_size: '18sp'
+    BoxLayout:
         size_hint_y: None
         height: 32
-        text_size: self.size
-        halign: 'left'
-        valign: 'middle'
+        SLabel:
+            text: 'Drive'
+            font_size: '18sp'
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        IconButton:
+            text: ''
+            font_size: '24sp'
+            size_hint_x: None
+            width: 40
+            on_press: app.open_drive_info()
     ScrollView:
         do_scroll_x: False
         bar_width: 4
@@ -2162,9 +2169,10 @@
             SLabel:
                 text: root.status
                 font_size: '12sp'
-                color: (0.6, 0.6, 0.6, 1)
+                color: (0.95, 0.75, 0.3, 1)
                 size_hint_y: None
-                height: 44
+                height: 30 if root.status else 0
+                opacity: 1 if root.status else 0
                 text_size: self.size
                 halign: 'left'
                 valign: 'middle'
@@ -2782,6 +2790,55 @@
             color: (0.4, 0.85, 0.5, 1) if root.rpm_set > 0 else (0.35, 0.35, 0.35, 1)
             disabled: root.rpm_set <= 0
             on_press: root.accept()
+
+<InfoOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), min(root.height - 20, 470))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 12
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: root.title
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            IconButton:
+                text: ''
+                size_hint_x: None
+                width: 44
+                on_press: app.close_info()
+        SLabel:
+            text: root.body
+            font_size: '14sp'
+            color: (0.85, 0.85, 0.85, 1)
+            text_size: self.size
+            halign: 'left'
+            valign: 'top'
+        SetKey:
+            text: 'OK'
+            font_size: '17sp'
+            size_hint_y: None
+            height: 50
+            on_press: app.close_info()
 
 <RatioCalOverlay>:
     canvas.before:

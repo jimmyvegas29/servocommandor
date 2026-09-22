@@ -405,6 +405,12 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
         App.get_running_app().apply_drive_param(self.key, int(self.entry))
 
 
+class InfoOverlay(ModalTouch, FloatLayout):
+    """A titled block of explanatory text with a close button."""
+    title = StringProperty('')
+    body = StringProperty('')
+
+
 class RatioCalOverlay(ModalTouch, FloatLayout):
     """Drive-ratio calibration: run the spindle at a preset, read the real
     spindle rpm with a tach, type it in.  new ratio = motor rpm / measured."""
@@ -786,6 +792,7 @@ class ServoCommanderApp(App):
         self._param_edit = None
         self._drill = None
         self._sfm = None
+        self._info = None
         self._copy_overlay = None
         self._ble_picker = None
 
@@ -873,7 +880,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker', '_drill', '_sfm'):
+                     '_copy_overlay', '_ble_picker', '_drill', '_sfm', '_info'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -1154,12 +1161,36 @@ class ServoCommanderApp(App):
             return 'Node firmware is read-only'
         if self.servo_state == 'enabled':
             return 'Disable the servo to change parameters'
-        kept = len(self.settings.get('drive_params', {}))
-        if kept:
-            return ('Live from the drive. %d value%s set from here, re-applied at every '
-                    "start-up; the rest are the drive's own"
-                    % (kept, '' if kept == 1 else 's'))
-        return 'Values live from the drive'
+        return ''
+
+    DRIVE_INFO = (
+        "These values are read live from the XP200." + "\n\n" +
+        "EDIT writes the new value to the drive at once and it takes effect "
+        "immediately. This drive does not keep values written over the link "
+        "when it is powered off, so the panel remembers every value changed "
+        "here and writes it back each time the drive comes up. Values you have "
+        "not changed stay as the drive's own." + "\n\n" +
+        "To make a change permanent in the drive itself, save it at the drive "
+        "keypad: main menu EE, SET, hold Enter until DONE.")
+
+    def open_drive_info(self):
+        kept = self.settings.get('drive_params', {})
+        names = {}
+        for spec in DRIVE_PARAMS:
+            names[str(spec['addr'])] = spec['label']
+            if spec['mirror'] is not None:
+                names[str(spec['mirror'])] = spec['label']
+        changed = sorted(set(names.get(k, 'Pr%03d' % int(k)) for k in kept))
+        if changed:
+            extra = "\n\n" + 'Set from this panel: ' + ', '.join(changed)
+        else:
+            extra = "\n\n" + 'Nothing has been changed from this panel yet.'
+        ov = self._show('_info', InfoOverlay())
+        ov.title = 'Drive parameters'
+        ov.body = self.DRIVE_INFO + extra
+
+    def close_info(self):
+        self._hide('_info')
 
     def request_drive_params(self):
         if not self._servo_has_params():
