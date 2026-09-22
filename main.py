@@ -1156,8 +1156,8 @@ class ServoCommanderApp(App):
             return 'Disable the servo to change parameters'
         kept = len(self.settings.get('drive_params', {}))
         if kept:
-            return ('Live from the drive. %d value%s kept by the panel and re-applied '
-                    'at every start-up (the drive only keeps them itself via keypad EE > SET)'
+            return ('Live from the drive. %d value%s set from here, re-applied at every '
+                    "start-up; the rest are the drive's own"
                     % (kept, '' if kept == 1 else 's'))
         return 'Values live from the drive'
 

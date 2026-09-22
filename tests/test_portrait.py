@@ -373,7 +373,7 @@ def after_ratio(ini_path, ini_before, old_ratio):
           (None, {'70': 200, '71': -200}))
     page.refresh()
     check('row shows new value', rows['overload_level'].value, '200 %')
-    check('status says kept', 'kept by the panel' in page.status, True)
+    check('status says kept', 'set from here' in page.status, True)
     app.toggle_enable()
     page.refresh()
     check('no edit while enabled', (app.drive_edit_ok, page.status), (False, 'Disable the servo to change parameters'))
