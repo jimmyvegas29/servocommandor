@@ -429,7 +429,10 @@ class InfoOverlay(ModalTouch, FloatLayout):
 
 class RatioCalOverlay(ModalTouch, FloatLayout):
     """Drive-ratio calibration: run the spindle at a preset, read the real
-    spindle rpm with a tach, type it in.  new ratio = motor rpm / measured."""
+    spindle rpm with a tach, type it in.  new ratio = motor rpm / measured.
+    mode 'back': the same with the lathe in back gear; that overall ratio
+    (motor turns per spindle turn) is what the Tap tool uses in back gear."""
+    mode = StringProperty('direct')
     entry = StringProperty('')
     motor_rpm = NumericProperty(0)
     shown_rpm = NumericProperty(0)
@@ -441,9 +444,14 @@ class RatioCalOverlay(ModalTouch, FloatLayout):
         app = App.get_running_app()
         live = app.servo_state == 'enabled' and app.current_speed > 0
         self.motor_rpm = int(app.current_speed if live else 0)
-        self.shown_rpm = int(round(self.motor_rpm / app.ratio)) if live else 0
-        self.hint = ('Spindle running - read the tach and enter the rpm'
-                     if live else 'Enable the servo and run a preset first, then enter the tach reading')
+        ratio = app.back_gear_ratio() if self.mode == 'back' else app.ratio
+        self.shown_rpm = int(round(self.motor_rpm / ratio)) if (live and ratio) else 0
+        if self.mode == 'back':
+            self.hint = ('In back gear and running - read the tach and enter the spindle rpm'
+                         if live else 'Put the lathe in back gear, run a preset, then enter the tach reading')
+        else:
+            self.hint = ('Spindle running - read the tach and enter the rpm'
+                         if live else 'Enable the servo and run a preset first, then enter the tach reading')
         self._compute()
 
     def _compute(self):
@@ -475,7 +483,11 @@ class RatioCalOverlay(ModalTouch, FloatLayout):
     def accept(self):
         if self.new_ratio <= 0:
             return
-        App.get_running_app().apply_ratio(self.new_ratio)
+        app = App.get_running_app()
+        if self.mode == 'back':
+            app.apply_back_gear_ratio(self.new_ratio)
+        else:
+            app.apply_ratio(self.new_ratio)
 
 
 class CopyOverlay(ModalTouch, FloatLayout):
@@ -1163,6 +1175,8 @@ class ServoCommanderApp(App):
                                            if self.drive_link == 'node' else 'XP200 ttyS0 9600')
         return [('Drive', drive),
                 ('Ratio', '%.3f' % self.ratio),
+                ('Back gear ratio', ('%.3f' % self.back_gear_ratio()) if self.back_gear_ratio()
+                 else 'not calibrated'),
                 ('Max motor rpm', '%d' % self.max_rpm),
                 ('Max spindle rpm', '%d' % round(self.max_rpm / self.ratio)),
                 ('Invert direction', 'ON' if cfg.getboolean('Hardware', 'invert_direction') else 'OFF')]
@@ -1335,8 +1349,8 @@ class ServoCommanderApp(App):
             return 'since boot: ' + ', '.join(since)
         return 'none since boot'
 
-    def open_ratio_cal(self):
-        ov = self._show('_ratio_cal', RatioCalOverlay())
+    def open_ratio_cal(self, mode='direct'):
+        ov = self._show('_ratio_cal', RatioCalOverlay(mode=mode))
         ov.refresh()
         # keep the motor rpm reading live while the popup is open
         self._ratio_cal_evt = Clock.schedule_interval(lambda dt: ov.refresh(), 0.5)
@@ -1359,6 +1373,20 @@ class ServoCommanderApp(App):
         self._write_ini_value('Settings', 'ratio', self.fmt_ratio(self.ratio))
         log.info('Ratio calibrated: %.3f -> %.3f', old, self.ratio)
         self.update_rpm_display()
+        self.close_ratio_cal()
+        if self._settings_overlay is not None:
+            self.open_settings('drive')
+
+    def back_gear_ratio(self):
+        """Overall motor turns per spindle turn in back gear (Drive page
+        calibration), or 0 when it has not been calibrated."""
+        return float(self.settings.get('back_gear_ratio') or 0)
+
+    def apply_back_gear_ratio(self, ratio):
+        old = self.back_gear_ratio()
+        self.settings['back_gear_ratio'] = round(float(ratio), 3)
+        self._save_settings()
+        log.info('Back gear ratio calibrated: %.3f -> %.3f', old, self.back_gear_ratio())
         self.close_ratio_cal()
         if self._settings_overlay is not None:
             self.open_settings('drive')
@@ -2402,8 +2430,8 @@ class ServoCommanderApp(App):
         # back gear (Tap only): the spindle turns bg_ratio times slower than
         # in direct drive and gets bg_ratio times the torque
         bg = bool(sp.get('tap_bg'))
-        bg_ratio = float(sp.get('tap_bg_ratio') or self.TAP_BG_DEFAULT)
-        eff = self.ratio * (bg_ratio if bg else 1.0)
+        bg_ratio = self.back_gear_ratio()         # overall, from the Drive page calibration
+        eff = bg_ratio if (bg and bg_ratio > 0) else self.ratio
         drag, drag_rpm = self.tap_drag_for(rpm, bg)
         manual = int(sp.get('tap_tlim_manual') or 0)
         motor_nm = self.motor_rated_nm()
@@ -2433,8 +2461,6 @@ class ServoCommanderApp(App):
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
     TAP_CAP_MAX = 150               # the node's hard cap for a tap pass
-
-    TAP_BG_DEFAULT = 7.14          # Clausing 5914 speed chart (2000 / 280): measure it
 
     def tap_auto_cap(self, thread, drag=None, ratio=None):
         """Torque cap (drive %) for a thread from the table: drag + the
@@ -2508,6 +2534,8 @@ class ServoCommanderApp(App):
         c = c or self.tap_config()
         if not self._tap_node_ok():
             return 'Needs the machine node on firmware 3.15 or newer (UPDATE NODE)'
+        if c['bg'] and c['bg_ratio'] <= 0:
+            return 'Back gear is not calibrated: CALIBRATE BACK GEAR on the Drive page first'
         if c['depth_mm'] <= 0:
             return 'Enter the %s' % ('max depth' if c['mode'] == 'bottom' else 'depth')
         if c['tlim'] <= 0:
@@ -2948,10 +2976,6 @@ class ServoCommanderApp(App):
             o = self._tap
             ov.setup_generic('Torque limit', 'Drive torque cap for the pass; 0 = auto from the thread',
                              '%', 0, 150, o.tlim_text, o.set_tlim, 'SET')
-        elif key == 'tap_bg_ratio':
-            o = self._tap
-            ov.setup_generic('Back gear ratio', 'Spindle turns in direct drive per turn in back gear', ':1',
-                             1.5, 20, o.bg_ratio_text, o.set_bg_ratio, 'SET', allow_dot=True)
         elif key == 'motor_nm':
             ov.setup_generic('Motor rated torque', 'From the servo motor nameplate', 'Nm', 0.1, 100,
                              self.motor_nm_text, self._set_motor_nm, 'SAVE', allow_dot=True)

@@ -2436,14 +2436,20 @@
                 halign: 'left'
                 valign: 'middle'
             BoxLayout:
+                orientation: 'vertical'
                 size_hint_y: None
-                height: 44
+                height: 94
                 spacing: 6
                 SetKey:
                     text: 'CALIBRATE RATIO'
                     font_size: '14sp'
                     color: ACCENT
                     on_press: app.open_ratio_cal()
+                SetKey:
+                    text: 'CALIBRATE BACK GEAR'
+                    font_size: '14sp'
+                    color: ACCENT
+                    on_press: app.open_ratio_cal('back')
             PadRow:
                 key: 'motor_nm'
                 label: 'Motor torque'
@@ -3583,17 +3589,6 @@
                     label: 'Stalls for bottom'
                     hint: 'same-depth stalls in a row'
                     value: str(root.confirm)
-                TouchGate:
-                    # only there in back gear; hidden it takes no taps
-                    size_hint_y: None
-                    height: 46 if root.bg else 0
-                    opacity: 1 if root.bg else 0
-                    live: root.bg
-                    PadRow:
-                        key: 'tap_bg_ratio'
-                        label: 'Back gear ratio'
-                        hint: 'Clausing chart 7.14: measure yours'
-                        value: root.bg_ratio_text
                 PadRow:
                     key: 'tap_rpm'
                     label: 'Speed'
@@ -3784,7 +3779,7 @@
             size_hint_y: None
             height: 40
             SLabel:
-                text: 'Ratio calibration'
+                text: 'Back gear calibration' if root.mode == 'back' else 'Ratio calibration'
                 font_size: '19sp'
                 text_size: self.size
                 halign: 'left'

@@ -339,6 +339,21 @@ def after_ratio(ini_path, ini_before, old_ratio):
     # restore the original ratio in the file and the app
     app.apply_ratio(old_ratio)
     check('ratio restored', open(ini_path, encoding='utf-8').read() == ini_before, True)
+    # back gear calibration: same method, stored as the overall back gear ratio
+    app.settings.pop('back_gear_ratio', None)
+    app.open_ratio_cal('back')
+    cal = app._ratio_cal
+    cal.refresh()
+    check('back gear cal: title mode, motor rpm read', (cal.mode, cal.motor_rpm), ('back', round(600 * old_ratio)))
+    for ch in '85':                       # in back gear the tach reads ~85
+        cal.add_digit(ch)
+    want_bg = round(round(600 * old_ratio) / 85.0, 3)
+    cal.accept()
+    check('back gear ratio stored, direct ratio untouched, ini untouched',
+          (app.back_gear_ratio(), app.ratio, open(ini_path, encoding='utf-8').read() == ini_before),
+          (want_bg, old_ratio, True))
+    check('drive page lists the back gear ratio',
+          dict(app.drive_rows()).get('Back gear ratio'), '%.3f' % want_bg)
     app.toggle_enable()
     app.close_settings()
 
@@ -1363,13 +1378,18 @@ def tap_flow(dt):
 
     # back gear: counts, motor speed, cap and drag all go through the back gear
     app.save_speed_pad(tap_thread='1/2-13', tap_mode='depth', tap_depth_mm=12.7, tap_rpm=40,
-                       tap_tlim_manual=0, tap_bg=False, tap_bg_ratio=7.0,
+                       tap_tlim_manual=0, tap_bg=False,
                        tap_drag={'50': 14, '100': 18}, tap_drag_bg={})
     c = app.tap_config()
     check('direct: 1/2-13 capped by the lathe', (c['tlim'], c['drag']), (150, 14))
+    app.settings['back_gear_ratio'] = 0
     app.save_speed_pad(tap_bg=True)
     c = app.tap_config()
-    eff = app.ratio * 7.0
+    check('back gear not calibrated: refused, says where to calibrate',
+          'CALIBRATE BACK GEAR' in app.tap_problem(c), True)
+    app.settings['back_gear_ratio'] = round(app.ratio * 7.0, 3)
+    c = app.tap_config()
+    eff = round(app.ratio * 7.0, 3)
     check('back gear: effective ratio', round(c['eff_ratio'], 4), round(eff, 4))
     check('back gear: no bg drag measured -> none used', c['drag'], None)
     check('back gear: cap from the clutch setting through the back gear',

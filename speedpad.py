@@ -405,7 +405,6 @@ class TapOverlay(ModalTouch, FloatLayout):
     ok = BooleanProperty(False)
     material = StringProperty('Mild steel')
     bg = BooleanProperty(False)
-    bg_ratio_text = StringProperty('')
 
     def populate(self):
         self._note = ''
@@ -450,8 +449,6 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_bg(self, on):
         self._save(tap_bg=bool(on))
 
-    def set_bg_ratio(self, v):
-        self._save(tap_bg_ratio=float(v))
 
     def measure(self):
         app = App.get_running_app()
@@ -467,7 +464,6 @@ class TapOverlay(ModalTouch, FloatLayout):
         c = app.tap_config()
         self.mode, self.hand, self.material = c['mode'], c['hand'], c['material']
         self.bg = c['bg']
-        self.bg_ratio_text = fmt_num(c['bg_ratio'], 2) + ' : 1'
         self.thread_text = app.tap_pitch_text(c)
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
         self.confirm, self.rpm = c['confirm'], c['rpm']

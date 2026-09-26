@@ -177,7 +177,8 @@ def s_tap():
 
 
 def s_tap_bg():
-    app.save_speed_pad(tap_bg=True, tap_bg_ratio=7.14, tap_thread='1/2-13', tap_rpm=40)
+    app.settings['back_gear_ratio'] = 11.78
+    app.save_speed_pad(tap_bg=True, tap_thread='1/2-13', tap_rpm=40)
     app._tap.refresh()
 
 
