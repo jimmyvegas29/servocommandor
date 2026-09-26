@@ -434,9 +434,10 @@
             spacing: 5
             SButtonL:
                 id: sp_btn7
-                text: 'DRILL'
-                font_size: root.btn_font * 0.78
-                on_press: app.open_drill()
+                text: '[font=' + app.fa + ']\uf0c9[/font]'
+                markup: True
+                font_size: root.btn_font
+                on_press: app.open_tools()
             SButtonN:
                 id: sp_btn8
                 text: 'SFM'
@@ -826,9 +827,10 @@
                 spacing: 5
                 LsButtonL:
                     id: sp_btn7
-                    text: 'DRILL'
-                    font_size: '30sp'
-                    on_press: app.open_drill()
+                    text: '[font=' + app.fa + ']\uf0c9[/font]'
+                    markup: True
+                    font_size: '34sp'
+                    on_press: app.open_tools()
                 LsButtonN:
                     id: sp_btn8
                     text: 'SFM'
@@ -2811,6 +2813,80 @@
             color: (0.4, 0.85, 0.5, 1) if root.rpm_set > 0 else (0.35, 0.35, 0.35, 1)
             disabled: root.rpm_set <= 0
             on_press: root.accept()
+
+<ToolRow@Button>:
+    title: ''
+    hint: ''
+    ready: True
+    font_name: app.font
+    markup: True
+    size_hint_y: None
+    height: 74
+    halign: 'left'
+    valign: 'middle'
+    padding: [18, 0]
+    text_size: self.size
+    color: (1, 1, 1, 1) if self.ready else (0.42, 0.42, 0.42, 1)
+    text: '[size=23sp]' + self.title + '[/size]\n[size=12sp]' + self.hint + '[/size]'
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+    canvas.before:
+        Color:
+            rgba: ACCENT if (self.state == 'down' and self.ready) else PANEL
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+
+<ToolsOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.9)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        width: min(root.width - 20, 420)
+        height: self.minimum_height
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Spindle tools'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                padding: [6, 0]
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_tools()
+        ToolRow:
+            title: 'Drill'
+            hint: 'Spindle speed for a drill size and material'
+            on_press: app.tools_pick('drill')
+        ToolRow:
+            title: 'Tap'
+            hint: 'Not built yet: depth by spindle turns, torque stop'
+            ready: False
+        ToolRow:
+            title: 'Constant SFM'
+            hint: 'Not built yet: speed follows the diameter while facing'
+            ready: False
 
 <InfoOverlay>:
     canvas.before:

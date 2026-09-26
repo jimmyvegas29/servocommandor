@@ -674,11 +674,11 @@ def after_layout(dt):
     app.dro = None
     app.dro_stale = False
 
-    # speed pad: presets 1-6 editable, 7-9 are DRILL / SFM / JOG
+    # speed pad: presets 1-6 editable, 7-9 are the tools menu / SFM / JOG
     import speedpad
     ids = app.control_ids()
     check('buttons 7-9 relabelled', (ids['sp_btn7'].text, ids['sp_btn8'].text, ids['sp_btn9'].text),
-          ('DRILL', 'SFM', 'JOG'))
+          ('[font=' + app.fa + ']\uf0c9[/font]', 'SFM', 'JOG'))
     check('preset 1 default from ini', app.preset_value(1), 50)
     app._set_preset(1, 75)
     check('preset 1 override applied', (ids['sp_btn1'].text, app.preset_value(1),
@@ -719,6 +719,15 @@ def after_layout(dt):
     app._param_edit.accept()
     check('jog rpm saved', app.jog_rpm(), 12)
     app.close_settings()
+
+    # button 7 is the tools menu; Drill opens the drill popup and closes the menu
+    app.open_tools()
+    check('tools menu open', app._tools is not None, True)
+    app.tools_pick('tap')
+    check('tap not built: menu stays', (app._tools is not None, app._drill), (True, None))
+    app.tools_pick('drill')
+    check('drill from the menu', (app._tools, app._drill is not None), (None, True))
+    app.close_drill()
 
     # drill: 1/4 in mild steel at 90 SFM -> 1375 rpm
     check('rpm_for', round(speedpad.rpm_for(90, 0.25)), 1375)

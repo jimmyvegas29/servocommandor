@@ -129,8 +129,13 @@ def s_settings_speedpad():
     app._settings_overlay.select('speedpad')
 
 
-def s_drill():
+def s_tools():
     app.close_settings()
+    app.open_tools()
+
+
+def s_drill():
+    app.close_tools()
     app.open_drill()
     app._drill.set_material('Mild steel')
     app._drill.choose('1/4', 0.25)
@@ -229,6 +234,7 @@ plan = [
     (0.2, s_settings_conn), (0.4, lambda: cap('settings_connection')),
     (0.2, s_drive_info), (0.5, lambda: cap('drive_info')), (0.2, s_drive_info_close),
     (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
+    (0.2, s_tools), (0.6, lambda: cap('tools')),
     (0.2, s_drill), (0.6, lambda: cap('drill')),
     (0.2, s_sfm), (0.6, lambda: cap('sfm')), (0.2, s_sfm_done),
     (0.2, lambda: app.open_settings()),

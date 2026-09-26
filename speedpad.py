@@ -199,6 +199,11 @@ class DrillOverlay(ModalTouch, FloatLayout):
             App.get_running_app().close_drill()
 
 
+class ToolsOverlay(ModalTouch, FloatLayout):
+    """Speed pad button 7: menu of spindle tools.  Drill works; Tap and
+    Constant SFM are listed but not built yet."""
+
+
 class SfmOverlay(ModalTouch, FloatLayout):
     """Diameter + surface speed -> spindle rpm."""
     unit = StringProperty('inch')            # diameter unit

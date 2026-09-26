@@ -40,7 +40,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
-from speedpad import (DrillOverlay, SfmOverlay, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+from speedpad import (DrillOverlay, ToolsOverlay, SfmOverlay, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -792,6 +792,7 @@ class ServoCommanderApp(App):
         self._ratio_cal = None
         self._param_edit = None
         self._drill = None
+        self._tools = None
         self._sfm = None
         self._info = None
         self._copy_overlay = None
@@ -881,7 +882,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker', '_drill', '_sfm', '_info'):
+                     '_copy_overlay', '_ble_picker', '_tools', '_drill', '_sfm', '_info'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -2122,7 +2123,18 @@ class ServoCommanderApp(App):
         self._save_settings()
         self._refresh_speedpad_page()
 
-    # drill / sfm popups
+    # tools menu, drill / sfm popups
+    def open_tools(self):
+        self._show('_tools', ToolsOverlay())
+
+    def close_tools(self):
+        self._hide('_tools')
+
+    def tools_pick(self, name):
+        if name == 'drill':
+            self.close_tools()
+            self.open_drill()
+
     def open_drill(self):
         if not self._drive_ready():
             return
