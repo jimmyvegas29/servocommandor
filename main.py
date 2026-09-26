@@ -40,7 +40,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
-from speedpad import (DrillOverlay, ToolsOverlay, SfmOverlay, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -793,6 +793,7 @@ class ServoCommanderApp(App):
         self._param_edit = None
         self._drill = None
         self._tools = None
+        self._css = None
         self._sfm = None
         self._info = None
         self._copy_overlay = None
@@ -882,7 +883,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker', '_tools', '_drill', '_sfm', '_info'):
+                     '_copy_overlay', '_ble_picker', '_tools', '_css', '_drill', '_sfm', '_info'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -1986,6 +1987,7 @@ class ServoCommanderApp(App):
     def set_speed(self, speed):
         if not self._drive_ready():
             return
+        self.css_stop('manual speed')
         self.command_speed = self._to_motor(speed)
         if self.command_speed > self.max_rpm:
             log.warning('set_speed clamped: %s -> %s (servo_max_rpm)',
@@ -1999,11 +2001,102 @@ class ServoCommanderApp(App):
     def adjust_speed(self, amount):
         if not self._drive_ready():
             return
+        self.css_stop('manual speed')
         self.command_speed += self._to_motor(amount)
         self.command_speed = max(0, min(self.max_rpm, self.command_speed))
         self._send_speed()
         log.info('GUI adjust_speed: %+d -> %s (direction=%s)',
                  amount, self.command_speed, self.direction)
+
+    # ---- constant surface speed (tools menu) -----------------------------
+    css_active = BooleanProperty(False)
+    css_label = StringProperty('')
+    CSS_TICK = 0.2                  # s between rpm updates while it runs
+
+    def css_config(self):
+        sp = self.settings.get('speed_pad', {})
+        return {'tool': sp.get('css_tool', 'cbd'), 'material': sp.get('css_material', ''),
+                'sfm': int(sp.get('css_sfm', 300)),
+                'top': int(sp.get('css_top', min(1000, self.max_spindle_rpm()))),
+                'x_mode': sp.get('css_x', 'radius')}
+
+    def css_diameter_in(self):
+        """Work diameter in inches from the X ABS reading, taken as the
+        distance from the spindle centreline (radius) or as the diameter."""
+        x = abs(self._abs_mm('X'))
+        d_mm = x * 2.0 if self.css_config()['x_mode'] == 'radius' else x
+        return d_mm / 25.4
+
+    def css_rpm(self, sfm, top, dia_in):
+        """(spindle rpm, capped) for a surface speed on a diameter, never
+        above the CSS top limit or the spindle maximum."""
+        top = min(int(top), self.max_spindle_rpm())
+        rpm = rpm_for(sfm, dia_in) if dia_in > 0.001 else top
+        return int(round(min(rpm, top))), rpm >= top
+
+    def css_set_diameter(self, dia):
+        """Measured work diameter typed in (display units): move the X ABS
+        datum so X reads it (as radius or diameter), keeping X's sign."""
+        d_mm = dia * 25.4 if self.units == 'in' else dia
+        want = d_mm / 2.0 if self.css_config()['x_mode'] == 'radius' else d_mm
+        sign = -1.0 if self._abs_mm('X') < 0 else 1.0
+        self.abs_off['X'] = self.raw['X'] - sign * want
+        self.refresh_axes()
+        self._save_datums()
+        log.info('CSS: X ABS set from measured diameter %s %s', dia, self.units)
+
+    def css_start(self):
+        if not self._drive_ready():
+            return False
+        if self.dro is None or self.dro_stale:
+            log.info('CSS not started: no live DRO')
+            return False
+        self.css_active = True
+        self._css_sent = None
+        self._css_evt = Clock.schedule_interval(self._css_tick, self.CSS_TICK)
+        c = self.css_config()
+        log.info('CSS start: %d SFM, top %d rpm, X as %s', c['sfm'], c['top'], c['x_mode'])
+        self._css_tick(0)
+        return True
+
+    def css_stop(self, why):
+        if not self.css_active:
+            return
+        evt = getattr(self, '_css_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._css_evt = None
+        self.css_active = False
+        self.css_label = ''
+        log.info('CSS stop (%s), speed stays %s', why, self.command_speed)
+
+    def _css_tick(self, dt):
+        if self.offline_flag:
+            self.css_stop('drive offline')
+            return
+        c = self.css_config()
+        if self.dro_stale:
+            self.css_label = 'CSS HOLD'           # no X reading: keep the last speed
+            return
+        self.css_label = 'CSS %d' % c['sfm']
+        if self.jogging:
+            return
+        rpm, _capped = self.css_rpm(c['sfm'], c['top'], self.css_diameter_in())
+        motor = max(0, min(self.max_rpm, int(round(rpm * self.ratio))))
+        last = self._css_sent
+        if last is None or abs(motor - last) >= max(2, last * 0.01):
+            self.command_speed = motor
+            self._send_speed()
+            self._css_sent = motor
+
+    def open_css(self):
+        if not self._drive_ready():
+            return
+        ov = self._show('_css', CssOverlay())
+        ov.populate()
+
+    def close_css(self):
+        self._hide('_css')
 
     # ---- speed pad ------------------------------------------------------
     jog_ok = BooleanProperty(False)
@@ -2017,6 +2110,7 @@ class ServoCommanderApp(App):
         surface speed).  Sets the speed only; never enables."""
         if not self._drive_ready():
             return False
+        self.css_stop('speed set: %s' % why)
         motor = int(round(rpm * self.ratio))
         self.command_speed = max(0, min(self.max_rpm, motor))
         self._send_speed()
@@ -2093,6 +2187,19 @@ class ServoCommanderApp(App):
             o = self._sfm
             ov.setup_generic('Diameter', 'Work or tool diameter', 'in' if o.unit == 'inch' else 'mm',
                              0.01, 99, o.dia_text(), o.set_diameter, 'SET', allow_dot=True)
+        elif key == 'css_sfm':
+            o = self._css
+            ov.setup_generic('Surface speed', 'Feet per minute, held while X moves', 'SFM', 10, 5000,
+                             '%d SFM' % o.sfm, o.set_sfm, 'SET')
+        elif key == 'css_top':
+            o = self._css
+            ov.setup_generic('Top speed', 'Constant SFM never goes above this', 'rpm',
+                             10, self.max_spindle_rpm(), '%d rpm' % o.top_rpm, o.set_top, 'SET')
+        elif key == 'css_dia':
+            o = self._css
+            unit = 'in' if self.units == 'in' else 'mm'
+            ov.setup_generic('Measured diameter', 'Sets X so it matches the work under the tool', unit,
+                             0.01, 999, o.dia_text, o.set_measured, 'SET', allow_dot=True)
         elif key == 'sfm_sfm':
             o = self._sfm
             ov.setup_generic('Surface speed', 'Feet per minute', 'SFM', 10, 5000,
@@ -2134,6 +2241,9 @@ class ServoCommanderApp(App):
         if name == 'drill':
             self.close_tools()
             self.open_drill()
+        elif name == 'css':
+            self.close_tools()
+            self.open_css()
 
     def open_drill(self):
         if not self._drive_ready():
@@ -2209,6 +2319,7 @@ class ServoCommanderApp(App):
         if self.config.getboolean('GUI', 'no_reverse') or not self._drive_ready():
             return
         new = 'rev' if self.direction == 'fwd' else 'fwd'
+        self.css_stop('direction change')
         # switching direction brings the speed to 0 first
         self.command_speed = 0
         self.servo.set_speed(0)

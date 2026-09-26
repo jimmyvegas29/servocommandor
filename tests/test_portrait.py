@@ -777,6 +777,54 @@ def after_layout(dt):
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
 
+    # constant SFM: X ABS read as the radius from the centreline, rpm follows it
+    app.dro = DroSerial('/nonexistent')
+    seq = [0]
+
+    def feed_x_abs(mm):
+        # counts that make X ABS read mm (servo.ini inverts X)
+        raw = app.abs_off['X'] + mm
+        inv = -1.0 if app.dro_x_invert else 1.0
+        seq[0] += 1
+        app.dro.feed('DRO X:%d Z:0 S:%d T:%d' % (round(raw * 1000.0 / (inv * app.dro_x_um)), seq[0], seq[0]))
+        app._poll_dro(0)
+
+    feed_x_abs(10.0)
+    app.save_speed_pad(css_sfm=400, css_top=1500, css_x='radius', css_material='', css_tool='cbd')
+    app.css_set_diameter(2.0 if app.units == 'in' else 50.8)
+    check('css: measured 2 in sets X to a 1 in radius', round(app.css_diameter_in(), 4), 2.0)
+    app.open_tools()
+    app.tools_pick('css')
+    o = app._css
+    check('css popup from the menu', (app._tools, o is not None), (None, True))
+    check('css live line', o.live_text, '400 SFM on %s  ->  764 rpm' % o.dia_text)
+    o.toggle()
+    check('css running', (app.css_active, app.command_speed, app.css_label),
+          (True, round(764 * app.ratio), 'CSS 400'))
+    feed_x_abs(12.7)                              # half the radius: 1528 rpm wanted
+    app._css_tick(0)
+    check('css toward centre stops at the top limit', app.command_speed, round(1500 * app.ratio))
+    feed_x_abs(50.8)                              # 4 in diameter
+    app._css_tick(0)
+    check('css bigger diameter slows down', app.command_speed, round(382 * app.ratio))
+    sends = app.servo.rpm
+    feed_x_abs(50.9)                              # 381 rpm: inside the 1 % deadband
+    app._css_tick(0)
+    check('css deadband: no resend for 1 rpm', (app.command_speed, app.servo.rpm),
+          (round(382 * app.ratio), sends))
+    app.dro_stale = True
+    app._css_tick(0)
+    check('css holds speed with no DRO', (app.css_label, app.command_speed), ('CSS HOLD', round(382 * app.ratio)))
+    app.dro_stale = False
+    o.set_x_mode('diameter')
+    check('css X read as the diameter', round(app.css_diameter_in(), 3), round(50.9 / 25.4, 3))
+    o.set_x_mode('radius')
+    app.set_speed(600)
+    check('a preset ends css', (app.css_active, app.command_speed), (False, round(600 * app.ratio)))
+    app.close_css()
+    app.dro = None
+    app.dro_stale = False
+
     # jog: hold sends keep-alives at the jog speed, release stops and restores
     app.set_speed(600)
     app.servo.hw_direction = None            # lever OFF (an earlier check left it in FWD)

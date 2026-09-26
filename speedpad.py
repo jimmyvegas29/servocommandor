@@ -204,6 +204,94 @@ class ToolsOverlay(ModalTouch, FloatLayout):
     Constant SFM are listed but not built yet."""
 
 
+class CssOverlay(ModalTouch, FloatLayout):
+    """Constant surface speed setup: surface speed, top rpm, how X reads.
+    While it runs the app re-computes the spindle rpm from the X diameter
+    five times a second (app.css_start / css_stop / _css_tick)."""
+    tool = StringProperty('cbd')
+    material = StringProperty('')
+    sfm = NumericProperty(300)
+    top_rpm = NumericProperty(1000)
+    x_mode = StringProperty('radius')        # X ABS reads 'radius' or 'diameter'
+    dia_text = StringProperty('-')
+    live_text = StringProperty('')
+    warn = BooleanProperty(False)
+    active = BooleanProperty(False)
+    no_dro = BooleanProperty(False)
+
+    def populate(self):
+        app = App.get_running_app()
+        c = app.css_config()
+        self.tool, self.material = c['tool'], c['material']
+        self.sfm, self.top_rpm, self.x_mode = c['sfm'], c['top'], c['x_mode']
+        self._evt = Clock.schedule_interval(lambda dt: self.refresh(), 0.2)
+        self.refresh()
+
+    def on_parent(self, _w, parent):
+        if parent is None and getattr(self, '_evt', None) is not None:
+            self._evt.cancel()
+            self._evt = None
+
+    def set_material(self, name):
+        app = App.get_running_app()
+        self.material = name
+        self.sfm = int(app.sfm_for(self.tool, name))
+        app.save_speed_pad(css_material=name, css_sfm=self.sfm)
+        self.refresh()
+
+    def set_tool(self, tool):
+        self.tool = tool
+        App.get_running_app().save_speed_pad(css_tool=tool)
+        if self.material:
+            self.set_material(self.material)
+
+    def set_sfm(self, v):
+        self.sfm = int(v)
+        self.material = ''
+        App.get_running_app().save_speed_pad(css_sfm=self.sfm, css_material='')
+        self.refresh()
+
+    def set_top(self, v):
+        self.top_rpm = int(v)
+        App.get_running_app().save_speed_pad(css_top=self.top_rpm)
+        self.refresh()
+
+    def set_x_mode(self, mode):
+        self.x_mode = mode
+        App.get_running_app().save_speed_pad(css_x=mode)
+        self.refresh()
+
+    def set_measured(self, v):
+        App.get_running_app().css_set_diameter(float(v))
+        self.refresh()
+
+    def refresh(self):
+        app = App.get_running_app()
+        self.active = app.css_active
+        self.no_dro = app.dro is None or app.dro_stale
+        dia_in = app.css_diameter_in()
+        if app.units == 'in':
+            self.dia_text = fmt_num(dia_in, 3) + ' in'
+        else:
+            self.dia_text = fmt_num(dia_in * 25.4, 2) + ' mm'
+        if app.dro_stale:
+            self.warn = True
+            self.live_text = 'No DRO data: constant SFM needs a live X reading'
+            return
+        rpm, capped = app.css_rpm(self.sfm, self.top_rpm, dia_in)
+        self.warn = capped
+        self.live_text = '%d SFM on %s  ->  %d rpm%s' % (
+            self.sfm, self.dia_text, rpm, '  (at the top limit)' if capped else '')
+
+    def toggle(self):
+        app = App.get_running_app()
+        if app.css_active:
+            app.css_stop('stopped from the popup')
+        else:
+            app.css_start()
+        self.refresh()
+
+
 class SfmOverlay(ModalTouch, FloatLayout):
     """Diameter + surface speed -> spindle rpm."""
     unit = StringProperty('inch')            # diameter unit

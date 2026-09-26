@@ -134,6 +134,23 @@ def s_tools():
     app.open_tools()
 
 
+def s_css():
+    app.close_tools()
+    app.save_speed_pad(css_sfm=400, css_top=1500, css_x='radius', css_material='Mild steel', css_tool='cbd')
+    app.open_css()
+
+
+def s_css_running():
+    app.close_css()
+    app.css_active = True                # picture only: the running state's header and menu icon
+    app.css_label = 'CSS 400'
+
+
+def s_css_off():
+    app.css_active = False
+    app.css_label = ''
+
+
 def s_drill():
     app.close_tools()
     app.open_drill()
@@ -235,6 +252,9 @@ plan = [
     (0.2, s_drive_info), (0.5, lambda: cap('drive_info')), (0.2, s_drive_info_close),
     (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
     (0.2, s_tools), (0.6, lambda: cap('tools')),
+    (0.2, s_css), (0.6, lambda: cap('css')),
+    (0.2, s_css_running), (0.6, lambda: cap('css_running')),
+    (0.2, lambda: app.open_tools()), (0.6, lambda: cap('tools_css_on')), (0.2, s_css_off),
     (0.2, s_drill), (0.6, lambda: cap('drill')),
     (0.2, s_sfm), (0.6, lambda: cap('sfm')), (0.2, s_sfm_done),
     (0.2, lambda: app.open_settings()),

@@ -120,6 +120,7 @@
     height: 30
     ltext: ''
     rtext: ''
+    rcolor: (1, 1, 1, 1)
     canvas.before:
         Color:
             rgba: PANEL
@@ -136,6 +137,7 @@
         padding: [8, 0]
     SLabel:
         text: root.rtext
+        color: root.rcolor
         font_size: '17sp'
         text_size: self.size
         halign: 'right'
@@ -362,7 +364,8 @@
     digit_font: 86
     HeaderBar:
         ltext: 'Servo speed'
-        rtext: app.speed_mode_text
+        rtext: (app.css_label + ' SFM' if app.css_label != 'CSS HOLD' else app.css_label) if app.css_active else app.speed_mode_text
+        rcolor: ACCENT if app.css_active else (1, 1, 1, 1)
     BoxLayout:
         padding: [10, 0, 10, 4]
         canvas.before:
@@ -436,6 +439,7 @@
                 id: sp_btn7
                 text: '[font=' + app.fa + ']\uf0c9[/font]'
                 markup: True
+                color: ACCENT if app.css_active else (1, 1, 1, 1)
                 font_size: root.btn_font
                 on_press: app.open_tools()
             SButtonN:
@@ -664,7 +668,8 @@
                     valign: 'middle'
                     padding: [10, 0, 0, 5]
                 LsLabel:
-                    text: app.speed_mode_text
+                    text: (app.css_label + ' SFM' if app.css_label != 'CSS HOLD' else app.css_label) if app.css_active else app.speed_mode_text
+                    color: ACCENT if app.css_active else (1, 1, 1, 1)
                     text_size: self.size
                     font_size: '34dp'
                     halign: 'right'
@@ -829,6 +834,7 @@
                     id: sp_btn7
                     text: '[font=' + app.fa + ']\uf0c9[/font]'
                     markup: True
+                    color: ACCENT if app.css_active else (1, 1, 1, 1)
                     font_size: '34sp'
                     on_press: app.open_tools()
                 LsButtonN:
@@ -2814,6 +2820,163 @@
             disabled: root.rpm_set <= 0
             on_press: root.accept()
 
+<CssOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), min(root.height - 20, 600))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 6
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Constant SFM'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_x: None
+                width: 112
+                SegButton:
+                    text: 'HSS'
+                    font_size: '12sp'
+                    active: root.tool == 'hss'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_tool('hss')
+                SegButton:
+                    text: 'CBD'
+                    font_size: '12sp'
+                    active: root.tool == 'cbd'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_tool('cbd')
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_css()
+        SLabel:
+            text: 'Material - or edit the SFM below'
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 20
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        GridLayout:
+            cols: 4
+            spacing: 4
+            size_hint_y: None
+            height: 84
+            PickButton:
+                text: 'Mild steel'
+                active: root.material == 'Mild steel'
+                on_press: root.set_material('Mild steel')
+            PickButton:
+                text: 'Med carbon'
+                active: root.material == 'Medium carbon'
+                on_press: root.set_material('Medium carbon')
+            PickButton:
+                text: 'High carbon'
+                active: root.material == 'High carbon'
+                on_press: root.set_material('High carbon')
+            PickButton:
+                text: 'Stainless'
+                active: root.material == 'Stainless'
+                on_press: root.set_material('Stainless')
+            PickButton:
+                text: 'Cast iron'
+                active: root.material == 'Cast iron'
+                on_press: root.set_material('Cast iron')
+            PickButton:
+                text: 'Aluminum'
+                active: root.material == 'Aluminum'
+                on_press: root.set_material('Aluminum')
+            PickButton:
+                text: 'Brass'
+                active: root.material == 'Brass'
+                on_press: root.set_material('Brass')
+            PickButton:
+                text: 'Plastic'
+                active: root.material == 'Plastic'
+                on_press: root.set_material('Plastic')
+        PadRow:
+            key: 'css_sfm'
+            label: 'Surface speed'
+            hint: 'ft/min (SFM), held while X moves'
+            value: str(root.sfm) + ' SFM'
+        PadRow:
+            key: 'css_top'
+            label: 'Top speed'
+            hint: 'never faster than this near centre'
+            value: str(root.top_rpm) + ' rpm'
+        PadRow:
+            key: 'css_dia'
+            label: 'Work diameter'
+            hint: 'from X; EDIT to enter the measured OD'
+            value: root.dia_text
+        BoxLayout:
+            size_hint_y: None
+            height: 34
+            padding: [8, 0]
+            SLabel:
+                text: 'X reads'
+                font_size: '14sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_x: None
+                width: 180
+                padding: [0, 3]
+                SegButton:
+                    text: 'RADIUS'
+                    font_size: '12sp'
+                    active: root.x_mode == 'radius'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_x_mode('radius')
+                SegButton:
+                    text: 'DIAMETER'
+                    font_size: '12sp'
+                    active: root.x_mode == 'diameter'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_x_mode('diameter')
+        SLabel:
+            text: root.live_text
+            font_size: '14sp'
+            color: (0.95, 0.75, 0.3, 1) if root.warn else (1, 1, 1, 1)
+            size_hint_y: None
+            height: 40
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        Widget:
+        SetKey:
+            markup: True
+            text: ('[font=' + app.fa + '][size=14]\uf04d[/size][/font]  STOP CONSTANT SFM') if root.active else ('[font=' + app.fa + '][size=14]\uf04b[/size][/font]  START CONSTANT SFM')
+            font_size: '17sp'
+            size_hint_y: None
+            height: 54
+            color: (1, 0.45, 0.4, 1) if root.active else ((0.35, 0.35, 0.35, 1) if root.no_dro else (0.4, 0.85, 0.5, 1))
+            disabled: root.no_dro and not root.active
+            on_press: root.toggle()
+
 <ToolRow@Button>:
     title: ''
     hint: ''
@@ -2885,8 +3048,8 @@
             ready: False
         ToolRow:
             title: 'Constant SFM'
-            hint: 'Not built yet: speed follows the diameter while facing'
-            ready: False
+            hint: ('ON at ' + app.css_label[4:] + ' SFM: tap to change or stop') if app.css_active else 'Speed follows the X diameter while facing'
+            on_press: app.tools_pick('css')
 
 <InfoOverlay>:
     canvas.before:
