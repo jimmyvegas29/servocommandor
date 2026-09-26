@@ -254,6 +254,7 @@ class CssOverlay(ModalTouch, FloatLayout):
     learn_btn = StringProperty('LEARN')
     learned = BooleanProperty(False)
     learning = BooleanProperty(False)
+    auto_stop = BooleanProperty(False)
     direction = StringProperty('in')
     live_text = StringProperty('')
     warn = BooleanProperty(False)
@@ -318,6 +319,10 @@ class CssOverlay(ModalTouch, FloatLayout):
         App.get_running_app().save_speed_pad(css_dir=d)
         self.refresh()
 
+    def set_auto_stop(self, on):
+        App.get_running_app().save_speed_pad(css_auto_stop=bool(on))
+        self.refresh()
+
     def refresh(self):
         app = App.get_running_app()
         c = app.css_config()
@@ -326,6 +331,7 @@ class CssOverlay(ModalTouch, FloatLayout):
         self.start_dia = app.css_len_text(dia_mm) if dia_mm > 0 else '-'
         live = app.dro is not None and not app.dro_stale
         self.direction = c['dir']
+        self.auto_stop = c['auto_stop']
         self.learned = c['in_sign'] != 0
         self.learning = app.css_learning
         if self.learning:

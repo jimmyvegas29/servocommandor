@@ -907,6 +907,17 @@ def after_layout(dt):
     check('OUT run-over reached: DONE', (app.css_state, app.css_badge, app.css_fill), ('done', 'DONE', [0.4, 0.85, 0.5, 1]))
     app.css_stop()
     app.save_speed_pad(css_dir='in')
+
+    # "Disable drive when done": the pass ends by itself like STOP
+    app.save_speed_pad(css_auto_stop=True)
+    at_radius(25.4)
+    app.toggle_enable()
+    check('auto-stop pass starts', (app.css_start(), app.servo_state), (True, 'enabled'))
+    at_radius(-0.6)
+    app._css_tick(0)
+    check('auto-stop: drive off, speed back, READY', (app.css_state, app.servo_state, app.command_speed),
+          ('ready', 'disabled', base))
+    app.save_speed_pad(css_auto_stop=False)
     app.css_exit()
     check('EXIT: pad back, speed as before', (app.css_mode, app.css_state, app.command_speed), (False, '', base))
     feed_x(x0)

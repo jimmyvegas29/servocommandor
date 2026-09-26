@@ -2048,6 +2048,7 @@ class ServoCommanderApp(App):
                 'top': int(sp.get('css_top', min(1000, self.max_spindle_rpm()))),
                 'start_dia_mm': float(sp.get('css_start_dia_mm', 0) or 0),
                 'dir': 'out' if sp.get('css_dir') == 'out' else 'in',
+                'auto_stop': bool(sp.get('css_auto_stop', False)),
                 'in_sign': int(sp.get('css_in_sign', 0)), 'over_mm': float(over)}
 
     def css_len_text(self, mm, places_in=3, places_mm=2):
@@ -2261,6 +2262,11 @@ class ServoCommanderApp(App):
                 self._send_speed()
                 self._css_sent = motor
             self._css_show_bar(c, top, r, blue)
+            if finished and c['auto_stop']:
+                # "Disable drive when done": the same as pressing STOP
+                self.set_enabled(False, source='GUI')
+                self._css_end_pass('done, drive disabled')
+                return
             if finished:
                 self.css_state = state = 'done'
                 log.info('CSS pass done (%s), holding %s', self._css_dir.upper(), self.command_speed)
