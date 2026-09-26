@@ -808,7 +808,7 @@ def after_layout(dt):
     app.tools_pick('css')
     o = app._css
     check('css popup from the menu', (app._tools, o is not None), (None, True))
-    check('css not learned yet', (o.learn_text, o.learn_btn, o.learned), ('not learned', 'LEARN', False))
+    check('css not learned yet', (o.learn_btn, o.learned), ('LEARN', False))
     o.primary()
     check('ACTIVATE refused until the direction is learned', (app.css_mode, app._css is o), (False, True))
     app.open_pad_edit('css_learn')
@@ -820,17 +820,16 @@ def after_layout(dt):
     app._css_learn_tick(0)
     o.refresh()
     check('learned: counts going down = toward centre',
-          (app.css_learning, app.css_config()['in_sign'], o.learn_text, o.learned), (False, -1, 'learned', True))
+          (app.css_learning, app.css_config()['in_sign'], o.learn_btn, o.learned), (False, -1, 'RELEARN', True))
     o.set_start_dia(2.0 if app.units == 'in' else 50.8)
     check('css live line', o.live_text, '400 SFM at OD %s  ->  764 rpm at START' % o.start_dia)
     o.primary()
     check('css ACTIVATE: panel in, popup closed, speed untouched',
           (app.css_mode, app.css_state, app._css, app.command_speed), (True, 'ready', None, base))
     check('css ready card', (app.css_badge, app.css_left_text, app.css_right_text, app.css_frac, app.css_can_start),
-          ('READY  IN', '764 rpm', '1500 rpm', 0.0, True))
+          ('READY', '764 rpm', '1500 rpm', 0.0, True))
     kinds = sorted(k for _f, k in app.css_marks)
-    check('bar marks: 9 minor, centre, top-speed point', (kinds.count('minor'), kinds.count('major'), kinds.count('cap')),
-          (9, 1, 1))
+    check('bar marks: 9 minor and the center', (kinds.count('minor'), kinds.count('major'), len(kinds)), (9, 1, 10))
     app.set_speed(600)
     app.adjust_speed(50)
     check('pad speed changes ignored while CSS is up', app.command_speed, base)
@@ -863,7 +862,7 @@ def after_layout(dt):
     at_radius(-0.6)                               # past the 0.5 mm run-over
     app._css_tick(0)
     check('run-over reached: pass DONE, speed held', (app.css_state, app.css_badge, app.command_speed),
-          ('done', 'PASS DONE', rpm_m(1500)))
+          ('done', 'DONE', rpm_m(1500)))
     check('bar full when done', app.css_frac, 1.0)
     at_radius(-5.0)
     app._css_tick(0)
@@ -888,7 +887,8 @@ def after_layout(dt):
     # DONE past the OD plus the run-over
     app.save_speed_pad(css_dir='out')
     app._css_tick(0)
-    check('OUT ready card', (app.css_badge, app.css_left_text, app.css_right_text), ('READY  OUT', '1500 rpm', '764 rpm'))
+    check('OUT ready card', (app.css_badge, app.css_left_text, app.css_right_text, app.css_dia_text),
+          ('READY', '1500 rpm', '764 rpm', 'from center'))
     feed_x(x0)                                    # tool at centre
     check('OUT start', app.css_start(), True)
     check('OUT starts at the top speed', app.command_speed, rpm_m(1500))
@@ -904,7 +904,7 @@ def after_layout(dt):
     check('OUT past the OD, inside the run-over', app.css_state, 'running')
     out_at(26.0)
     app._css_tick(0)
-    check('OUT run-over reached: DONE', (app.css_state, app.css_badge), ('done', 'PASS DONE'))
+    check('OUT run-over reached: DONE', (app.css_state, app.css_badge, app.css_fill), ('done', 'DONE', [0.4, 0.85, 0.5, 1]))
     app.css_stop()
     app.save_speed_pad(css_dir='in')
     app.css_exit()

@@ -208,8 +208,8 @@ class ToolsOverlay(ModalTouch, FloatLayout):
 
 class CssBar(Widget):
     """Constant SFM progress: a track that fills left to right, tick marks
-    underneath every 10 %, a taller white mark at the centre (IN) or OD
-    (OUT) and an amber mark where the top speed takes over."""
+    underneath every 10 % and a taller white mark at the center (OD > Center)
+    or the OD (Center > OD); the run-over is the part after it."""
     frac = NumericProperty(0.0)
     marks = ListProperty([])
     fill = ListProperty([0, 0.5, 1, 1])
@@ -235,17 +235,14 @@ class CssBar(Widget):
                 if kind == 'minor':
                     Color(0.45, 0.45, 0.45, 1)
                     Rectangle(pos=(tx - 0.5, ty - 5), size=(1, 5))
-                elif kind == 'major':
+                else:
                     Color(1, 1, 1, 1)
                     Rectangle(pos=(tx - 1, y), size=(2, h))
-                else:
-                    Color(0.95, 0.75, 0.3, 1)
-                    Rectangle(pos=(tx - 1, ty - 8), size=(2, th + 8))
 
 
 class CssOverlay(ModalTouch, FloatLayout):
     """Constant surface speed setup: surface speed, top rpm, run-over,
-    work OD, facing IN or OUT, and a learned direction to centre (needed
+    work OD, facing OD > Center or Center > OD, and a learned direction to center (needed
     before ACTIVATE).  ACTIVATE hands over to the CSS panel that replaces
     the speed pad."""
     tool = StringProperty('cbd')
@@ -254,9 +251,9 @@ class CssOverlay(ModalTouch, FloatLayout):
     top_rpm = NumericProperty(1000)
     over = StringProperty('-')
     start_dia = StringProperty('-')
-    learn_text = StringProperty('')
     learn_btn = StringProperty('LEARN')
     learned = BooleanProperty(False)
+    learning = BooleanProperty(False)
     direction = StringProperty('in')
     live_text = StringProperty('')
     warn = BooleanProperty(False)
@@ -330,17 +327,16 @@ class CssOverlay(ModalTouch, FloatLayout):
         live = app.dro is not None and not app.dro_stale
         self.direction = c['dir']
         self.learned = c['in_sign'] != 0
-        if app.css_learning:
-            self.learn_text, self.learn_btn = 'move X in now', 'CANCEL'
-        elif self.learned:
-            self.learn_text, self.learn_btn = 'learned', 'AGAIN'
+        self.learning = app.css_learning
+        if self.learning:
+            self.learn_btn = 'CANCEL'
         else:
-            self.learn_text, self.learn_btn = 'not learned', 'LEARN'
+            self.learn_btn = 'RELEARN' if self.learned else 'LEARN'
         self.warn = True
-        if app.css_learning:
-            self.live_text = 'Move the cross slide toward the centre a little'
+        if self.learning:
+            self.live_text = 'Move the cross slide toward the center a little'
         elif not self.learned:
-            self.live_text = ('LEARN, then move the cutting tool toward centre' if live
+            self.live_text = ('LEARN, then move the cutting tool toward center' if live
                               else 'Learning the direction needs a live DRO reading')
         elif dia_mm <= 0:
             self.live_text = 'Enter the work OD'
@@ -352,7 +348,7 @@ class CssOverlay(ModalTouch, FloatLayout):
         else:
             rpm, _capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
             self.warn = False
-            self.live_text = 'OUT: top speed at centre, %d rpm at OD %s' % (rpm, self.start_dia)
+            self.live_text = 'Top speed at center, %d rpm at OD %s' % (rpm, self.start_dia)
 
     def primary(self):
         app = App.get_running_app()

@@ -395,6 +395,7 @@
     orientation: 'vertical'
     padding: [14, 6, 14, 6]
     lbl_font: '14sp'
+    dia_font: '26sp'
     canvas.before:
         Color:
             rgba: PANEL
@@ -444,18 +445,9 @@
     Widget:
     SLabel:
         text: app.css_dia_text
-        font_size: '16sp'
+        font_size: root.dia_font
         size_hint_y: None
-        height: 22
-        text_size: self.size
-        halign: 'left'
-        valign: 'middle'
-    SLabel:
-        text: app.css_hint
-        font_size: '11sp'
-        color: (0.6, 0.6, 0.6, 1)
-        size_hint_y: None
-        height: 20
+        height: 40
         text_size: self.size
         halign: 'left'
         valign: 'middle'
@@ -980,6 +972,7 @@
                 padding: [0, 0, 5, 0]
                 CssCard:
                     lbl_font: '18sp'
+                    dia_font: '34sp'
         BoxLayout:
             orientation: 'vertical'
             size_hint_x: 0.3275
@@ -2488,6 +2481,7 @@
     value: '-'
     btn: 'EDIT'
     btn_w: 52
+    btn_color: ACCENT
     size_hint_y: None
     height: 46
     padding: [8, 3]
@@ -2531,7 +2525,7 @@
         font_size: '13sp'
         size_hint_x: None
         width: root.btn_w
-        color: ACCENT
+        color: root.btn_color
         on_press: app.open_pad_edit(root.key)
 
 <SpeedPadPage>:
@@ -3065,7 +3059,7 @@
         PadRow:
             key: 'css_top'
             label: 'Top speed'
-            hint: 'never faster than this near centre'
+            hint: 'never faster than this near center'
             value: str(root.top_rpm) + ' rpm'
         PadRow:
             key: 'css_over'
@@ -3075,7 +3069,7 @@
         PadRow:
             key: 'css_start_dia'
             label: 'Work OD'
-            hint: 'IN starts here, OUT ends here'
+            hint: 'where the cut starts or ends'
             value: root.start_dia
         BoxLayout:
             size_hint_y: None
@@ -3092,13 +3086,13 @@
                 width: 220
                 padding: [0, 3]
                 SegButton:
-                    text: 'IN  OD > centre'
+                    text: 'OD > Center'
                     font_size: '11sp'
                     active: root.direction == 'in'
                     corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
                     on_press: root.set_dir('in')
                 SegButton:
-                    text: 'OUT  centre > OD'
+                    text: 'Center > OD'
                     font_size: '11sp'
                     active: root.direction == 'out'
                     corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
@@ -3106,10 +3100,10 @@
         PadRow:
             key: 'css_learn'
             label: 'Learn direction'
-            hint: 'with the tool you will cut with'
-            value: root.learn_text
+            value: ''
             btn: root.learn_btn
-            btn_w: 74
+            btn_w: 86
+            btn_color: (1, 1, 1, 1) if root.learning else (ACCENT if root.learned else (0.5, 0.5, 0.5, 1))
         SLabel:
             text: root.live_text
             font_size: '14sp'

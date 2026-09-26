@@ -2033,7 +2033,6 @@ class ServoCommanderApp(App):
     css_left_text = StringProperty('')
     css_right_text = StringProperty('')
     css_dia_text = StringProperty('')
-    css_hint = StringProperty('')
     css_can_start = BooleanProperty(False)
     css_learning = BooleanProperty(False)
     CSS_TICK = 0.2                  # s between rpm updates
@@ -2100,7 +2099,7 @@ class ServoCommanderApp(App):
             sign = 1 if d > 0 else -1
             self.save_speed_pad(css_in_sign=sign)
             self.css_learn_cancel()
-            log.info('CSS learn: toward centre = counts %s', 'up' if sign > 0 else 'down')
+            log.info('CSS learn: toward center = counts %s', 'up' if sign > 0 else 'down')
 
     def css_activate(self):
         if not self._drive_ready():
@@ -2183,25 +2182,20 @@ class ServoCommanderApp(App):
 
     def _css_bar(self, c, top, r=None):
         """Progress bar for a pass: (fraction done, marks, left rpm, right rpm).
-        IN runs from the OD to the run-over past centre, OUT from centre to
+        IN runs from the OD to the run-over past center, OUT from center to
         the run-over past the OD.  Marks: minor every 10 %, 'major' at the
-        centre (IN) or the OD (OUT), 'cap' where the top speed takes over."""
+        center (IN) or the OD (OUT)."""
         R = c['start_dia_mm'] / 2.0
         total = R + c['over_mm']
         if R <= 0 or top <= 0:
             return 0.0, [], 0, 0
-        r_cap = c['sfm'] * 12.0 / (3.14159265 * top) * 25.4 / 2.0     # radius where rpm = top
         od_rpm = self.css_rpm(c['sfm'], top, 2.0 * R / 25.4)[0]
         marks = [(i / 10.0, 'minor') for i in range(1, 10)]
         marks.append((R / total, 'major'))
         if c['dir'] == 'in':
-            if 0 < r_cap < R:
-                marks.append(((R - r_cap) / total, 'cap'))
             frac = 0.0 if r is None else (R - r) / total
             left, right = od_rpm, top
         else:
-            if 0 < r_cap < R:
-                marks.append((r_cap / total, 'cap'))
             frac = 0.0 if r is None else r / total
             left, right = top, od_rpm
         return max(0.0, min(1.0, frac)), marks, left, right
@@ -2228,39 +2222,28 @@ class ServoCommanderApp(App):
             return
         if state == 'ready':
             dia_mm = c['start_dia_mm']
-            going_in = c['dir'] == 'in'
             self._css_show_bar(c, top, None, blue)
             self.css_can_start = live and c['in_sign'] != 0 and dia_mm > 0
-            self.css_badge, self.css_badge_color = ('READY  IN' if going_in else 'READY  OUT'), [1, 1, 1, 1]
-            if dia_mm <= 0:
-                self.css_dia_text = 'no work OD'
-            elif going_in:
-                self.css_dia_text = 'start at OD ' + self.css_len_text(dia_mm)
-            else:
-                self.css_dia_text = 'start at centre, out to ' + self.css_len_text(dia_mm)
+            self.css_badge, self.css_badge_color = 'READY', [1, 1, 1, 1]
+            # the big line: what START is waiting for, else where the pass starts
             if c['in_sign'] == 0:
-                self.css_hint = 'SETUP: learn the direction to centre'
+                self.css_dia_text = 'Learn direction in SETUP'
             elif dia_mm <= 0:
-                self.css_hint = 'SETUP: enter the work OD'
+                self.css_dia_text = 'Enter the OD in SETUP'
             elif not live:
-                self.css_hint = 'No DRO data: START needs a live X'
-            elif going_in:
-                self.css_hint = 'Set depth, put the tool at the OD, START'
+                self.css_dia_text = 'No DRO data'
+            elif c['dir'] == 'in':
+                self.css_dia_text = 'OD ' + self.css_len_text(dia_mm)
             else:
-                self.css_hint = 'Set depth, put the tool at centre, START'
+                self.css_dia_text = 'from center'
             return
         self.css_can_start = False
         if state == 'running':
-            if not live:
+            if not live or self._css_lost:
                 self._css_lost = True
                 self.css_badge, self.css_badge_color = 'HOLD', amber
                 self.css_fill = amber
-                self.css_hint = 'No DRO data: holding the last speed'
-                return
-            if self._css_lost:
-                self.css_badge, self.css_badge_color = 'HOLD', amber
-                self.css_fill = amber
-                self.css_hint = 'DRO dropped out: STOP, then START again'
+                self.css_dia_text = 'No DRO data' if not live else 'DRO dropped: STOP, START'
                 return
             r = self.css_radius_mm()
             if self._css_dir == 'out':
@@ -2277,20 +2260,18 @@ class ServoCommanderApp(App):
                 self.command_speed = motor
                 self._send_speed()
                 self._css_sent = motor
-            self._css_show_bar(c, top, r, green)
+            self._css_show_bar(c, top, r, blue)
             if finished:
                 self.css_state = state = 'done'
                 log.info('CSS pass done (%s), holding %s', self._css_dir.upper(), self.command_speed)
             else:
-                self.css_badge, self.css_badge_color = 'RUNNING', green
-                self.css_dia_text = ('dia ' + self.css_len_text(2.0 * r)) if r > 0 else 'at centre'
-                self.css_hint = 'Speed follows X.  STOP ends the pass'
+                self.css_badge, self.css_badge_color = 'RUNNING', [1, 1, 1, 1]
+                self.css_dia_text = ('OD ' + self.css_len_text(2.0 * r)) if r > 0 else 'at center'
         if state == 'done':
-            self.css_badge, self.css_badge_color = 'PASS DONE', amber
+            self.css_badge, self.css_badge_color = 'DONE', green
             self.css_frac = 1.0
-            self.css_fill = amber
-            self.css_dia_text = 'past centre' if self._css_dir == 'in' else 'past the OD'
-            self.css_hint = 'Holding speed.  STOP: drive off, speed back'
+            self.css_fill = green
+            self.css_dia_text = 'past center' if self._css_dir == 'in' else 'past the OD'
 
     def open_css(self):
         if not self._drive_ready():
@@ -2410,7 +2391,7 @@ class ServoCommanderApp(App):
         elif key == 'css_start_dia':
             o = self._css
             unit = 'in' if self.units == 'in' else 'mm'
-            ov.setup_generic('Work OD', 'IN starts here, OUT finishes here', unit,
+            ov.setup_generic('Work OD', 'Where the cut starts (OD > Center) or ends (Center > OD)', unit,
                              0.01, 99 if unit == 'in' else 2500, o.start_dia, o.set_start_dia, 'SET',
                              allow_dot=True)
         elif key == 'css_over':

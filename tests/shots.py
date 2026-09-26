@@ -150,10 +150,9 @@ def s_css_running():
     if evt is not None:
         evt.cancel()
     app.css_state = 'running'
-    app.css_badge, app.css_badge_color = 'RUNNING', [0.4, 0.85, 0.5, 1]
-    app.css_dia_text = 'dia 1.500 in'
-    app.css_frac, app.css_fill = 0.42, [0.4, 0.85, 0.5, 1]
-    app.css_hint = 'Speed follows X.  STOP ends the pass'
+    app.css_badge, app.css_badge_color = 'RUNNING', [1, 1, 1, 1]
+    app.css_dia_text = 'OD 0.912 in'
+    app.css_frac, app.css_fill = 0.42, [0, 0.5, 1, 1]
 
 
 def s_css_off():
