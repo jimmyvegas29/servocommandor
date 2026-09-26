@@ -171,7 +171,7 @@ def s_tap():
     app.close_tools()
     app.close_css()
     app._tap_node_ok = lambda: True          # picture only: pretend a 3.15 node
-    app.save_speed_pad(tap_thread='1/4-20', tap_mode='bottom', tap_depth_mm=12.7, tap_confirm=2,
+    app.save_speed_pad(tap_thread='1/4-20', tap_material='Mild steel', tap_mode='bottom', tap_depth_mm=12.7, tap_confirm=2,
                        tap_rpm=100, tap_tlim_manual=0, tap_margin=2.0, tap_hand='rh', tap_drag={'100': 8})
     app.open_tap()
 

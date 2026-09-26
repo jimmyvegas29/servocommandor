@@ -2402,10 +2402,13 @@ class ServoCommanderApp(App):
         drag, drag_rpm = self.tap_drag_for(rpm)
         manual = int(sp.get('tap_tlim_manual') or 0)
         motor_nm = self.motor_rated_nm()
-        clutch_pct = min_pct = None
+        material = sp.get('tap_material') or 'Mild steel'
+        clutch_pct = need_pct = None
         if thread is not None:
             clutch_pct = tapdata.pct_of_spindle(thread['clutch'], motor_nm, self.ratio)
-            min_pct = (drag or 0) + tapdata.pct_of_spindle(thread['min'], motor_nm, self.ratio)
+            cut = tapdata.cutting_torque_in_lb(thread['pitch_mm'], thread['dia_mm'], material)
+            if cut is not None:
+                need_pct = (drag or 0) + tapdata.pct_of_spindle(cut, motor_nm, self.ratio)
         if manual:
             tlim, auto = manual, False
         elif clutch_pct is not None:
@@ -2417,7 +2420,9 @@ class ServoCommanderApp(App):
                 'depth_mm': float(sp.get('tap_depth_mm', 0) or 0),
                 'confirm': max(1, int(sp.get('tap_confirm', 2))),
                 'rpm': rpm, 'drag': drag, 'drag_rpm': drag_rpm,
-                'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'min_pct': min_pct,
+                'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'need_pct': need_pct,
+                'material': material, 'lathe_capped': auto and thread is not None and tlim == self.TAP_CAP_MAX
+                and (drag or 0) + clutch_pct > self.TAP_CAP_MAX,
                 'margin': float(sp.get('tap_margin', 2.0)),
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
@@ -2425,13 +2430,12 @@ class ServoCommanderApp(App):
 
     def tap_auto_cap(self, thread, drag=None):
         """Torque cap (drive %) for a thread from the table: drag + the
-        recommended clutch setting at the tap, through motor and ratio."""
-        return int(round((drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(),
-                                                               self.ratio)))
-
-    def tap_thread_fits(self, thread):
-        drag, _ = self.tap_drag_for(int(self.settings.get('speed_pad', {}).get('tap_rpm', 100)))
-        return self.tap_auto_cap(thread, drag) <= self.TAP_CAP_MAX
+        recommended clutch setting at the tap, through motor and ratio, but
+        never above the lathe's tapping cap.  A big tap is capped by the
+        lathe: it cannot be broken, and the stall at the cap is what stops
+        it at the bottom."""
+        pct = (drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(), self.ratio)
+        return int(round(min(pct, self.TAP_CAP_MAX)))
 
     def tap_pitch_text(self, c):
         if c['thread'] is not None:
@@ -2490,9 +2494,6 @@ class ServoCommanderApp(App):
         if not 5 <= c['rpm'] <= self.tap_max_rpm():
             return 'Tapping speed must be 5 to %d rpm' % self.tap_max_rpm()
         if not 5 <= c['tlim'] <= 150:
-            if c['auto'] and c['tlim'] > 150:
-                return ('%s needs about %d %%: more torque than this lathe can tap with (150 %% max)'
-                        % (self.tap_pitch_text(c), c['tlim']))
             return 'Torque limit must be 5 to 150 %'
         overload = self.settings.get('drive_params', {}).get('70')
         if overload is not None and c['tlim'] >= int(overload):

@@ -9,9 +9,35 @@ https://www.tapmatic.com/tapping_questions_torque_setting_data_for_hss.ydev
 
 Tapmatic lists inch sizes only.  Metric sizes use the row of the next
 SMALLER inch size, so their cap errs low (they are marked derived).
+
+The torque a thread needs in a given material is estimated with the
+cutting-tap formula from tap makers' technical data (ECL):
+    Md [Nm] = 0.2 * P^2 * Ks * D / 1000
+P pitch mm, D major diameter mm, Ks specific cutting force N/mm2.
+https://precisiontoolstooling.au/pages/ecl-taps-technical-information-trouble-shooting
+Only materials with a published Ks get an estimate.
 """
 
 IN_LB_PER_NM = 8.8507
+
+# specific cutting force, N/mm2 (middle of the published range), by the
+# material names the SFM tables use; None = no published value
+KS = {
+    'Mild steel': 2300,            # low carbon steel 2200-2400
+    'Medium carbon': 3000,         # not listed: uses the alloy steel value (errs high)
+    'High carbon': 3000,           # 4130 / 4140: alloy steel 2800-3200
+    'Stainless': 3000,             # stainless 2800-3200
+    'Cast iron': None,
+    'Aluminum': 800,               # aluminium alloy 700-900
+    'Brass': None,
+    'Plastic': None,
+}
+KS_NOTE = {'Medium carbon': 'alloy steel value'}
+
+# major diameter, mm, of the numbered and fractional sizes
+_DIA = {'#0': 1.524, '#1': 1.854, '#2': 2.184, '#3': 2.515, '#4': 2.845, '#5': 3.175, '#6': 3.505,
+        '#8': 4.166, '#10': 4.826, '#12': 5.486, '1/4': 6.35, '5/16': 7.9375, '3/8': 9.525,
+        '7/16': 11.1125, '1/2': 12.7, '9/16': 14.2875, '5/8': 15.875, '3/4': 19.05}
 
 # row: (min tapping, max tapping, break low, break high, clutch setting), in-lb
 _ROWS = {
@@ -108,7 +134,11 @@ FAMILIES = [('UNC', 'UNC'), ('UNF', 'UNF'), ('M', 'Metric'), ('MF', 'M fine')]
 def _entry(t):
     key, label, fam, pitch, unit, row, derived = t
     mn, mx, blo, bhi, clutch = _ROWS[row]
-    return {'key': key, 'label': label, 'family': fam, 'pitch': pitch, 'unit': unit,
+    if unit == 'tpi':
+        dia = _DIA[label.split('-')[0]]
+    else:
+        dia = float(key[1:].split('x')[0])
+    return {'key': key, 'label': label, 'family': fam, 'pitch': pitch, 'unit': unit, 'dia_mm': dia,
             'pitch_mm': 25.4 / pitch if unit == 'tpi' else float(pitch),
             'min': mn, 'max': mx, 'break_lo': blo, 'break_hi': bhi, 'clutch': clutch,
             'derived': derived}
@@ -133,3 +163,12 @@ def pct_of_spindle(in_lb, motor_rated_nm, ratio):
     through the belt ratio."""
     spindle_in_lb = motor_rated_nm * ratio * IN_LB_PER_NM
     return 100.0 * in_lb / spindle_in_lb if spindle_in_lb > 0 else 0.0
+
+
+def cutting_torque_in_lb(pitch_mm, dia_mm, material):
+    """Estimated torque to cut the thread, in-lb, or None when the material
+    has no published specific cutting force."""
+    ks = KS.get(material)
+    if ks is None or pitch_mm <= 0 or dia_mm <= 0:
+        return None
+    return 0.2 * pitch_mm ** 2 * ks * dia_mm / 1000.0 * IN_LB_PER_NM

@@ -403,6 +403,7 @@ class TapOverlay(ModalTouch, FloatLayout):
     hand = StringProperty('rh')
     live_text = StringProperty('')
     ok = BooleanProperty(False)
+    material = StringProperty('Mild steel')
 
     def populate(self):
         self._note = ''
@@ -441,6 +442,9 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_hand(self, hand):
         self._save(tap_hand=hand)
 
+    def set_material(self, name):
+        self._save(tap_material=name)
+
     def measure(self):
         app = App.get_running_app()
         if app.tap_drag_busy:
@@ -453,7 +457,7 @@ class TapOverlay(ModalTouch, FloatLayout):
     def refresh(self):
         app = App.get_running_app()
         c = app.tap_config()
-        self.mode, self.hand = c['mode'], c['hand']
+        self.mode, self.hand, self.material = c['mode'], c['hand'], c['material']
         self.thread_text = app.tap_pitch_text(c)
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
         self.confirm, self.rpm = c['confirm'], c['rpm']
@@ -469,10 +473,9 @@ class TapOverlay(ModalTouch, FloatLayout):
             else:
                 self.drag_text = '%d %% (at %d rpm)' % (c['drag'], c['drag_rpm'])
         self.tlim_color = [1, 1, 1, 1]
-        if c['auto'] and c['tlim'] > app.TAP_CAP_MAX:
-            self.tlim_text = 'needs %d %%' % c['tlim']
-            self.tlim_color = [0.95, 0.75, 0.3, 1]
-            self.tlim_hint = 'too big for this lathe: pick a smaller size'
+        if c['auto'] and c['lathe_capped']:
+            self.tlim_text = 'auto %d %%' % c['tlim']
+            self.tlim_hint = "lathe max: can't break this tap"
         elif c['auto'] and c['tlim'] > 0:
             self.tlim_text = 'auto %d %%' % c['tlim']
             t = c['thread']
@@ -493,8 +496,17 @@ class TapOverlay(ModalTouch, FloatLayout):
             text = '%s %s = %s turns at %d rpm, cap %d %%' % (
                 'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
                 c['rpm'], c['tlim'])
-            if c['min_pct'] is not None and c['min_pct'] >= c['tlim']:
-                text += '. Even easy tapping needs %d %%: expect stalls' % round(c['min_pct'])
+            need = c['need_pct']
+            if need is None:
+                text += '. No torque estimate for %s' % c['material'].lower()
+            else:
+                note = tapdata.KS_NOTE.get(c['material'])
+                text += '. %s needs ~%d %%%s' % (c['material'], round(need), ' (%s)' % note if note else '')
+                if need > c['tlim']:
+                    text += ': over the cap, expect stalls'
+                    self.tlim_color = [0.95, 0.75, 0.3, 1]
+                elif need > 0.8 * c['tlim']:
+                    text += ': close to the cap'
             self.live_text = text
 
     def primary(self):
@@ -539,19 +551,11 @@ class ThreadOverlay(ModalTouch, FloatLayout):
         self.note = ''
         if self.family == 'custom':
             return
-        too_big = 0
         for t in tapdata.family(self.family):
             b = Factory.PickButton(text=t['label'])
             b.active = t['key'] == self.current
-            if app.tap_thread_fits(t):
-                b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
-            else:
-                # more than the lathe can tap with: shown greyed, not pickable
-                b.color = (0.32, 0.32, 0.32, 1)
-                too_big += 1
+            b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
             grid.add_widget(b)
-        if too_big:
-            self.note = 'Grey sizes need more torque than this lathe can tap with'
 
     def pick(self, key):
         app = App.get_running_app()
