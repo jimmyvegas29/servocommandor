@@ -777,7 +777,8 @@ def after_layout(dt):
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
 
-    # constant SFM: X ABS read as the radius from the centreline, rpm follows it
+    # constant SFM: ACTIVATE swaps in the CSS panel, START tracks X,
+    # past centre + run-over the pass is DONE, STOP = drive off + old speed
     app.dro = DroSerial('/nonexistent')
     seq = [0]
 
@@ -789,8 +790,14 @@ def after_layout(dt):
         app.dro.feed('DRO X:%d Z:0 S:%d T:%d' % (round(raw * 1000.0 / (inv * app.dro_x_um)), seq[0], seq[0]))
         app._poll_dro(0)
 
+    def rpm_m(rpm):
+        return round(rpm * app.ratio)
+
     feed_x_abs(10.0)
-    app.save_speed_pad(css_sfm=400, css_top=1500, css_x='radius', css_material='', css_tool='cbd')
+    app.set_speed(400)
+    base = app.command_speed
+    app.save_speed_pad(css_sfm=400, css_top=1500, css_x='radius', css_material='', css_tool='cbd',
+                       css_over_mm=0.5)
     app.css_set_diameter(2.0 if app.units == 'in' else 50.8)
     check('css: measured 2 in sets X to a 1 in radius', round(app.css_diameter_in(), 4), 2.0)
     app.open_tools()
@@ -798,30 +805,51 @@ def after_layout(dt):
     o = app._css
     check('css popup from the menu', (app._tools, o is not None), (None, True))
     check('css live line', o.live_text, '400 SFM on %s  ->  764 rpm' % o.dia_text)
-    o.toggle()
-    check('css running', (app.css_active, app.command_speed, app.css_label),
-          (True, round(764 * app.ratio), 'CSS 400'))
+    o.primary()
+    check('css ACTIVATE: panel in, popup closed, speed untouched',
+          (app.css_mode, app.css_state, app._css, app.command_speed), (True, 'ready', None, base))
+    check('css ready card', (app.css_badge, app.css_rpm_text, app.css_can_start), ('READY', '764 rpm', True))
+    app.set_speed(600)
+    app.adjust_speed(50)
+    check('pad speed changes ignored while CSS is up', app.command_speed, base)
+    check('css START', app.css_start(), True)
+    check('css running at the start diameter', (app.css_state, app.css_badge, app.command_speed),
+          ('running', 'RUNNING', rpm_m(764)))
+    app.css_exit()
+    check('EXIT does nothing while running', (app.css_mode, app.css_state), (True, 'running'))
     feed_x_abs(12.7)                              # half the radius: 1528 rpm wanted
     app._css_tick(0)
-    check('css toward centre stops at the top limit', app.command_speed, round(1500 * app.ratio))
+    check('toward centre stops at the top limit', app.command_speed, rpm_m(1500))
     feed_x_abs(50.8)                              # 4 in diameter
     app._css_tick(0)
-    check('css bigger diameter slows down', app.command_speed, round(382 * app.ratio))
+    check('bigger diameter slows down', app.command_speed, rpm_m(382))
     sends = app.servo.rpm
     feed_x_abs(50.9)                              # 381 rpm: inside the 1 % deadband
     app._css_tick(0)
-    check('css deadband: no resend for 1 rpm', (app.command_speed, app.servo.rpm),
-          (round(382 * app.ratio), sends))
+    check('deadband: no resend for 1 rpm', (app.command_speed, app.servo.rpm), (rpm_m(382), sends))
     app.dro_stale = True
     app._css_tick(0)
-    check('css holds speed with no DRO', (app.css_label, app.command_speed), ('CSS HOLD', round(382 * app.ratio)))
+    check('holds speed with no DRO', (app.css_badge, app.command_speed), ('HOLD', rpm_m(382)))
     app.dro_stale = False
-    o.set_x_mode('diameter')
-    check('css X read as the diameter', round(app.css_diameter_in(), 3), round(50.9 / 25.4, 3))
-    o.set_x_mode('radius')
+    feed_x_abs(-0.3)                              # past centre, inside the run-over
+    app._css_tick(0)
+    check('past centre: top speed, still running', (app.css_state, app.command_speed), ('running', rpm_m(1500)))
+    feed_x_abs(-0.6)                              # past the 0.5 mm run-over
+    app._css_tick(0)
+    check('run-over reached: pass DONE, speed held', (app.css_state, app.css_badge, app.command_speed),
+          ('done', 'PASS DONE', rpm_m(1500)))
+    feed_x_abs(-5.0)
+    app._css_tick(0)
+    check('DONE holds, no slowing back down', app.command_speed, rpm_m(1500))
+    app.toggle_enable()
+    check('drive enabled for the STOP check', app.servo_state, 'enabled')
+    app.css_stop()
+    check('STOP: drive off, speed back to before CSS', (app.css_state, app.servo_state, app.command_speed),
+          ('ready', 'disabled', base))
+    app.css_exit()
+    check('EXIT: pad back, speed as before', (app.css_mode, app.css_state, app.command_speed), (False, '', base))
     app.set_speed(600)
-    check('a preset ends css', (app.css_active, app.command_speed), (False, round(600 * app.ratio)))
-    app.close_css()
+    check('pad works again after EXIT', app.command_speed, rpm_m(600))
     app.dro = None
     app.dro_stale = False
 

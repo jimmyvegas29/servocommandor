@@ -140,15 +140,23 @@ def s_css():
     app.open_css()
 
 
+def s_css_ready():
+    app.css_activate()
+
+
 def s_css_running():
-    app.close_css()
-    app.css_active = True                # picture only: the running state's header and menu icon
-    app.css_label = 'CSS 400'
+    evt = getattr(app, '_css_evt', None)       # picture only: freeze a running pass
+    if evt is not None:
+        evt.cancel()
+    app.css_state = 'running'
+    app.css_badge, app.css_badge_color = 'RUNNING', [0.4, 0.85, 0.5, 1]
+    app.css_rpm_text, app.css_dia_text = '1019 rpm', 'dia 1.500 in'
+    app.css_hint = 'Speed follows X.  STOP ends the pass'
 
 
 def s_css_off():
-    app.css_active = False
-    app.css_label = ''
+    app.css_state = 'ready'
+    app.css_exit()
 
 
 def s_drill():
@@ -253,8 +261,8 @@ plan = [
     (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
     (0.2, s_tools), (0.6, lambda: cap('tools')),
     (0.2, s_css), (0.6, lambda: cap('css')),
-    (0.2, s_css_running), (0.6, lambda: cap('css_running')),
-    (0.2, lambda: app.open_tools()), (0.6, lambda: cap('tools_css_on')), (0.2, s_css_off),
+    (0.2, s_css_ready), (0.6, lambda: cap('css_ready')),
+    (0.2, s_css_running), (0.6, lambda: cap('css_running')), (0.2, s_css_off),
     (0.2, s_drill), (0.6, lambda: cap('drill')),
     (0.2, s_sfm), (0.6, lambda: cap('sfm')), (0.2, s_sfm_done),
     (0.2, lambda: app.open_settings()),
@@ -264,6 +272,8 @@ plan = [
     (0.2, s_ratio_prep), (1.6, s_ratio_cal), (1.2, lambda: cap('ratio_cal')),
     (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
     (0.2, s_landscape), (1.0, lambda: cap('landscape')),
+    (0.2, s_css_ready), (0.6, lambda: cap('landscape_css_ready')),
+    (0.2, s_css_running), (0.6, lambda: cap('landscape_css_running')), (0.2, s_css_off),
     (0.2, s_landscape_settings), (0.6, lambda: cap('landscape_settings')),
     (0.2, s_landscape_running), (2.5, lambda: cap('landscape_running')),
     (0.2, s_landscape_cards), (1.0, lambda: cap('landscape_cards')),

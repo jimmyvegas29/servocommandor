@@ -205,9 +205,9 @@ class ToolsOverlay(ModalTouch, FloatLayout):
 
 
 class CssOverlay(ModalTouch, FloatLayout):
-    """Constant surface speed setup: surface speed, top rpm, how X reads.
-    While it runs the app re-computes the spindle rpm from the X diameter
-    five times a second (app.css_start / css_stop / _css_tick)."""
+    """Constant surface speed setup: surface speed, top rpm, how X reads,
+    run-over past centre.  ACTIVATE hands over to the CSS panel that
+    replaces the speed pad (app.css_activate / _css_tick)."""
     tool = StringProperty('cbd')
     material = StringProperty('')
     sfm = NumericProperty(300)
@@ -215,9 +215,8 @@ class CssOverlay(ModalTouch, FloatLayout):
     x_mode = StringProperty('radius')        # X ABS reads 'radius' or 'diameter'
     dia_text = StringProperty('-')
     live_text = StringProperty('')
+    over = StringProperty('-')
     warn = BooleanProperty(False)
-    active = BooleanProperty(False)
-    no_dro = BooleanProperty(False)
 
     def populate(self):
         app = App.get_running_app()
@@ -265,10 +264,20 @@ class CssOverlay(ModalTouch, FloatLayout):
         App.get_running_app().css_set_diameter(float(v))
         self.refresh()
 
+    def set_over(self, v):
+        app = App.get_running_app()
+        mm = float(v) * 25.4 if app.units == 'in' else float(v)
+        app.save_speed_pad(css_over_mm=mm)
+        self.refresh()
+
+    def over_text(self):
+        app = App.get_running_app()
+        mm = app.css_config()['over_mm']
+        return (fmt_num(mm / 25.4, 3) + ' in') if app.units == 'in' else (fmt_num(mm, 2) + ' mm')
+
     def refresh(self):
         app = App.get_running_app()
-        self.active = app.css_active
-        self.no_dro = app.dro is None or app.dro_stale
+        self.over = self.over_text()
         dia_in = app.css_diameter_in()
         if app.units == 'in':
             self.dia_text = fmt_num(dia_in, 3) + ' in'
@@ -283,13 +292,12 @@ class CssOverlay(ModalTouch, FloatLayout):
         self.live_text = '%d SFM on %s  ->  %d rpm%s' % (
             self.sfm, self.dia_text, rpm, '  (at the top limit)' if capped else '')
 
-    def toggle(self):
+    def primary(self):
         app = App.get_running_app()
-        if app.css_active:
-            app.css_stop('stopped from the popup')
+        if app.css_mode:
+            app.close_css()              # changes apply live
         else:
-            app.css_start()
-        self.refresh()
+            app.css_activate()
 
 
 class SfmOverlay(ModalTouch, FloatLayout):
