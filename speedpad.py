@@ -206,16 +206,19 @@ class ToolsOverlay(ModalTouch, FloatLayout):
 
 class CssOverlay(ModalTouch, FloatLayout):
     """Constant surface speed setup: surface speed, top rpm, run-over,
-    start diameter and a one-time teach of which way is toward centre.
-    ACTIVATE hands over to the CSS panel that replaces the speed pad."""
+    work OD, facing IN or OUT, and a learned direction to centre (needed
+    before ACTIVATE).  ACTIVATE hands over to the CSS panel that replaces
+    the speed pad."""
     tool = StringProperty('cbd')
     material = StringProperty('')
     sfm = NumericProperty(300)
     top_rpm = NumericProperty(1000)
     over = StringProperty('-')
     start_dia = StringProperty('-')
-    teach_text = StringProperty('')
-    teach_btn = StringProperty('TEACH')
+    learn_text = StringProperty('')
+    learn_btn = StringProperty('LEARN')
+    learned = BooleanProperty(False)
+    direction = StringProperty('in')
     live_text = StringProperty('')
     warn = BooleanProperty(False)
 
@@ -267,12 +270,16 @@ class CssOverlay(ModalTouch, FloatLayout):
         App.get_running_app().save_speed_pad(css_start_dia_mm=self._to_mm(v))
         self.refresh()
 
-    def teach(self):
+    def learn(self):
         app = App.get_running_app()
-        if app.css_teaching:
-            app.css_teach_cancel()
+        if app.css_learning:
+            app.css_learn_cancel()
         else:
-            app.css_teach_start()
+            app.css_learn_start()
+        self.refresh()
+
+    def set_dir(self, d):
+        App.get_running_app().save_speed_pad(css_dir=d)
         self.refresh()
 
     def refresh(self):
@@ -282,25 +289,31 @@ class CssOverlay(ModalTouch, FloatLayout):
         dia_mm = c['start_dia_mm']
         self.start_dia = app.css_len_text(dia_mm) if dia_mm > 0 else '-'
         live = app.dro is not None and not app.dro_stale
-        if app.css_teaching:
-            self.teach_text, self.teach_btn = 'move X in now', 'CANCEL'
-        elif c['in_sign']:
-            self.teach_text, self.teach_btn = 'learned', 'AGAIN'
+        self.direction = c['dir']
+        self.learned = c['in_sign'] != 0
+        if app.css_learning:
+            self.learn_text, self.learn_btn = 'move X in now', 'CANCEL'
+        elif self.learned:
+            self.learn_text, self.learn_btn = 'learned', 'AGAIN'
         else:
-            self.teach_text, self.teach_btn = 'not taught', 'TEACH'
+            self.learn_text, self.learn_btn = 'not learned', 'LEARN'
         self.warn = True
-        if app.css_teaching:
+        if app.css_learning:
             self.live_text = 'Move the cross slide toward the centre a little'
-        elif not c['in_sign']:
-            self.live_text = ('Press TEACH, then move the cross slide toward the centre'
-                              if live else 'Teaching needs a live DRO reading')
+        elif not self.learned:
+            self.live_text = ('LEARN, then move the cutting tool toward centre' if live
+                              else 'Learning the direction needs a live DRO reading')
         elif dia_mm <= 0:
-            self.live_text = 'Enter the start diameter'
-        else:
+            self.live_text = 'Enter the work OD'
+        elif c['dir'] == 'in':
             rpm, capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
             self.warn = capped
-            self.live_text = '%d SFM on %s  ->  %d rpm at START%s' % (
+            self.live_text = '%d SFM at OD %s  ->  %d rpm at START%s' % (
                 self.sfm, self.start_dia, rpm, ' (top limit)' if capped else '')
+        else:
+            rpm, _capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
+            self.warn = False
+            self.live_text = 'OUT: top speed at centre, %d rpm at OD %s' % (rpm, self.start_dia)
 
     def primary(self):
         app = App.get_running_app()

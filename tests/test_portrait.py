@@ -777,10 +777,11 @@ def after_layout(dt):
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
 
-    # constant SFM: teach the way to centre once, ACTIVATE swaps in the CSS
-    # panel, START anchors the start diameter where X is, past centre +
-    # run-over the pass is DONE, STOP = drive off + old speed.  The DRO
-    # display is never touched.
+    # constant SFM: learn the way to centre (needed before ACTIVATE),
+    # ACTIVATE swaps in the CSS panel, START anchors the pass where X is,
+    # IN: past centre + run-over the pass is DONE; OUT: past the OD +
+    # run-over.  STOP = drive off + old speed.  The DRO display is never
+    # touched.
     app.dro = DroSerial('/nonexistent')
     seq = [0]
     x0 = 40000                                    # counts; on this lathe 'in' = counts going down
@@ -801,29 +802,31 @@ def after_layout(dt):
     app.set_speed(400)
     base = app.command_speed
     app.save_speed_pad(css_sfm=400, css_top=1500, css_material='', css_tool='cbd', css_over_mm=0.5,
-                       css_start_dia_mm=0, css_in_sign=0)
+                       css_start_dia_mm=0, css_in_sign=0, css_dir='in')
     x_shown = app.x_val
     app.open_tools()
     app.tools_pick('css')
     o = app._css
     check('css popup from the menu', (app._tools, o is not None), (None, True))
-    check('css untaught', (o.teach_text, o.teach_btn), ('not taught', 'TEACH'))
-    app.open_pad_edit('css_teach')
-    check('teach waits for movement', (app.css_teaching, app._param_edit), (True, None))
+    check('css not learned yet', (o.learn_text, o.learn_btn, o.learned), ('not learned', 'LEARN', False))
+    o.primary()
+    check('ACTIVATE refused until the direction is learned', (app.css_mode, app._css is o), (False, True))
+    app.open_pad_edit('css_learn')
+    check('learn waits for movement', (app.css_learning, app._param_edit), (True, None))
     feed_x(x0 - 20)                               # 0.02 mm: not enough yet
-    app._css_teach_tick(0)
-    check('teach ignores a small wiggle', app.css_teaching, True)
+    app._css_learn_tick(0)
+    check('learn ignores a small wiggle', app.css_learning, True)
     feed_x(x0 - 80)
-    app._css_teach_tick(0)
+    app._css_learn_tick(0)
     o.refresh()
-    check('teach learned counts-down = toward centre',
-          (app.css_teaching, app.css_config()['in_sign'], o.teach_text), (False, -1, 'learned'))
+    check('learned: counts going down = toward centre',
+          (app.css_learning, app.css_config()['in_sign'], o.learn_text, o.learned), (False, -1, 'learned', True))
     o.set_start_dia(2.0 if app.units == 'in' else 50.8)
-    check('css live line', o.live_text, '400 SFM on %s  ->  764 rpm at START' % o.start_dia)
+    check('css live line', o.live_text, '400 SFM at OD %s  ->  764 rpm at START' % o.start_dia)
     o.primary()
     check('css ACTIVATE: panel in, popup closed, speed untouched',
           (app.css_mode, app.css_state, app._css, app.command_speed), (True, 'ready', None, base))
-    check('css ready card', (app.css_badge, app.css_rpm_text, app.css_can_start), ('READY', '764 rpm', True))
+    check('css ready card', (app.css_badge, app.css_rpm_text, app.css_can_start), ('READY  IN', '764 rpm', True))
     app.set_speed(600)
     app.adjust_speed(50)
     check('pad speed changes ignored while CSS is up', app.command_speed, base)
@@ -868,6 +871,30 @@ def after_layout(dt):
     app._css_tick(0)
     check('DRO back: stays on hold until restarted', (app.css_badge, app.command_speed), ('HOLD', rpm_m(764)))
     app.css_stop()
+
+    # OUT: start at centre, top speed there, slows as the tool moves out,
+    # DONE past the OD plus the run-over
+    app.save_speed_pad(css_dir='out')
+    app._css_tick(0)
+    check('OUT ready card', (app.css_badge, app.css_rpm_text), ('READY  OUT', '1500 rpm'))
+    feed_x(x0)                                    # tool at centre
+    check('OUT start', app.css_start(), True)
+    check('OUT starts at the top speed', app.command_speed, rpm_m(1500))
+
+    def out_at(r_mm):                             # outward = counts going up here
+        feed_x(round(x0 + r_mm * 1000.0 / app.dro_x_um))
+
+    out_at(19.05)                                 # 1.5 in diameter
+    app._css_tick(0)
+    check('OUT slows as the diameter grows', app.command_speed, rpm_m(1019))
+    out_at(25.7)                                  # past the 1 in radius, inside the run-over
+    app._css_tick(0)
+    check('OUT past the OD, inside the run-over', app.css_state, 'running')
+    out_at(26.0)
+    app._css_tick(0)
+    check('OUT run-over reached: DONE', (app.css_state, app.css_badge), ('done', 'PASS DONE'))
+    app.css_stop()
+    app.save_speed_pad(css_dir='in')
     app.css_exit()
     check('EXIT: pad back, speed as before', (app.css_mode, app.css_state, app.command_speed), (False, '', base))
     feed_x(x0)
