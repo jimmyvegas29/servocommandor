@@ -172,6 +172,7 @@ class DroBle:
                 async with BleakClient(target, timeout=8.0) as client:
                     self._client = client
                     self.connected = True
+                    last_seq = None          # a reconnect gap is not a dropped packet
                     log.info('DRO BLE: connected to %s', target)
                     self._ping_event = asyncio.Event()
 
@@ -388,6 +389,13 @@ class DroBle:
         ack = self._ota_ack
         return ack if ack and ack[1] == want else None
 
+    def _node_at_least(self, major, minor):
+        try:
+            v = self.node_version.split()[-1].split('.')
+            return (int(v[0]), int(v[1])) >= (major, minor)
+        except (IndexError, ValueError):
+            return False
+
     async def _ota(self, path):
         import zlib
         try:
@@ -397,12 +405,17 @@ class DroBle:
             self._ota_event = asyncio.Event()
             client = self._client
             try:
-                await client._acquire_mtu()          # BlueZ: ask for the real MTU
-            except Exception:
-                pass
+                # BlueZ only reports the negotiated MTU through the backend
+                await getattr(client, '_backend', client)._acquire_mtu()
+            except Exception as exc:
+                log.warning('node OTA: MTU not acquired (%s)', exc)
             mtu = getattr(client, 'mtu_size', 23) or 23
-            chunk = max(16, min(mtu - 4, 200))
-            log.info('node OTA: %s, %d bytes, crc %08x, chunk %d', path, len(blob), crc, chunk)
+            if self._node_at_least(3, 14):
+                chunk = max(19, min(mtu - 4, 200))   # 3.14+ takes writes up to 256 bytes
+            else:
+                chunk = 19                           # older nodes truncate writes at 20 bytes
+            log.info('node OTA: %s, %d bytes, crc %08x, mtu %d, chunk %d',
+                     path, len(blob), crc, mtu, chunk)
             self._ota_event.clear()
             await client.write_gatt_char(CMD_UUID, b'F' + struct.pack('<II', len(blob), crc), response=True)
             ack = await self._wait_ota_ack(b'F', 3.0)

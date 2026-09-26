@@ -65,7 +65,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.13'         # shown on the panel; bump on every change
+VERSION = 'node 3.14'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -328,7 +328,9 @@ state = {'online': False, 'rpm': 0, 'torque': 0, 'alarm': 0, 'avg_load': 0,
          'jog_until': None,       # ticks_ms deadline for the next jog keep-alive
          'linked': False,         # a panel is connected over BLE
          'boot_disable': False,   # drive was told 'disable' once after coming online
-         'poll_errors': 0}        # failed drive polls since boot (RS-485 noise indicator)
+         'poll_errors': 0,        # failed drive polls since boot (RS-485 noise indicator)
+         'conn': None,            # the panel's connection, for DATA notifies
+         'notify_fail': 0}        # DATA notifies the BLE stack refused since boot
 
 
 def safe_disable(why, zero_speed=False):
@@ -622,6 +624,12 @@ ping_char = aioble.Characteristic(svc, PING_UUID, write=True, write_no_response=
 cmd_char = aioble.Characteristic(svc, CMD_UUID, write=True, write_no_response=True,
                                  notify=True, capture=True)
 aioble.register_services(svc)
+try:
+    # MicroPython's default is 20 bytes, which truncates any longer write;
+    # updates arrive as 'f' + up to ~240 bytes once the MTU is raised
+    bluetooth.BLE().gatts_set_buffer(cmd_char._value_handle, 256)
+except Exception as exc:
+    print('CMD buffer not enlarged:', exc)
 led = Pin('LED', Pin.OUT)
 seq = 0
 
@@ -651,17 +659,19 @@ async def sampler():
         x, z, t = enc_x.value(), enc_z.value(), time.ticks_ms()
         print('DRO X:%d Z:%d S:%d T:%d' % (x, z, seq, t))
         if seq % 4 == 0:
-            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d pe:%d pins fwd=%d rev=%d' % (
+            print('NODE rpm:%d tq:%d al:%d sw:%s on:%d en:%d pe:%d nf:%d pins fwd=%d rev=%d' % (
                 state['rpm'], state['torque'], state['alarm'], state['switch'],
-                state['online'], state['enabled'], state['poll_errors'],
+                state['online'], state['enabled'], state['poll_errors'], state['notify_fail'],
                 pin_fwd.value(), pin_rev.value()))
-        try:
-            data_char.write(struct.pack('<IiiIhhHBH', seq, x, z, t, state['rpm'],
-                                        state['torque'], state['alarm'], flags(),
-                                        state['avg_load'] & 0xFFFF),
-                            send_update=True)
-        except Exception:
-            pass
+        data_char.write(struct.pack('<IiiIhhHBH', seq, x, z, t, state['rpm'],
+                                    state['torque'], state['alarm'], flags(),
+                                    state['avg_load'] & 0xFFFF))
+        conn = state['conn']
+        if conn is not None:
+            try:
+                data_char.notify(conn)
+            except Exception:
+                state['notify_fail'] += 1
         next_t = time.ticks_add(next_t, PERIOD_MS)
         delay = time.ticks_diff(next_t, time.ticks_ms())
         await asyncio.sleep_ms(delay if delay > 0 else 0)
@@ -687,13 +697,22 @@ async def peripheral():
             print('BLE connected', conn.device)
             led.on()
             state['linked'] = True
+            state['conn'] = conn
+            asyncio.create_task(report_mtu(conn))
             await conn.disconnected(timeout_ms=None)
             print('BLE disconnected')
+            state['conn'] = None
             state['linked'] = False
             # panel gone: stop the spindle and make the switch pass through
             # OFF before it can start anything again
             safe_disable('link lost', zero_speed=True)
             state['armed'] = False
+
+
+async def report_mtu(conn):
+    # the panel (BlueZ) runs the MTU exchange just after connecting
+    await asyncio.sleep_ms(3000)
+    print('BLE mtu', getattr(conn, 'mtu', None))
 
 
 async def pinger():
