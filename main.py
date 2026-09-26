@@ -806,7 +806,7 @@ class ServoCommanderApp(App):
     def build_config(self, config):
         config.setdefaults('GUI', {'fullscreen': True, 'cursor': False,
                                    'rotate': 90, 'landscape_rotate': 0, 'no_reverse': False,
-                                   'pixel_aspect': 1.0})
+                                   'pixel_aspect': 1.0, 'touch_log': False})
         config.setdefaults('Hardware', {'invert_direction': False})
         config.setdefaults('DRO', {'enabled': False, 'port': '/dev/ttyACM0'})
         config.setdefaults('Settings', {'mode': 'rpm', 'servo_max_rpm': 3000,
@@ -853,6 +853,10 @@ class ServoCommanderApp(App):
             # up with the saved reading straight away
             self._resync_datums({'X': 0.0, 'Z': 0.0})
         Clock.schedule_interval(self._datum_autosave, 2.0)
+        if cfg.getboolean('GUI', 'touch_log'):
+            # diagnostics: log every touch with its input source and the
+            # button under it ([GUI] touch_log = 1 in servo.ini)
+            Window.bind(on_touch_down=self._log_touch, on_touch_up=self._log_touch_up)
 
         self.base = FloatLayout()
         self._build_stage()
@@ -1935,6 +1939,35 @@ class ServoCommanderApp(App):
         self._hide('_numpad')
 
     # ---- speed / direction / enable -------------------------------------
+    def _touch_target(self, x, y):
+        """Deepest button-like widget under a window point, topmost first."""
+        def walk(w):
+            for c in w.children[:]:
+                got = walk(c)
+                if got is not None:
+                    return got
+            try:
+                px, py = w.parent.to_widget(x, y) if hasattr(w.parent, 'to_widget') else (x, y)
+                hit = w.collide_point(px, py)
+            except Exception:
+                return None
+            if hit and hasattr(w, 'state') and hasattr(w, 'text'):
+                return w
+            return None
+        for top in Window.children[:]:
+            got = walk(top)
+            if got is not None:
+                ident = next((k for k, v in self.control_ids().items() if v == got), '')
+                return '%s %r%s' % (type(got).__name__, got.text[:24], ' #' + ident if ident else '')
+        return 'nothing'
+
+    def _log_touch(self, _win, touch):
+        log.info('TOUCH down %s #%s at (%d, %d) on %s', touch.device, touch.uid,
+                 touch.x, touch.y, self._touch_target(touch.x, touch.y))
+
+    def _log_touch_up(self, _win, touch):
+        log.info('TOUCH up   %s #%s at (%d, %d)', touch.device, touch.uid, touch.x, touch.y)
+
     def _drive_ready(self):
         """Speed-section guard: while the drive is offline every speed
         control just brings the offline popup back (the DRO keeps working
