@@ -222,7 +222,7 @@ class CssBar(Widget):
     def _draw(self, *_):
         x, y = self.pos
         w, h = self.size
-        th = min(18.0, h * 0.6)                 # track height; ticks hang below it
+        th = max(8.0, h - 8.0)                  # track height; ticks hang below it
         ty = y + h - th
         self.canvas.clear()
         with self.canvas:
