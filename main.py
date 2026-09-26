@@ -2445,13 +2445,22 @@ class ServoCommanderApp(App):
         return '%s mm pitch' % fmt_num(c['pitch'], 2)
 
     def tap_drag_for(self, rpm):
-        """Measured spindle drag (% torque) at this speed, or the nearest
-        speed that was measured: (pct, rpm) or (None, None)."""
+        """Spindle drag (% torque) at this speed from the measured points:
+        interpolated between the two either side, or the end point when the
+        speed is outside what was measured (drag is not a straight line - it
+        climbs fast at low speed and flattens).  Returns (pct, rpm the value
+        belongs to: this rpm, or the end point used) or (None, None)."""
         table = self.settings.get('speed_pad', {}).get('tap_drag', {})
-        if not table:
+        pts = sorted((int(k), float(v)) for k, v in table.items())
+        if not pts:
             return None, None
-        near = min(table, key=lambda k: abs(int(k) - rpm))
-        return int(table[near]), int(near)
+        if rpm <= pts[0][0]:
+            return int(round(pts[0][1])), pts[0][0]
+        if rpm >= pts[-1][0]:
+            return int(round(pts[-1][1])), pts[-1][0]
+        for (r0, d0), (r1, d1) in zip(pts, pts[1:]):
+            if r0 <= rpm <= r1:
+                return int(round(d0 + (d1 - d0) * (rpm - r0) / float(r1 - r0))), rpm
 
     # motor rated torque (Drive page): turns the tap table's inch-pounds
     # into the drive's torque percent

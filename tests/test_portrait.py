@@ -1187,7 +1187,9 @@ def tap_flow(dt):
     th = app._threads
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
-    check('UNC sizes listed', [b.text for b in th.ids.grid.children][::-1][:3], ['#1-64', '#2-56', '#3-48'])
+    check('UNC sizes listed, nothing under 1/4', [b.text for b in th.ids.grid.children][::-1][:3],
+          ['1/4-20', '5/16-18', '3/8-16'])
+    check('metric starts at M6', [t['label'] for t in tapdata.family('M')][0], 'M6')
     btn = {b.text: b for b in th.ids.grid.children}
     check('no greyed sizes, no note', (min(b.color[0] for b in btn.values()) > 0.5, th.note), (True, ''))
     th.pick('1/4-20')
@@ -1251,6 +1253,16 @@ def tap_flow(dt):
           (False, b'j', 9, auto_cap + 9))
     o.refresh()
     check('drag shown', o.drag_text, '9 %')
+    # measured points: interpolated between, end value outside
+    app.save_speed_pad(tap_drag={'50': 14, '100': 18, '200': 25, '400': 35})
+    check('drag interpolated between points', app.tap_drag_for(150), (22, 150))
+    check('drag exact at a point', app.tap_drag_for(100), (18, 100))
+    check('drag below the range uses the end point', app.tap_drag_for(30), (14, 50))
+    check('drag above the range uses the end point', app.tap_drag_for(900), (35, 400))
+    app.save_speed_pad(tap_rpm=30)
+    o.refresh()
+    check('drag outside the range says where it came from', o.drag_text, '14 % (at 50 rpm)')
+    app.save_speed_pad(tap_rpm=100)
     app.save_speed_pad(tap_drag={})
     fake.torque = 0
     auto_cap_now = app.tap_config()['tlim']

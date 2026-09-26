@@ -7,7 +7,8 @@ setting Tapmatic recommends for its torque-limiting heads (the "normal"
 column).  The panel uses that clutch setting as the torque cap.
 https://www.tapmatic.com/tapping_questions_torque_setting_data_for_hss.ydev
 
-Tapmatic lists inch sizes only.  Metric sizes use the row of the next
+Sizes under 1/4 in are left out (not tapped on a lathe); M6 stays as the
+metric 1/4-20.  Tapmatic lists inch sizes only.  Metric sizes use the row of the next
 SMALLER inch size, so their cap errs low (they are marked derived).
 
 The torque a thread needs in a given material is estimated with the
@@ -69,15 +70,6 @@ _ROWS = {
 # (key, label, family, pitch value, pitch unit, table row, derived-from label or '')
 _SIZES = [
     # UNC
-    ('#1-64', '#1-64', 'UNC', 64, 'tpi', '0-2', ''),
-    ('#2-56', '#2-56', 'UNC', 56, 'tpi', '0-2', ''),
-    ('#3-48', '#3-48', 'UNC', 48, 'tpi', '3-4', ''),
-    ('#4-40', '#4-40', 'UNC', 40, 'tpi', '3-4', ''),
-    ('#5-40', '#5-40', 'UNC', 40, 'tpi', '5-6', ''),
-    ('#6-32', '#6-32', 'UNC', 32, 'tpi', '5-6', ''),
-    ('#8-32', '#8-32', 'UNC', 32, 'tpi', '8', ''),
-    ('#10-24', '#10-24', 'UNC', 24, 'tpi', '10-24', ''),
-    ('#12-24', '#12-24', 'UNC', 24, 'tpi', '12', ''),
     ('1/4-20', '1/4-20', 'UNC', 20, 'tpi', '1/4-20', ''),
     ('5/16-18', '5/16-18', 'UNC', 18, 'tpi', '5/16-18', ''),
     ('3/8-16', '3/8-16', 'UNC', 16, 'tpi', '3/8-16', ''),
@@ -87,16 +79,6 @@ _SIZES = [
     ('5/8-11', '5/8-11', 'UNC', 11, 'tpi', '5/8-11', ''),
     ('3/4-10', '3/4-10', 'UNC', 10, 'tpi', '3/4-10', ''),
     # UNF
-    ('#0-80', '#0-80', 'UNF', 80, 'tpi', '0-2', ''),
-    ('#1-72', '#1-72', 'UNF', 72, 'tpi', '0-2', ''),
-    ('#2-64', '#2-64', 'UNF', 64, 'tpi', '0-2', ''),
-    ('#3-56', '#3-56', 'UNF', 56, 'tpi', '3-4', ''),
-    ('#4-48', '#4-48', 'UNF', 48, 'tpi', '3-4', ''),
-    ('#5-44', '#5-44', 'UNF', 44, 'tpi', '5-6', ''),
-    ('#6-40', '#6-40', 'UNF', 40, 'tpi', '5-6', ''),
-    ('#8-36', '#8-36', 'UNF', 36, 'tpi', '8', ''),
-    ('#10-32', '#10-32', 'UNF', 32, 'tpi', '10-32', ''),
-    ('#12-28', '#12-28', 'UNF', 28, 'tpi', '12', ''),
     ('1/4-28', '1/4-28', 'UNF', 28, 'tpi', '1/4-28', ''),
     ('5/16-24', '5/16-24', 'UNF', 24, 'tpi', '5/16-24', ''),
     ('3/8-24', '3/8-24', 'UNF', 24, 'tpi', '3/8-24', ''),
@@ -106,12 +88,6 @@ _SIZES = [
     ('5/8-18', '5/8-18', 'UNF', 18, 'tpi', '5/8-18', ''),
     ('3/4-16', '3/4-16', 'UNF', 16, 'tpi', '3/4-16', ''),
     # metric coarse (row of the next smaller inch size)
-    ('M2x0.4', 'M2', 'M', 0.4, 'mm', '0-2', '#0-#2'),
-    ('M2.5x0.45', 'M2.5', 'M', 0.45, 'mm', '0-2', '#2'),
-    ('M3x0.5', 'M3', 'M', 0.5, 'mm', '3-4', '#4'),
-    ('M3.5x0.6', 'M3.5', 'M', 0.6, 'mm', '5-6', '#5'),
-    ('M4x0.7', 'M4', 'M', 0.7, 'mm', '5-6', '#6'),
-    ('M5x0.8', 'M5', 'M', 0.8, 'mm', '10-24', '#10'),
     ('M6x1', 'M6', 'M', 1.0, 'mm', '12', '#12'),
     ('M8x1.25', 'M8', 'M', 1.25, 'mm', '5/16-18', '5/16'),
     ('M10x1.5', 'M10', 'M', 1.5, 'mm', '3/8-16', '3/8'),
