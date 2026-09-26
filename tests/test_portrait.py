@@ -1188,6 +1188,14 @@ def tap_flow(dt):
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
     check('UNC sizes listed', [b.text for b in th.ids.grid.children][::-1][:3], ['#1-64', '#2-56', '#3-48'])
+    btn = {b.text: b for b in th.ids.grid.children}
+    btn['9/16-12'].dispatch('on_press')
+    check('too big for the lathe: greyed, pressing does nothing, note shown',
+          (btn['9/16-12'].color[0] < 0.4, app._threads is th, app.tap_config()['thread_key'], bool(th.note)),
+          (True, True, 'M6x1', True))
+    check('3/8-16 fits, 7/16-14 does not (6 Nm motor)',
+          (app.tap_thread_fits(tapdata.BY_KEY['3/8-16']), app.tap_thread_fits(tapdata.BY_KEY['7/16-14'])),
+          (True, False))
     th.pick('1/4-20')
     c = app.tap_config()
     check('picked 1/4-20: 20 TPI, 50 in-lb clutch', (app._threads, round(c['pitch_mm'], 3), c['thread']['clutch'],
@@ -1216,6 +1224,8 @@ def tap_flow(dt):
     app.save_speed_pad(tap_thread='1/2-13')
     o.refresh()
     check('1/2-13 past the 150 % cap', (o.ok, '150' in o.live_text), (False, True))
+    check('1/2-13 torque row says what it needs, in amber', (o.tlim_text.startswith('needs'), o.tlim_color[2] < 0.5),
+          (True, True))
     app.save_speed_pad(tap_thread='M6x1')
     # spindle drag: a short jog, torque averaged after spin-up
     fake.torque = 9

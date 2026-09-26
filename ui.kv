@@ -2607,6 +2607,7 @@
     btn_w: 52
     btn_color: ACCENT
     btn_bg: (0, 0, 0, 0)
+    value_color: (1, 1, 1, 1)
     size_hint_y: None
     height: 46
     padding: [8, 3]
@@ -2640,6 +2641,7 @@
             shorten_from: 'right'
     SLabel:
         text: root.value
+        color: root.value_color
         font_size: '14sp'
         size_hint_x: 0.32
         text_size: self.size
@@ -3418,6 +3420,15 @@
                 row_default_height: 44
                 row_force_default: True
                 height: self.minimum_height
+        SLabel:
+            text: root.note
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            height: 22 if root.note else 0
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
 
 <TapOverlay>:
     canvas.before:
@@ -3529,6 +3540,7 @@
                     label: 'Torque limit'
                     hint: root.tlim_hint
                     value: root.tlim_text
+                    value_color: root.tlim_color
                 PadRow:
                     key: 'tap_margin'
                     label: 'Back-out margin'

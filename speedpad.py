@@ -398,6 +398,7 @@ class TapOverlay(ModalTouch, FloatLayout):
     drag_btn = StringProperty('MEASURE')
     tlim_text = StringProperty('-')
     tlim_hint = StringProperty('')
+    tlim_color = ListProperty([1, 1, 1, 1])
     margin = StringProperty('2')
     hand = StringProperty('rh')
     live_text = StringProperty('')
@@ -467,7 +468,12 @@ class TapOverlay(ModalTouch, FloatLayout):
                 self.drag_text = '%d %%' % c['drag']
             else:
                 self.drag_text = '%d %% (at %d rpm)' % (c['drag'], c['drag_rpm'])
-        if c['auto'] and c['tlim'] > 0:
+        self.tlim_color = [1, 1, 1, 1]
+        if c['auto'] and c['tlim'] > app.TAP_CAP_MAX:
+            self.tlim_text = 'needs %d %%' % c['tlim']
+            self.tlim_color = [0.95, 0.75, 0.3, 1]
+            self.tlim_hint = 'too big for this lathe: pick a smaller size'
+        elif c['auto'] and c['tlim'] > 0:
             self.tlim_text = 'auto %d %%' % c['tlim']
             t = c['thread']
             self.tlim_hint = '%d in-lb clutch setting%s + drag' % (
@@ -504,6 +510,7 @@ class ThreadOverlay(ModalTouch, FloatLayout):
     (UNC, UNF, metric, metric fine), or a custom pitch."""
     family = StringProperty('UNC')
     current = StringProperty('')
+    note = StringProperty('')
     unit = StringProperty('tpi')
     custom_pitch = StringProperty('-')
 
@@ -526,15 +533,25 @@ class ThreadOverlay(ModalTouch, FloatLayout):
 
     def show(self):
         from kivy.factory import Factory
+        app = App.get_running_app()
         grid = self.ids.grid
         grid.clear_widgets()
+        self.note = ''
         if self.family == 'custom':
             return
+        too_big = 0
         for t in tapdata.family(self.family):
             b = Factory.PickButton(text=t['label'])
             b.active = t['key'] == self.current
-            b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
+            if app.tap_thread_fits(t):
+                b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
+            else:
+                # more than the lathe can tap with: shown greyed, not pickable
+                b.color = (0.32, 0.32, 0.32, 1)
+                too_big += 1
             grid.add_widget(b)
+        if too_big:
+            self.note = 'Grey sizes need more torque than this lathe can tap with'
 
     def pick(self, key):
         app = App.get_running_app()

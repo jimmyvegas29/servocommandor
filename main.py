@@ -2409,7 +2409,7 @@ class ServoCommanderApp(App):
         if manual:
             tlim, auto = manual, False
         elif clutch_pct is not None:
-            tlim, auto = int(round((drag or 0) + clutch_pct)), True
+            tlim, auto = self.tap_auto_cap(thread, drag), True
         else:
             tlim, auto = 0, True                 # custom thread: must be set by hand
         return {'thread_key': key, 'thread': thread, 'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
@@ -2420,6 +2420,18 @@ class ServoCommanderApp(App):
                 'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'min_pct': min_pct,
                 'margin': float(sp.get('tap_margin', 2.0)),
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
+
+    TAP_CAP_MAX = 150               # the node's hard cap for a tap pass
+
+    def tap_auto_cap(self, thread, drag=None):
+        """Torque cap (drive %) for a thread from the table: drag + the
+        recommended clutch setting at the tap, through motor and ratio."""
+        return int(round((drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(),
+                                                               self.ratio)))
+
+    def tap_thread_fits(self, thread):
+        drag, _ = self.tap_drag_for(int(self.settings.get('speed_pad', {}).get('tap_rpm', 100)))
+        return self.tap_auto_cap(thread, drag) <= self.TAP_CAP_MAX
 
     def tap_pitch_text(self, c):
         if c['thread'] is not None:
@@ -2479,7 +2491,7 @@ class ServoCommanderApp(App):
             return 'Tapping speed must be 5 to %d rpm' % self.tap_max_rpm()
         if not 5 <= c['tlim'] <= 150:
             if c['auto'] and c['tlim'] > 150:
-                return ('%s needs %d %% (clutch setting): past the 150 %% tapping cap'
+                return ('%s needs about %d %%: more torque than this lathe can tap with (150 %% max)'
                         % (self.tap_pitch_text(c), c['tlim']))
             return 'Torque limit must be 5 to 150 %'
         overload = self.settings.get('drive_params', {}).get('70')
