@@ -26,13 +26,13 @@ KS = {
     'Mild steel': 2300,            # low carbon steel 2200-2400
     'Medium carbon': 3000,         # not listed: uses the alloy steel value (errs high)
     'High carbon': 3000,           # 4130 / 4140: alloy steel 2800-3200
-    'Stainless': 3000,             # stainless 2800-3200
+    'Stainless': 3650,             # austenitic stainless (304 / 316) 3500-3800
     'Cast iron': None,
     'Aluminum': 800,               # aluminium alloy 700-900
     'Brass': None,
     'Plastic': None,
 }
-KS_NOTE = {'Medium carbon': 'alloy steel value'}
+KS_NOTE = {'Medium carbon': 'alloy steel value', 'Stainless': '304/316 value'}
 
 # major diameter, mm, of the numbered and fractional sizes
 _DIA = {'#0': 1.524, '#1': 1.854, '#2': 2.184, '#3': 2.515, '#4': 2.845, '#5': 3.175, '#6': 3.505,
