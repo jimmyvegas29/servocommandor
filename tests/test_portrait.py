@@ -829,7 +829,10 @@ def after_layout(dt):
     check('css ready card', (app.css_badge, app.css_left_text, app.css_right_text, app.css_frac, app.css_can_start),
           ('READY', '764 rpm', '1500 rpm', 0.0, True))
     kinds = sorted(k for _f, k in app.css_marks)
-    check('bar marks: 9 minor and the center', (kinds.count('minor'), kinds.count('major'), len(kinds)), (9, 1, 10))
+    check('bar marks: 9 minor, the center, the top-speed point',
+          (kinds.count('minor'), kinds.count('major'), kinds.count('cap')), (9, 1, 1))
+    check('ready: the whole radius is left to cut', (app.css_rem_label, app.css_dia_text),
+          ('Cut remaining', app.css_len_text(25.4)))
     app.set_speed(600)
     app.adjust_speed(50)
     check('pad speed changes ignored while CSS is up', app.command_speed, base)
@@ -849,6 +852,7 @@ def after_layout(dt):
     at_radius(12.7)                               # half the radius: 1528 rpm wanted
     app._css_tick(0)
     check('toward centre stops at the top limit', app.command_speed, rpm_m(1500))
+    check('cut remaining is the radius to center', app.css_dia_text, app.css_len_text(12.7))
     at_radius(50.8)                               # out to a 4 in diameter
     app._css_tick(0)
     check('bigger diameter slows down', app.command_speed, rpm_m(382))
@@ -859,6 +863,7 @@ def after_layout(dt):
     at_radius(-0.3)                               # past centre, inside the run-over
     app._css_tick(0)
     check('past centre: top speed, still running', (app.css_state, app.command_speed), ('running', rpm_m(1500)))
+    check('cut remaining holds at 0 in the run-over', app.css_dia_text, app.css_len_text(0.0))
     at_radius(-0.6)                               # past the 0.5 mm run-over
     app._css_tick(0)
     check('run-over reached: pass DONE, speed held', (app.css_state, app.css_badge, app.command_speed),
@@ -888,7 +893,7 @@ def after_layout(dt):
     app.save_speed_pad(css_dir='out')
     app._css_tick(0)
     check('OUT ready card', (app.css_badge, app.css_left_text, app.css_right_text, app.css_dia_text),
-          ('READY', '1500 rpm', '764 rpm', 'from center'))
+          ('READY', '1500 rpm', '764 rpm', app.css_len_text(25.4)))
     feed_x(x0)                                    # tool at centre
     check('OUT start', app.css_start(), True)
     check('OUT starts at the top speed', app.command_speed, rpm_m(1500))
@@ -899,6 +904,7 @@ def after_layout(dt):
     out_at(19.05)                                 # 1.5 in diameter
     app._css_tick(0)
     check('OUT slows as the diameter grows', app.command_speed, rpm_m(1019))
+    check('OUT cut remaining is the way out to the OD', app.css_dia_text, app.css_len_text(25.4 - 19.05))
     out_at(25.7)                                  # past the 1 in radius, inside the run-over
     app._css_tick(0)
     check('OUT past the OD, inside the run-over', app.css_state, 'running')

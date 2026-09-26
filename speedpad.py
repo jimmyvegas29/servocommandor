@@ -207,9 +207,10 @@ class ToolsOverlay(ModalTouch, FloatLayout):
 
 
 class CssBar(Widget):
-    """Constant SFM progress: a track that fills left to right, tick marks
-    underneath every 10 % and a taller white mark at the center (OD > Center)
-    or the OD (Center > OD); the run-over is the part after it."""
+    """Constant SFM progress: a track that fills left to right with tick
+    marks underneath every 10 %.  Two white lines inside the track: the end
+    of the cut (center for OD > Center, the OD for Center > OD; the run-over
+    is the part after it) and the point where the top speed takes over."""
     frac = NumericProperty(0.0)
     marks = ListProperty([])
     fill = ListProperty([0, 0.5, 1, 1])
@@ -235,9 +236,9 @@ class CssBar(Widget):
                 if kind == 'minor':
                     Color(0.45, 0.45, 0.45, 1)
                     Rectangle(pos=(tx - 0.5, ty - 5), size=(1, 5))
-                else:
+                else:                               # end of cut / top speed: inside the track
                     Color(1, 1, 1, 1)
-                    Rectangle(pos=(tx - 1, y), size=(2, h))
+                    Rectangle(pos=(tx - 1, ty), size=(2, th))
 
 
 class CssOverlay(ModalTouch, FloatLayout):

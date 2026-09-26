@@ -2032,7 +2032,8 @@ class ServoCommanderApp(App):
     css_fill = ListProperty([0, 0.5, 1, 1])
     css_left_text = StringProperty('')
     css_right_text = StringProperty('')
-    css_dia_text = StringProperty('')
+    css_dia_text = StringProperty('')       # big value, or what START is waiting for
+    css_rem_label = StringProperty('')      # 'Cut remaining' beside the value, '' for a message
     css_can_start = BooleanProperty(False)
     css_learning = BooleanProperty(False)
     CSS_TICK = 0.2                  # s between rpm updates
@@ -2185,18 +2186,23 @@ class ServoCommanderApp(App):
         """Progress bar for a pass: (fraction done, marks, left rpm, right rpm).
         IN runs from the OD to the run-over past center, OUT from center to
         the run-over past the OD.  Marks: minor every 10 %, 'major' at the
-        center (IN) or the OD (OUT)."""
+        center (IN) or the OD (OUT), 'cap' where the top speed takes over."""
         R = c['start_dia_mm'] / 2.0
         total = R + c['over_mm']
         if R <= 0 or top <= 0:
             return 0.0, [], 0, 0
         od_rpm = self.css_rpm(c['sfm'], top, 2.0 * R / 25.4)[0]
+        r_cap = c['sfm'] * 12.0 / (3.14159265 * top) * 25.4 / 2.0     # radius where rpm = top
         marks = [(i / 10.0, 'minor') for i in range(1, 10)]
         marks.append((R / total, 'major'))
         if c['dir'] == 'in':
+            if 0 < r_cap < R:
+                marks.append(((R - r_cap) / total, 'cap'))
             frac = 0.0 if r is None else (R - r) / total
             left, right = od_rpm, top
         else:
+            if 0 < r_cap < R:
+                marks.append((r_cap / total, 'cap'))
             frac = 0.0 if r is None else r / total
             left, right = top, od_rpm
         return max(0.0, min(1.0, frac)), marks, left, right
@@ -2227,16 +2233,16 @@ class ServoCommanderApp(App):
             self.css_can_start = live and c['in_sign'] != 0 and dia_mm > 0
             self.css_badge, self.css_badge_color = 'READY', [1, 1, 1, 1]
             # the big line: what START is waiting for, else where the pass starts
+            self.css_rem_label = ''
             if c['in_sign'] == 0:
                 self.css_dia_text = 'Learn direction in SETUP'
             elif dia_mm <= 0:
                 self.css_dia_text = 'Enter the OD in SETUP'
             elif not live:
                 self.css_dia_text = 'No DRO data'
-            elif c['dir'] == 'in':
-                self.css_dia_text = 'OD ' + self.css_len_text(dia_mm)
             else:
-                self.css_dia_text = 'from center'
+                self.css_rem_label = 'Cut remaining'
+                self.css_dia_text = self.css_len_text(dia_mm / 2.0)
             return
         self.css_can_start = False
         if state == 'running':
@@ -2244,6 +2250,7 @@ class ServoCommanderApp(App):
                 self._css_lost = True
                 self.css_badge, self.css_badge_color = 'HOLD', amber
                 self.css_fill = amber
+                self.css_rem_label = ''
                 self.css_dia_text = 'No DRO data' if not live else 'DRO dropped: STOP, START'
                 return
             r = self.css_radius_mm()
@@ -2272,12 +2279,17 @@ class ServoCommanderApp(App):
                 log.info('CSS pass done (%s), holding %s', self._css_dir.upper(), self.command_speed)
             else:
                 self.css_badge, self.css_badge_color = 'RUNNING', [1, 1, 1, 1]
-                self.css_dia_text = ('OD ' + self.css_len_text(2.0 * r)) if r > 0 else 'at center'
+                # true distance left to cut (to center, or out to the OD);
+                # the run-over is the part of the bar after the end mark
+                rem = r if self._css_dir == 'in' else c['start_dia_mm'] / 2.0 - r
+                self.css_rem_label = 'Cut remaining'
+                self.css_dia_text = self.css_len_text(max(0.0, rem))
         if state == 'done':
             self.css_badge, self.css_badge_color = 'DONE', green
             self.css_frac = 1.0
             self.css_fill = green
-            self.css_dia_text = 'past center' if self._css_dir == 'in' else 'past the OD'
+            self.css_rem_label = 'Cut remaining'
+            self.css_dia_text = self.css_len_text(0.0)
 
     def open_css(self):
         if not self._drive_ready():

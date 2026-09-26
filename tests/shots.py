@@ -158,7 +158,7 @@ def s_css_running():
         evt.cancel()
     app.css_state = 'running'
     app.css_badge, app.css_badge_color = 'RUNNING', [1, 1, 1, 1]
-    app.css_dia_text = 'OD 0.912 in'
+    app.css_rem_label, app.css_dia_text = 'Cut remaining', '0.456 in'
     app.css_frac, app.css_fill = 0.42, [0, 0.5, 1, 1]
 
 
