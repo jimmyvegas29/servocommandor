@@ -151,7 +151,8 @@ def s_css_running():
         evt.cancel()
     app.css_state = 'running'
     app.css_badge, app.css_badge_color = 'RUNNING', [0.4, 0.85, 0.5, 1]
-    app.css_rpm_text, app.css_dia_text = '1019 rpm', 'dia 1.500 in'
+    app.css_dia_text = 'dia 1.500 in'
+    app.css_frac, app.css_fill = 0.42, [0.4, 0.85, 0.5, 1]
     app.css_hint = 'Speed follows X.  STOP ends the pass'
 
 

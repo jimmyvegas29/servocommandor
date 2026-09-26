@@ -394,7 +394,7 @@
 <CssCard@BoxLayout>:
     orientation: 'vertical'
     padding: [14, 6, 14, 6]
-    big_font: '34sp'
+    lbl_font: '14sp'
     canvas.before:
         Color:
             rgba: PANEL
@@ -419,22 +419,29 @@
             text_size: self.size
             halign: 'right'
             valign: 'middle'
+    Widget:
+    CssBar:
+        size_hint_y: None
+        height: 30
+        frac: app.css_frac
+        marks: app.css_marks
+        fill: app.css_fill
     BoxLayout:
+        size_hint_y: None
+        height: 22
         SLabel:
-            text: app.css_rpm_text
-            font_size: root.big_font
+            text: app.css_left_text
+            font_size: root.lbl_font
             text_size: self.size
             halign: 'left'
             valign: 'middle'
         SLabel:
-            text: app.css_top_text
-            color: (0.65, 0.65, 0.65, 1)
-            font_size: '13sp'
-            size_hint_x: None
-            width: 90
+            text: app.css_right_text
+            font_size: root.lbl_font
             text_size: self.size
             halign: 'right'
             valign: 'middle'
+    Widget:
     SLabel:
         text: app.css_dia_text
         font_size: '16sp'
@@ -972,7 +979,7 @@
                 disabled: not app.css_mode
                 padding: [0, 0, 5, 0]
                 CssCard:
-                    big_font: '44sp'
+                    lbl_font: '18sp'
         BoxLayout:
             orientation: 'vertical'
             size_hint_x: 0.3275

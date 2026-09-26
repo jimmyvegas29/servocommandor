@@ -13,6 +13,8 @@ from kivy.properties import (StringProperty, NumericProperty, BooleanProperty,
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.clock import Clock
 
 from portrait_ui import ModalTouch
@@ -202,6 +204,43 @@ class DrillOverlay(ModalTouch, FloatLayout):
 class ToolsOverlay(ModalTouch, FloatLayout):
     """Speed pad button 7: menu of spindle tools.  Drill works; Tap and
     Constant SFM are listed but not built yet."""
+
+
+class CssBar(Widget):
+    """Constant SFM progress: a track that fills left to right, tick marks
+    underneath every 10 %, a taller white mark at the centre (IN) or OD
+    (OUT) and an amber mark where the top speed takes over."""
+    frac = NumericProperty(0.0)
+    marks = ListProperty([])
+    fill = ListProperty([0, 0.5, 1, 1])
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.bind(pos=self._draw, size=self._draw, frac=self._draw, marks=self._draw, fill=self._draw)
+
+    def _draw(self, *_):
+        x, y = self.pos
+        w, h = self.size
+        th = min(18.0, h * 0.6)                 # track height; ticks hang below it
+        ty = y + h - th
+        self.canvas.clear()
+        with self.canvas:
+            Color(0.07, 0.07, 0.07, 1)
+            RoundedRectangle(pos=(x, ty), size=(w, th), radius=[(4, 4)] * 4)
+            if self.frac > 0:
+                Color(*self.fill)
+                RoundedRectangle(pos=(x, ty), size=(max(8.0, w * self.frac), th), radius=[(4, 4)] * 4)
+            for f, kind in self.marks:
+                tx = x + w * f
+                if kind == 'minor':
+                    Color(0.45, 0.45, 0.45, 1)
+                    Rectangle(pos=(tx - 0.5, ty - 5), size=(1, 5))
+                elif kind == 'major':
+                    Color(1, 1, 1, 1)
+                    Rectangle(pos=(tx - 1, y), size=(2, h))
+                else:
+                    Color(0.95, 0.75, 0.3, 1)
+                    Rectangle(pos=(tx - 1, ty - 8), size=(2, th + 8))
 
 
 class CssOverlay(ModalTouch, FloatLayout):

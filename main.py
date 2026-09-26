@@ -2027,8 +2027,11 @@ class ServoCommanderApp(App):
     css_badge = StringProperty('')
     css_badge_color = ListProperty([1, 1, 1, 1])
     css_setup_text = StringProperty('')
-    css_top_text = StringProperty('')
-    css_rpm_text = StringProperty('')
+    css_frac = NumericProperty(0.0)
+    css_marks = ListProperty([])
+    css_fill = ListProperty([0, 0.5, 1, 1])
+    css_left_text = StringProperty('')
+    css_right_text = StringProperty('')
     css_dia_text = StringProperty('')
     css_hint = StringProperty('')
     css_can_start = BooleanProperty(False)
@@ -2178,26 +2181,57 @@ class ServoCommanderApp(App):
         else:
             self.css_stop()
 
+    def _css_bar(self, c, top, r=None):
+        """Progress bar for a pass: (fraction done, marks, left rpm, right rpm).
+        IN runs from the OD to the run-over past centre, OUT from centre to
+        the run-over past the OD.  Marks: minor every 10 %, 'major' at the
+        centre (IN) or the OD (OUT), 'cap' where the top speed takes over."""
+        R = c['start_dia_mm'] / 2.0
+        total = R + c['over_mm']
+        if R <= 0 or top <= 0:
+            return 0.0, [], 0, 0
+        r_cap = c['sfm'] * 12.0 / (3.14159265 * top) * 25.4 / 2.0     # radius where rpm = top
+        od_rpm = self.css_rpm(c['sfm'], top, 2.0 * R / 25.4)[0]
+        marks = [(i / 10.0, 'minor') for i in range(1, 10)]
+        marks.append((R / total, 'major'))
+        if c['dir'] == 'in':
+            if 0 < r_cap < R:
+                marks.append(((R - r_cap) / total, 'cap'))
+            frac = 0.0 if r is None else (R - r) / total
+            left, right = od_rpm, top
+        else:
+            if 0 < r_cap < R:
+                marks.append((r_cap / total, 'cap'))
+            frac = 0.0 if r is None else r / total
+            left, right = top, od_rpm
+        return max(0.0, min(1.0, frac)), marks, left, right
+
+    def _css_show_bar(self, c, top, r, fill):
+        frac, marks, left, right = self._css_bar(c, top, r)
+        self.css_frac = frac
+        self.css_marks = marks
+        self.css_fill = fill
+        self.css_left_text = '%d rpm' % left if left else '-'
+        self.css_right_text = '%d rpm' % right if right else '-'
+
     def _css_tick(self, dt):
         if not self.css_mode:
             return
         c = self.css_config()
         top = min(c['top'], self.max_spindle_rpm())
         self.css_setup_text = '%d SFM' % c['sfm']
-        self.css_top_text = 'max %d' % top
         state = self.css_state
         live = self._css_live()
-        amber, green = [0.95, 0.75, 0.3, 1], [0.4, 0.85, 0.5, 1]
+        amber, green, blue = [0.95, 0.75, 0.3, 1], [0.4, 0.85, 0.5, 1], [0, 0.5, 1, 1]
         if state in ('running', 'done') and self.offline_flag:
             self._css_end_pass('drive offline')
             return
         if state == 'ready':
             dia_mm = c['start_dia_mm']
             going_in = c['dir'] == 'in'
-            rpm, _capped = self.css_rpm(c['sfm'], top, dia_mm / 25.4 if going_in else 0.0)
+            self._css_show_bar(c, top, None, blue)
             self.css_can_start = live and c['in_sign'] != 0 and dia_mm > 0
             self.css_badge, self.css_badge_color = ('READY  IN' if going_in else 'READY  OUT'), [1, 1, 1, 1]
-            self.css_rpm_text = '%d rpm' % rpm if dia_mm > 0 else '- rpm'
             if dia_mm <= 0:
                 self.css_dia_text = 'no work OD'
             elif going_in:
@@ -2220,10 +2254,12 @@ class ServoCommanderApp(App):
             if not live:
                 self._css_lost = True
                 self.css_badge, self.css_badge_color = 'HOLD', amber
+                self.css_fill = amber
                 self.css_hint = 'No DRO data: holding the last speed'
                 return
             if self._css_lost:
                 self.css_badge, self.css_badge_color = 'HOLD', amber
+                self.css_fill = amber
                 self.css_hint = 'DRO dropped out: STOP, then START again'
                 return
             r = self.css_radius_mm()
@@ -2231,24 +2267,28 @@ class ServoCommanderApp(App):
                 finished = r >= c['start_dia_mm'] / 2.0 + c['over_mm']
             else:
                 finished = -r >= c['over_mm']
+            rpm, capped = self.css_rpm(c['sfm'], top, 2.0 * max(r, 0.0) / 25.4)
+            motor = max(0, min(self.max_rpm, int(round(rpm * self.ratio))))
+            last = self._css_sent
+            # the 1 % deadband saves Modbus writes, but never stops the speed
+            # from reaching the top limit or the pass's final value
+            if not self.jogging and motor != last and (
+                    last is None or finished or capped or abs(motor - last) >= max(2, last * 0.01)):
+                self.command_speed = motor
+                self._send_speed()
+                self._css_sent = motor
+            self._css_show_bar(c, top, r, green)
             if finished:
                 self.css_state = state = 'done'
                 log.info('CSS pass done (%s), holding %s', self._css_dir.upper(), self.command_speed)
             else:
-                rpm, _capped = self.css_rpm(c['sfm'], top, 2.0 * max(r, 0.0) / 25.4)
-                motor = max(0, min(self.max_rpm, int(round(rpm * self.ratio))))
-                last = self._css_sent
-                if not self.jogging and (last is None or abs(motor - last) >= max(2, last * 0.01)):
-                    self.command_speed = motor
-                    self._send_speed()
-                    self._css_sent = motor
                 self.css_badge, self.css_badge_color = 'RUNNING', green
-                self.css_rpm_text = '%d rpm' % int(round(self.command_speed / self.ratio))
                 self.css_dia_text = ('dia ' + self.css_len_text(2.0 * r)) if r > 0 else 'at centre'
                 self.css_hint = 'Speed follows X.  STOP ends the pass'
         if state == 'done':
             self.css_badge, self.css_badge_color = 'PASS DONE', amber
-            self.css_rpm_text = '%d rpm' % int(round(self.command_speed / self.ratio))
+            self.css_frac = 1.0
+            self.css_fill = amber
             self.css_dia_text = 'past centre' if self._css_dir == 'in' else 'past the OD'
             self.css_hint = 'Holding speed.  STOP: drive off, speed back'
 

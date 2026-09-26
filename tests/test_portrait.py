@@ -826,7 +826,11 @@ def after_layout(dt):
     o.primary()
     check('css ACTIVATE: panel in, popup closed, speed untouched',
           (app.css_mode, app.css_state, app._css, app.command_speed), (True, 'ready', None, base))
-    check('css ready card', (app.css_badge, app.css_rpm_text, app.css_can_start), ('READY  IN', '764 rpm', True))
+    check('css ready card', (app.css_badge, app.css_left_text, app.css_right_text, app.css_frac, app.css_can_start),
+          ('READY  IN', '764 rpm', '1500 rpm', 0.0, True))
+    kinds = sorted(k for _f, k in app.css_marks)
+    check('bar marks: 9 minor, centre, top-speed point', (kinds.count('minor'), kinds.count('major'), kinds.count('cap')),
+          (9, 1, 1))
     app.set_speed(600)
     app.adjust_speed(50)
     check('pad speed changes ignored while CSS is up', app.command_speed, base)
@@ -836,6 +840,13 @@ def after_layout(dt):
           ('running', 'RUNNING', rpm_m(764)))
     app.css_exit()
     check('EXIT does nothing while running', (app.css_mode, app.css_state), (True, 'running'))
+    at_radius(13.03)                              # 1490 rpm: just under the top
+    app._css_tick(0)
+    check('near the top', app.command_speed, rpm_m(round(speedpad.rpm_for(400, 2 * 13.03 / 25.4))))
+    at_radius(12.9)                               # 1504 wanted: capped, a step under 1 %
+    app._css_tick(0)
+    check('small last step still reaches the top limit', app.command_speed, rpm_m(1500))
+    check('bar fills with the travel', round(app.css_frac, 3), round((25.4 - 12.9) / 25.9, 3))
     at_radius(12.7)                               # half the radius: 1528 rpm wanted
     app._css_tick(0)
     check('toward centre stops at the top limit', app.command_speed, rpm_m(1500))
@@ -853,6 +864,7 @@ def after_layout(dt):
     app._css_tick(0)
     check('run-over reached: pass DONE, speed held', (app.css_state, app.css_badge, app.command_speed),
           ('done', 'PASS DONE', rpm_m(1500)))
+    check('bar full when done', app.css_frac, 1.0)
     at_radius(-5.0)
     app._css_tick(0)
     check('DONE holds, no slowing back down', app.command_speed, rpm_m(1500))
@@ -876,7 +888,7 @@ def after_layout(dt):
     # DONE past the OD plus the run-over
     app.save_speed_pad(css_dir='out')
     app._css_tick(0)
-    check('OUT ready card', (app.css_badge, app.css_rpm_text), ('READY  OUT', '1500 rpm'))
+    check('OUT ready card', (app.css_badge, app.css_left_text, app.css_right_text), ('READY  OUT', '1500 rpm', '764 rpm'))
     feed_x(x0)                                    # tool at centre
     check('OUT start', app.css_start(), True)
     check('OUT starts at the top speed', app.command_speed, rpm_m(1500))
