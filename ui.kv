@@ -2482,6 +2482,7 @@
     btn: 'EDIT'
     btn_w: 52
     btn_color: ACCENT
+    btn_bg: (0, 0, 0, 0)
     size_hint_y: None
     height: 46
     padding: [8, 3]
@@ -2529,6 +2530,13 @@
         width: root.btn_w
         color: root.btn_color
         on_press: app.open_pad_edit(root.key)
+        canvas.before:
+            Color:
+                rgba: root.btn_bg
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
 
 <SpeedPadPage>:
     orientation: 'vertical'
@@ -3140,11 +3148,12 @@
                     value: ''
                     btn: root.learn_btn
                     btn_w: 86
-                    btn_color: (1, 1, 1, 1) if root.learning else (ACCENT if root.learned else (0.5, 0.5, 0.5, 1))
+                    btn_color: (1, 1, 1, 1) if (root.learning or root.learned) else ACCENT
+                    btn_bg: ACCENT if (root.learned and not root.learning) else (0, 0, 0, 0)
                 SLabel:
                     text: root.live_text
                     font_size: '14sp'
-                    color: (0.95, 0.75, 0.3, 1) if root.warn else (1, 1, 1, 1)
+                    color: (1, 1, 1, 1)
                     size_hint_y: None
                     height: 40
                     text_size: self.size

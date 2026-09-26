@@ -340,10 +340,10 @@ class CssOverlay(ModalTouch, FloatLayout):
             self.learn_btn = 'RELEARN' if self.learned else 'LEARN'
         self.warn = True
         if self.learning:
-            self.live_text = 'Move the cross slide toward the center a little'
+            self.live_text = 'Move the cutter toward center a little'
         elif not self.learned:
-            self.live_text = ('LEARN, then move the cutting tool toward center' if live
-                              else 'Learning the direction needs a live DRO reading')
+            self.live_text = ('Your direction must be calibrated. Press LEARN to calibrate.' if live
+                              else 'Calibrating the direction needs a live DRO reading')
         elif dia_mm <= 0:
             self.live_text = 'Enter the work OD'
         elif c['dir'] == 'in':

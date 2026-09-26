@@ -136,8 +136,15 @@ def s_tools():
 
 def s_css():
     app.close_tools()
+    app.close_css()
     app.save_speed_pad(css_sfm=400, css_top=1500, css_material='Mild steel', css_tool='cbd',
                        css_start_dia_mm=38.1, css_in_sign=-1)
+    app.open_css()
+
+
+def s_css_unlearned():
+    app.close_tools()
+    app.save_speed_pad(css_in_sign=0)
     app.open_css()
 
 
@@ -261,6 +268,7 @@ plan = [
     (0.2, s_drive_info), (0.5, lambda: cap('drive_info')), (0.2, s_drive_info_close),
     (0.2, s_settings_speedpad), (0.4, lambda: cap('settings_speedpad')),
     (0.2, s_tools), (0.6, lambda: cap('tools')),
+    (0.2, s_css_unlearned), (0.6, lambda: cap('css_unlearned')),
     (0.2, s_css), (0.6, lambda: cap('css')),
     (0.2, s_css_ready), (0.6, lambda: cap('css_ready')),
     (0.2, s_css_running), (0.6, lambda: cap('css_running')), (0.2, s_css_off),
