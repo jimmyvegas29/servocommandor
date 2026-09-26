@@ -2479,6 +2479,8 @@
     label: ''
     hint: ''
     value: '-'
+    btn: 'EDIT'
+    btn_w: 52
     size_hint_y: None
     height: 46
     padding: [8, 3]
@@ -2518,10 +2520,10 @@
         shorten: True
         shorten_from: 'left'
     SetKey:
-        text: 'EDIT'
+        text: root.btn
         font_size: '13sp'
         size_hint_x: None
-        width: 52
+        width: root.btn_w
         color: ACCENT
         on_press: app.open_pad_edit(root.key)
 
@@ -3064,36 +3066,17 @@
             hint: 'past centre before the pass is done'
             value: root.over
         PadRow:
-            key: 'css_dia'
-            label: 'Work diameter'
-            hint: 'from X; EDIT to enter the measured OD'
-            value: root.dia_text
-        BoxLayout:
-            size_hint_y: None
-            height: 34
-            padding: [8, 0]
-            SLabel:
-                text: 'X reads'
-                font_size: '14sp'
-                text_size: self.size
-                halign: 'left'
-                valign: 'middle'
-            BoxLayout:
-                size_hint_x: None
-                width: 180
-                padding: [0, 3]
-                SegButton:
-                    text: 'RADIUS'
-                    font_size: '12sp'
-                    active: root.x_mode == 'radius'
-                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
-                    on_press: root.set_x_mode('radius')
-                SegButton:
-                    text: 'DIAMETER'
-                    font_size: '12sp'
-                    active: root.x_mode == 'diameter'
-                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
-                    on_press: root.set_x_mode('diameter')
+            key: 'css_start_dia'
+            label: 'Start diameter'
+            hint: 'work OD at the tool at START'
+            value: root.start_dia
+        PadRow:
+            key: 'css_teach'
+            label: 'Toward centre'
+            hint: 'TEACH once, then move X in'
+            value: root.teach_text
+            btn: root.teach_btn
+            btn_w: 74
         SLabel:
             text: root.live_text
             font_size: '14sp'

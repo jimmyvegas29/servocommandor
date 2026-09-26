@@ -136,7 +136,8 @@ def s_tools():
 
 def s_css():
     app.close_tools()
-    app.save_speed_pad(css_sfm=400, css_top=1500, css_x='radius', css_material='Mild steel', css_tool='cbd')
+    app.save_speed_pad(css_sfm=400, css_top=1500, css_material='Mild steel', css_tool='cbd',
+                       css_start_dia_mm=38.1, css_in_sign=-1)
     app.open_css()
 
 

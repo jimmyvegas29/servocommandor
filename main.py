@@ -2014,9 +2014,12 @@ class ServoCommanderApp(App):
 
     # ---- constant surface speed (tools menu) -----------------------------
     # ACTIVATE in the setup popup swaps the speed pad for the CSS panel
-    # (READY).  START tracks X (RUNNING); once X is past the centre by the
-    # run-over the pass is DONE and the speed holds.  STOP disables the drive
-    # and puts the speed back to what it was before CSS; EXIT leaves CSS.
+    # (READY).  START anchors the pass where X is: that spot is the start
+    # diameter, and the radius shrinks by however far the slide travels
+    # toward centre (raw scale counts, so the DRO display and its datums are
+    # never touched).  Past centre the rpm stays at the top limit; after the
+    # run-over the pass is DONE and the speed holds.  STOP disables the
+    # drive and puts back the speed from before CSS; EXIT leaves CSS.
     css_mode = BooleanProperty(False)
     css_state = StringProperty('')          # '', 'ready', 'running', 'done'
     css_badge = StringProperty('')
@@ -2027,7 +2030,9 @@ class ServoCommanderApp(App):
     css_dia_text = StringProperty('')
     css_hint = StringProperty('')
     css_can_start = BooleanProperty(False)
+    css_teaching = BooleanProperty(False)
     CSS_TICK = 0.2                  # s between rpm updates
+    CSS_TEACH_MM = 0.05             # slide travel that counts as "moved toward centre"
 
     def css_config(self):
         sp = self.settings.get('speed_pad', {})
@@ -2037,15 +2042,21 @@ class ServoCommanderApp(App):
         return {'tool': sp.get('css_tool', 'cbd'), 'material': sp.get('css_material', ''),
                 'sfm': int(sp.get('css_sfm', 300)),
                 'top': int(sp.get('css_top', min(1000, self.max_spindle_rpm()))),
-                'x_mode': sp.get('css_x', 'radius'), 'over_mm': float(over)}
+                'start_dia_mm': float(sp.get('css_start_dia_mm', 0) or 0),
+                'in_sign': int(sp.get('css_in_sign', 0)), 'over_mm': float(over)}
 
-    def _css_x_radius_mm(self):
-        """Signed distance of the tool from the spindle centreline, mm."""
-        x = self._abs_mm('X')
-        return x / 2.0 if self.css_config()['x_mode'] == 'diameter' else x
+    def css_len_text(self, mm, places_in=3, places_mm=2):
+        if self.units == 'in':
+            return '%.*f in' % (places_in, mm / 25.4)
+        return '%.*f mm' % (places_mm, mm)
 
-    def css_diameter_in(self):
-        return 2.0 * abs(self._css_x_radius_mm()) / 25.4
+    def _css_travel_mm(self):
+        """Cross-slide position straight from the scale counts: no invert,
+        no datum.  Only differences of it are used."""
+        counts = getattr(self, '_last_counts', None)
+        if counts is None:
+            return None
+        return counts[0] * self.dro_x_um / 1000.0
 
     def css_rpm(self, sfm, top, dia_in):
         """(spindle rpm, capped) for a surface speed on a diameter, never
@@ -2054,16 +2065,35 @@ class ServoCommanderApp(App):
         rpm = rpm_for(sfm, dia_in) if dia_in > 0.001 else top
         return int(round(min(rpm, top))), rpm >= top
 
-    def css_set_diameter(self, dia):
-        """Measured work diameter typed in (display units): move the X ABS
-        datum so X reads it (as radius or diameter), keeping X's sign."""
-        d_mm = dia * 25.4 if self.units == 'in' else dia
-        want = d_mm / 2.0 if self.css_config()['x_mode'] == 'radius' else d_mm
-        sign = -1.0 if self._abs_mm('X') < 0 else 1.0
-        self.abs_off['X'] = self.raw['X'] - sign * want
-        self.refresh_axes()
-        self._save_datums()
-        log.info('CSS: X ABS set from measured diameter %s %s', dia, self.units)
+    # teach: the user moves the slide toward centre once; the sign of the
+    # count change is stored (a property of how the scale is mounted)
+    def css_teach_start(self):
+        pos = self._css_travel_mm()
+        if pos is None or self.dro is None or self.dro_stale:
+            return False
+        self._css_teach_from = pos
+        self.css_teaching = True
+        self._css_teach_evt = Clock.schedule_interval(self._css_teach_tick, 0.1)
+        log.info('CSS teach: waiting for the slide to move toward centre')
+        return True
+
+    def css_teach_cancel(self):
+        evt = getattr(self, '_css_teach_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._css_teach_evt = None
+        self.css_teaching = False
+
+    def _css_teach_tick(self, dt):
+        pos = self._css_travel_mm()
+        if pos is None or self.dro_stale:
+            return
+        d = pos - self._css_teach_from
+        if abs(d) >= self.CSS_TEACH_MM:
+            sign = 1 if d > 0 else -1
+            self.save_speed_pad(css_in_sign=sign)
+            self.css_teach_cancel()
+            log.info('CSS teach: toward centre = counts %s', 'up' if sign > 0 else 'down')
 
     def css_activate(self):
         if not self._drive_ready():
@@ -2074,28 +2104,36 @@ class ServoCommanderApp(App):
             self.css_state = 'ready'
             self._css_evt = Clock.schedule_interval(self._css_tick, self.CSS_TICK)
             c = self.css_config()
-            log.info('CSS activated: %d SFM, top %d, X as %s, run-over %.3f mm, base speed %s',
-                     c['sfm'], c['top'], c['x_mode'], c['over_mm'], self._css_base)
+            log.info('CSS activated: %d SFM, top %d, start dia %.3f mm, run-over %.3f mm, base speed %s',
+                     c['sfm'], c['top'], c['start_dia_mm'], c['over_mm'], self._css_base)
         self.close_css()
         self._css_tick(0)
         return True
 
+    def _css_live(self):
+        return self.dro is not None and not self.dro_stale and self._css_travel_mm() is not None
+
     def css_start(self):
         if self.css_state != 'ready' or not self._drive_ready():
             return False
-        if self.dro is None or self.dro_stale:
-            log.info('CSS not started: no live DRO')
+        c = self.css_config()
+        if not self._css_live() or c['in_sign'] == 0 or c['start_dia_mm'] <= 0:
+            log.info('CSS not started (DRO live %s, taught %s, start dia %s)',
+                     self._css_live(), c['in_sign'] != 0, c['start_dia_mm'])
             return False
-        r = self._css_x_radius_mm()
-        if abs(r) < 0.05:
-            log.info('CSS not started: X is at the centreline')
-            return False
-        self._css_side = 1.0 if r > 0 else -1.0
+        self._css_pos0 = self._css_travel_mm()
+        self._css_r0 = c['start_dia_mm'] / 2.0
+        self._css_in = c['in_sign']
+        self._css_lost = False
         self._css_sent = None
         self.css_state = 'running'
-        log.info('CSS pass start at dia %.3f in', self.css_diameter_in())
+        log.info('CSS pass start at dia %.3f mm', c['start_dia_mm'])
         self._css_tick(0)
         return True
+
+    def css_radius_mm(self):
+        """Tool's distance from centre during a pass (negative past it)."""
+        return self._css_r0 - self._css_in * (self._css_travel_mm() - self._css_pos0)
 
     def css_stop(self):
         """End the pass: drive off, speed back to the pre-CSS value."""
@@ -2135,55 +2173,58 @@ class ServoCommanderApp(App):
             return
         c = self.css_config()
         top = min(c['top'], self.max_spindle_rpm())
-        unit_in = self.units == 'in'
         self.css_setup_text = '%d SFM' % c['sfm']
         self.css_top_text = 'max %d' % top
-        r = self._css_x_radius_mm()
-        dia_in = 2.0 * abs(r) / 25.4
-        dia_txt = ('%.3f in' % dia_in) if unit_in else ('%.2f mm' % (dia_in * 25.4))
-        rpm, _capped = self.css_rpm(c['sfm'], top, dia_in)
         state = self.css_state
-        live = self.dro is not None and not self.dro_stale
-        self.css_can_start = state == 'ready' and live and abs(r) >= 0.05
+        live = self._css_live()
+        amber, green = [0.95, 0.75, 0.3, 1], [0.4, 0.85, 0.5, 1]
         if state in ('running', 'done') and self.offline_flag:
             self._css_end_pass('drive offline')
             return
-        if state == 'running' and live:
-            past = -self._css_side * r
-            if past >= c['over_mm']:
-                self.css_state = state = 'done'
-                log.info('CSS pass done: X %.3f mm past centre, holding %s', past, self.command_speed)
+        if state == 'ready':
+            dia_mm = c['start_dia_mm']
+            rpm, _capped = self.css_rpm(c['sfm'], top, dia_mm / 25.4)
+            self.css_can_start = live and c['in_sign'] != 0 and dia_mm > 0
+            self.css_badge, self.css_badge_color = 'READY', [1, 1, 1, 1]
+            self.css_rpm_text = '%d rpm' % rpm if dia_mm > 0 else '- rpm'
+            self.css_dia_text = ('start dia ' + self.css_len_text(dia_mm)) if dia_mm > 0 else 'no start diameter'
+            if c['in_sign'] == 0:
+                self.css_hint = 'SETUP: teach which way is toward centre'
+            elif dia_mm <= 0:
+                self.css_hint = 'SETUP: enter the start diameter'
+            elif not live:
+                self.css_hint = 'No DRO data: START needs a live X'
             else:
-                if past > 0:
-                    rpm = top                        # past centre: no slowing back down
+                self.css_hint = 'Set depth, put X at the start diameter, START'
+            return
+        self.css_can_start = False
+        if state == 'running':
+            if not live:
+                self._css_lost = True
+                self.css_badge, self.css_badge_color = 'HOLD', amber
+                self.css_hint = 'No DRO data: holding the last speed'
+                return
+            if self._css_lost:
+                self.css_badge, self.css_badge_color = 'HOLD', amber
+                self.css_hint = 'DRO dropped out: STOP, then START again'
+                return
+            r = self.css_radius_mm()
+            if -r >= c['over_mm']:
+                self.css_state = state = 'done'
+                log.info('CSS pass done: %.3f mm past centre, holding %s', -r, self.command_speed)
+            else:
+                rpm, _capped = self.css_rpm(c['sfm'], top, 2.0 * max(r, 0.0) / 25.4)
                 motor = max(0, min(self.max_rpm, int(round(rpm * self.ratio))))
                 last = self._css_sent
                 if not self.jogging and (last is None or abs(motor - last) >= max(2, last * 0.01)):
                     self.command_speed = motor
                     self._send_speed()
                     self._css_sent = motor
-        amber, green = [0.95, 0.75, 0.3, 1], [0.4, 0.85, 0.5, 1]
-        if state == 'ready':
-            self.css_badge, self.css_badge_color = 'READY', [1, 1, 1, 1]
-            self.css_rpm_text = '%d rpm' % rpm
-            self.css_dia_text = 'start speed at dia ' + dia_txt
-            if not live:
-                self.css_hint = 'No DRO data: START needs a live X reading'
-            elif abs(r) < 0.05:
-                self.css_hint = 'X is at the centreline: move to the OD'
-            else:
-                self.css_hint = 'Set the depth, put X at the OD, then START'
-        elif state == 'running':
-            shown = int(round(self.command_speed / self.ratio))
-            self.css_rpm_text = '%d rpm' % shown
-            self.css_dia_text = 'dia ' + dia_txt
-            if live:
                 self.css_badge, self.css_badge_color = 'RUNNING', green
+                self.css_rpm_text = '%d rpm' % int(round(self.command_speed / self.ratio))
+                self.css_dia_text = ('dia ' + self.css_len_text(2.0 * r)) if r > 0 else 'at centre'
                 self.css_hint = 'Speed follows X.  STOP ends the pass'
-            else:
-                self.css_badge, self.css_badge_color = 'HOLD', amber
-                self.css_hint = 'No DRO data: holding the last speed'
-        else:
+        if state == 'done':
             self.css_badge, self.css_badge_color = 'PASS DONE', amber
             self.css_rpm_text = '%d rpm' % int(round(self.command_speed / self.ratio))
             self.css_dia_text = 'past centre'
@@ -2196,8 +2237,10 @@ class ServoCommanderApp(App):
         ov.populate()
 
     def close_css(self):
+        self.css_teach_cancel()
         self._hide('_css')
 
+    # ---- speed pad ------------------------------------------------------
     # ---- speed pad ------------------------------------------------------
     # ---- speed pad ------------------------------------------------------
     jog_ok = BooleanProperty(False)
@@ -2265,6 +2308,10 @@ class ServoCommanderApp(App):
 
     def open_pad_edit(self, key):
         """EDIT on a Speed Pad row (or an SFM calculator row)."""
+        if key == 'css_teach':                   # not a number: the teach button
+            if self._css is not None:
+                self._css.teach()
+            return
         ov = self._show('_param_edit', ParamEditOverlay())
         if key.startswith('preset:'):
             pos = int(key.split(':')[1])
@@ -2298,11 +2345,12 @@ class ServoCommanderApp(App):
             o = self._css
             ov.setup_generic('Top speed', 'Constant SFM never goes above this', 'rpm',
                              10, self.max_spindle_rpm(), '%d rpm' % o.top_rpm, o.set_top, 'SET')
-        elif key == 'css_dia':
+        elif key == 'css_start_dia':
             o = self._css
             unit = 'in' if self.units == 'in' else 'mm'
-            ov.setup_generic('Measured diameter', 'Sets X so it matches the work under the tool', unit,
-                             0.01, 999, o.dia_text, o.set_measured, 'SET', allow_dot=True)
+            ov.setup_generic('Start diameter', 'Work diameter at the tool when you press START', unit,
+                             0.01, 99 if unit == 'in' else 2500, o.start_dia, o.set_start_dia, 'SET',
+                             allow_dot=True)
         elif key == 'css_over':
             o = self._css
             unit = 'in' if self.units == 'in' else 'mm'

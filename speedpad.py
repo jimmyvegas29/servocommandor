@@ -205,24 +205,25 @@ class ToolsOverlay(ModalTouch, FloatLayout):
 
 
 class CssOverlay(ModalTouch, FloatLayout):
-    """Constant surface speed setup: surface speed, top rpm, how X reads,
-    run-over past centre.  ACTIVATE hands over to the CSS panel that
-    replaces the speed pad (app.css_activate / _css_tick)."""
+    """Constant surface speed setup: surface speed, top rpm, run-over,
+    start diameter and a one-time teach of which way is toward centre.
+    ACTIVATE hands over to the CSS panel that replaces the speed pad."""
     tool = StringProperty('cbd')
     material = StringProperty('')
     sfm = NumericProperty(300)
     top_rpm = NumericProperty(1000)
-    x_mode = StringProperty('radius')        # X ABS reads 'radius' or 'diameter'
-    dia_text = StringProperty('-')
-    live_text = StringProperty('')
     over = StringProperty('-')
+    start_dia = StringProperty('-')
+    teach_text = StringProperty('')
+    teach_btn = StringProperty('TEACH')
+    live_text = StringProperty('')
     warn = BooleanProperty(False)
 
     def populate(self):
         app = App.get_running_app()
         c = app.css_config()
         self.tool, self.material = c['tool'], c['material']
-        self.sfm, self.top_rpm, self.x_mode = c['sfm'], c['top'], c['x_mode']
+        self.sfm, self.top_rpm = c['sfm'], c['top']
         self._evt = Clock.schedule_interval(lambda dt: self.refresh(), 0.2)
         self.refresh()
 
@@ -255,42 +256,51 @@ class CssOverlay(ModalTouch, FloatLayout):
         App.get_running_app().save_speed_pad(css_top=self.top_rpm)
         self.refresh()
 
-    def set_x_mode(self, mode):
-        self.x_mode = mode
-        App.get_running_app().save_speed_pad(css_x=mode)
-        self.refresh()
-
-    def set_measured(self, v):
-        App.get_running_app().css_set_diameter(float(v))
-        self.refresh()
+    def _to_mm(self, v):
+        return float(v) * 25.4 if App.get_running_app().units == 'in' else float(v)
 
     def set_over(self, v):
-        app = App.get_running_app()
-        mm = float(v) * 25.4 if app.units == 'in' else float(v)
-        app.save_speed_pad(css_over_mm=mm)
+        App.get_running_app().save_speed_pad(css_over_mm=self._to_mm(v))
         self.refresh()
 
-    def over_text(self):
+    def set_start_dia(self, v):
+        App.get_running_app().save_speed_pad(css_start_dia_mm=self._to_mm(v))
+        self.refresh()
+
+    def teach(self):
         app = App.get_running_app()
-        mm = app.css_config()['over_mm']
-        return (fmt_num(mm / 25.4, 3) + ' in') if app.units == 'in' else (fmt_num(mm, 2) + ' mm')
+        if app.css_teaching:
+            app.css_teach_cancel()
+        else:
+            app.css_teach_start()
+        self.refresh()
 
     def refresh(self):
         app = App.get_running_app()
-        self.over = self.over_text()
-        dia_in = app.css_diameter_in()
-        if app.units == 'in':
-            self.dia_text = fmt_num(dia_in, 3) + ' in'
+        c = app.css_config()
+        self.over = app.css_len_text(c['over_mm'])
+        dia_mm = c['start_dia_mm']
+        self.start_dia = app.css_len_text(dia_mm) if dia_mm > 0 else '-'
+        live = app.dro is not None and not app.dro_stale
+        if app.css_teaching:
+            self.teach_text, self.teach_btn = 'move X in now', 'CANCEL'
+        elif c['in_sign']:
+            self.teach_text, self.teach_btn = 'learned', 'AGAIN'
         else:
-            self.dia_text = fmt_num(dia_in * 25.4, 2) + ' mm'
-        if app.dro_stale:
-            self.warn = True
-            self.live_text = 'No DRO data: constant SFM needs a live X reading'
-            return
-        rpm, capped = app.css_rpm(self.sfm, self.top_rpm, dia_in)
-        self.warn = capped
-        self.live_text = '%d SFM on %s  ->  %d rpm%s' % (
-            self.sfm, self.dia_text, rpm, '  (at the top limit)' if capped else '')
+            self.teach_text, self.teach_btn = 'not taught', 'TEACH'
+        self.warn = True
+        if app.css_teaching:
+            self.live_text = 'Move the cross slide toward the centre a little'
+        elif not c['in_sign']:
+            self.live_text = ('Press TEACH, then move the cross slide toward the centre'
+                              if live else 'Teaching needs a live DRO reading')
+        elif dia_mm <= 0:
+            self.live_text = 'Enter the start diameter'
+        else:
+            rpm, capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
+            self.warn = capped
+            self.live_text = '%d SFM on %s  ->  %d rpm at START%s' % (
+                self.sfm, self.start_dia, rpm, ' (top limit)' if capped else '')
 
     def primary(self):
         app = App.get_running_app()
