@@ -1361,6 +1361,35 @@ def tap_flow(dt):
     app.tap_exit()
     check('EXIT after the stop', (app.tap_mode, app.tap_state), (False, ''))
 
+    # back gear: counts, motor speed, cap and drag all go through the back gear
+    app.save_speed_pad(tap_thread='1/2-13', tap_mode='depth', tap_depth_mm=12.7, tap_rpm=40,
+                       tap_tlim_manual=0, tap_bg=False, tap_bg_ratio=7.0,
+                       tap_drag={'50': 14, '100': 18}, tap_drag_bg={})
+    c = app.tap_config()
+    check('direct: 1/2-13 capped by the lathe', (c['tlim'], c['drag']), (150, 14))
+    app.save_speed_pad(tap_bg=True)
+    c = app.tap_config()
+    eff = app.ratio * 7.0
+    check('back gear: effective ratio', round(c['eff_ratio'], 4), round(eff, 4))
+    check('back gear: no bg drag measured -> none used', c['drag'], None)
+    check('back gear: cap from the clutch setting through the back gear',
+          c['tlim'], int(round(tapdata.pct_of_spindle(300, 6.0, eff))))
+    check('back gear: counts per spindle turn', app.tap_counts_per_turn(c), 10000 * eff)
+    check('back gear: max tapping rpm', app.tap_max_rpm(c), int(min(app.max_rpm, 1000) / eff))
+    app.tap_activate()
+    check('back gear shown on the card', app.tap_setup_text.endswith('BG'), True)
+    app.tap_startstop()
+    speed, tlim, target, margin, stall_ms, keep = last_T()
+    check('back gear pass: motor speed, cap, depth counts',
+          (speed, tlim, target), (round(40 * eff), c['tlim'], round(12.7 / (25.4 / 13) * 10000 * eff)))
+    node(1, 0, 7.0)                  # the helper counts direct-drive turns: 7 of them = 1 back-gear turn
+    check('back gear depth readout in spindle turns', app.tap_big_text, app.css_len_text(25.4 / 13))
+    app.tap_stop()
+    node(4, 3, 1.0)
+    app.tap_exit()
+    app.save_speed_pad(tap_bg=False)
+    check('back to direct', round(app.tap_config()['eff_ratio'], 4), round(app.ratio, 4))
+
     app.servo, app.dro = old_servo, old_dro
     Clock.schedule_once(picker_setup, 0.2)
 

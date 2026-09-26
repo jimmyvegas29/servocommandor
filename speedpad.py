@@ -404,6 +404,8 @@ class TapOverlay(ModalTouch, FloatLayout):
     live_text = StringProperty('')
     ok = BooleanProperty(False)
     material = StringProperty('Mild steel')
+    bg = BooleanProperty(False)
+    bg_ratio_text = StringProperty('')
 
     def populate(self):
         self._note = ''
@@ -445,6 +447,12 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_material(self, name):
         self._save(tap_material=name)
 
+    def set_bg(self, on):
+        self._save(tap_bg=bool(on))
+
+    def set_bg_ratio(self, v):
+        self._save(tap_bg_ratio=float(v))
+
     def measure(self):
         app = App.get_running_app()
         if app.tap_drag_busy:
@@ -458,6 +466,8 @@ class TapOverlay(ModalTouch, FloatLayout):
         app = App.get_running_app()
         c = app.tap_config()
         self.mode, self.hand, self.material = c['mode'], c['hand'], c['material']
+        self.bg = c['bg']
+        self.bg_ratio_text = fmt_num(c['bg_ratio'], 2) + ' : 1'
         self.thread_text = app.tap_pitch_text(c)
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
         self.confirm, self.rpm = c['confirm'], c['rpm']
@@ -493,9 +503,9 @@ class TapOverlay(ModalTouch, FloatLayout):
             self.live_text = problem
         else:
             turns = c['depth_mm'] / c['pitch_mm']
-            text = '%s %s = %s turns at %d rpm, cap %d %%' % (
+            text = '%s %s = %s turns at %d rpm%s, cap %d %%' % (
                 'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
-                c['rpm'], c['tlim'])
+                c['rpm'], ' in BACK GEAR' if c['bg'] else '', c['tlim'])
             need = c['need_pct']
             if need is None:
                 text += '. No torque estimate for %s' % c['material'].lower()

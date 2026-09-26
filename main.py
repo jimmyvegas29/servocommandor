@@ -2399,20 +2399,25 @@ class ServoCommanderApp(App):
             pitch = float(sp.get('tap_pitch') or (20 if unit == 'tpi' else 1.0))
             pitch_mm = 25.4 / pitch if unit == 'tpi' else pitch
         rpm = int(sp.get('tap_rpm', 100))
-        drag, drag_rpm = self.tap_drag_for(rpm)
+        # back gear (Tap only): the spindle turns bg_ratio times slower than
+        # in direct drive and gets bg_ratio times the torque
+        bg = bool(sp.get('tap_bg'))
+        bg_ratio = float(sp.get('tap_bg_ratio') or self.TAP_BG_DEFAULT)
+        eff = self.ratio * (bg_ratio if bg else 1.0)
+        drag, drag_rpm = self.tap_drag_for(rpm, bg)
         manual = int(sp.get('tap_tlim_manual') or 0)
         motor_nm = self.motor_rated_nm()
         material = sp.get('tap_material') or 'Mild steel'
         clutch_pct = need_pct = None
         if thread is not None:
-            clutch_pct = tapdata.pct_of_spindle(thread['clutch'], motor_nm, self.ratio)
+            clutch_pct = tapdata.pct_of_spindle(thread['clutch'], motor_nm, eff)
             cut = tapdata.cutting_torque_in_lb(thread['pitch_mm'], thread['dia_mm'], material)
             if cut is not None:
-                need_pct = (drag or 0) + tapdata.pct_of_spindle(cut, motor_nm, self.ratio)
+                need_pct = (drag or 0) + tapdata.pct_of_spindle(cut, motor_nm, eff)
         if manual:
             tlim, auto = manual, False
         elif clutch_pct is not None:
-            tlim, auto = self.tap_auto_cap(thread, drag), True
+            tlim, auto = self.tap_auto_cap(thread, drag, eff), True
         else:
             tlim, auto = 0, True                 # custom thread: must be set by hand
         return {'thread_key': key, 'thread': thread, 'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
@@ -2421,20 +2426,24 @@ class ServoCommanderApp(App):
                 'confirm': max(1, int(sp.get('tap_confirm', 2))),
                 'rpm': rpm, 'drag': drag, 'drag_rpm': drag_rpm,
                 'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'need_pct': need_pct,
-                'material': material, 'lathe_capped': auto and thread is not None and tlim == self.TAP_CAP_MAX
+                'material': material, 'bg': bg, 'bg_ratio': bg_ratio, 'eff_ratio': eff,
+                'lathe_capped': auto and thread is not None and tlim == self.TAP_CAP_MAX
                 and (drag or 0) + clutch_pct > self.TAP_CAP_MAX,
                 'margin': float(sp.get('tap_margin', 2.0)),
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
     TAP_CAP_MAX = 150               # the node's hard cap for a tap pass
 
-    def tap_auto_cap(self, thread, drag=None):
+    TAP_BG_DEFAULT = 7.14          # Clausing 5914 speed chart (2000 / 280): measure it
+
+    def tap_auto_cap(self, thread, drag=None, ratio=None):
         """Torque cap (drive %) for a thread from the table: drag + the
         recommended clutch setting at the tap, through motor and ratio, but
         never above the lathe's tapping cap.  A big tap is capped by the
         lathe: it cannot be broken, and the stall at the cap is what stops
         it at the bottom."""
-        pct = (drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(), self.ratio)
+        pct = (drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(),
+                                                   ratio or self.ratio)
         return int(round(min(pct, self.TAP_CAP_MAX)))
 
     def tap_pitch_text(self, c):
@@ -2444,13 +2453,13 @@ class ServoCommanderApp(App):
             return '%s TPI' % fmt_num(c['pitch'], 1)
         return '%s mm pitch' % fmt_num(c['pitch'], 2)
 
-    def tap_drag_for(self, rpm):
+    def tap_drag_for(self, rpm, bg=False):
         """Spindle drag (% torque) at this speed from the measured points:
         interpolated between the two either side, or the end point when the
         speed is outside what was measured (drag is not a straight line - it
         climbs fast at low speed and flattens).  Returns (pct, rpm the value
         belongs to: this rpm, or the end point used) or (None, None)."""
-        table = self.settings.get('speed_pad', {}).get('tap_drag', {})
+        table = self.settings.get('speed_pad', {}).get('tap_drag_bg' if bg else 'tap_drag', {})
         pts = sorted((int(k), float(v)) for k, v in table.items())
         if not pts:
             return None, None
@@ -2475,17 +2484,20 @@ class ServoCommanderApp(App):
         self.motor_nm_text = '%s Nm' % fmt_num(self.motor_rated_nm(), 2)
         log.info('Motor rated torque -> %s Nm', value)
 
-    def tap_counts_per_turn(self):
-        return self.TAP_COUNTS_PER_REV * self.ratio
+    def tap_counts_per_turn(self, c=None):
+        """Motor encoder counts per spindle turn (through back gear if on)."""
+        c = c or self.tap_config()
+        return self.TAP_COUNTS_PER_REV * c['eff_ratio']
 
     def tap_counts_to_mm(self, counts, c):
-        return counts / self.tap_counts_per_turn() * c['pitch_mm']
+        return counts / self.tap_counts_per_turn(c) * c['pitch_mm']
 
     def tap_mm_to_counts(self, mm, c):
-        return int(round(mm / c['pitch_mm'] * self.tap_counts_per_turn()))
+        return int(round(mm / c['pitch_mm'] * self.tap_counts_per_turn(c)))
 
-    def tap_max_rpm(self):
-        return int(min(self.max_spindle_rpm(), self.TAP_MAX_MOTOR_RPM / self.ratio))
+    def tap_max_rpm(self, c=None):
+        c = c or self.tap_config()
+        return int(min(self.max_rpm / c['eff_ratio'], self.TAP_MAX_MOTOR_RPM / c['eff_ratio']))
 
     def _tap_node_ok(self):
         return (isinstance(self.servo, NodeServo) and isinstance(self.dro, DroBle)
@@ -2500,8 +2512,8 @@ class ServoCommanderApp(App):
             return 'Enter the %s' % ('max depth' if c['mode'] == 'bottom' else 'depth')
         if c['tlim'] <= 0:
             return 'Custom thread: set the torque limit by hand'
-        if not 5 <= c['rpm'] <= self.tap_max_rpm():
-            return 'Tapping speed must be 5 to %d rpm' % self.tap_max_rpm()
+        if not 5 <= c['rpm'] <= self.tap_max_rpm(c):
+            return 'Tapping speed must be 5 to %d rpm%s' % (self.tap_max_rpm(c), ' in back gear' if c['bg'] else '')
         if not 5 <= c['tlim'] <= 150:
             return 'Torque limit must be 5 to 150 %'
         overload = self.settings.get('drive_params', {}).get('70')
@@ -2559,10 +2571,10 @@ class ServoCommanderApp(App):
 
     def _tap_send_pass(self, keep):
         c = self.tap_config()
-        motor = int(round(c['rpm'] * self.ratio))
+        motor = int(round(c['rpm'] * c['eff_ratio']))
         speed = motor if c['hand'] == 'rh' else -motor
         target = self.tap_mm_to_counts(c['depth_mm'], c)
-        margin = int(round(c['margin'] * self.tap_counts_per_turn()))
+        margin = int(round(c['margin'] * self.tap_counts_per_turn(c)))
         self.servo.tap_start(speed, c['tlim'], target, margin, self.TAP_STALL_MS, keep)
         self._tap_passes += 1
         self._tap_seen_active = False
@@ -2604,7 +2616,7 @@ class ServoCommanderApp(App):
     def _tap_pass_done(self, node, c):
         reason, peak = node['reason'], node['peak']
         if reason == self.R_STALL:
-            tol = self.TAP_SAME_TURNS * self.tap_counts_per_turn()
+            tol = self.TAP_SAME_TURNS * self.tap_counts_per_turn(c)
             ref = self._tap_ref
             if ref is None or peak > ref + tol:
                 self._tap_ref, self._tap_repeat = peak, 1         # deeper: the last one was chips
@@ -2657,7 +2669,7 @@ class ServoCommanderApp(App):
     def _tap_show(self, c, node):
         st = self.tap_state
         green, amber, blue = [0.4, 0.85, 0.5, 1], [0.95, 0.75, 0.3, 1], [0, 0.5, 1, 1]
-        self.tap_setup_text = '%s  %d rpm' % (self.tap_pitch_text(c), c['rpm'])
+        self.tap_setup_text = '%s  %d rpm%s' % (self.tap_pitch_text(c), c['rpm'], '  BG' if c['bg'] else '')
         target = c['depth_mm']
         now_mm = max(0.0, self.tap_counts_to_mm(node['counts'], c)) if st != 'ready' else 0.0
         marks = [(i / 10.0, 'minor') for i in range(1, 10)]
@@ -2714,14 +2726,16 @@ class ServoCommanderApp(App):
         if self.tap_drag_busy:
             return ''
         c = self.tap_config()
-        motor = int(round(c['rpm'] * self.ratio))
+        motor = int(round(c['rpm'] * c['eff_ratio']))
         if motor > self.NODE_JOG_MAX:
-            return 'Drag can be measured up to %d rpm' % int(self.NODE_JOG_MAX / self.ratio)
+            return 'Drag can be measured up to %d rpm%s' % (int(self.NODE_JOG_MAX / c['eff_ratio']),
+                                                             ' in back gear' if c['bg'] else '')
         self._update_jog_ok()
         if not self.jog_ok or not self._drive_ready():
             return 'Needs the lever OFF, the drive disabled and the node linked'
         speed = motor if c['hand'] == 'rh' else -motor
-        self._drag = {'speed': speed, 'rpm': c['rpm'], 'samples': [], 't0': time.monotonic(), 'n': 0}
+        self._drag = {'speed': speed, 'rpm': c['rpm'], 'bg': c['bg'], 'samples': [], 't0': time.monotonic(),
+                      'n': 0}
         self.tap_drag_busy = True
         self._gui_cmd_until = time.monotonic() + self.DRAG_S + 2   # the poller must not fight the jog
         self.servo.jog(speed)
@@ -2755,7 +2769,7 @@ class ServoCommanderApp(App):
             return
         pct = int(round(sum(d['samples']) / float(len(d['samples']))))
         sp = self.settings.setdefault('speed_pad', {})
-        sp.setdefault('tap_drag', {})[str(d['rpm'])] = pct
+        sp.setdefault('tap_drag_bg' if d['bg'] else 'tap_drag', {})[str(d['rpm'])] = pct
         self._save_settings()
         log.info('Tap drag: %d %% at %d rpm (%d samples)', pct, d['rpm'], len(d['samples']))
 
@@ -2934,6 +2948,10 @@ class ServoCommanderApp(App):
             o = self._tap
             ov.setup_generic('Torque limit', 'Drive torque cap for the pass; 0 = auto from the thread',
                              '%', 0, 150, o.tlim_text, o.set_tlim, 'SET')
+        elif key == 'tap_bg_ratio':
+            o = self._tap
+            ov.setup_generic('Back gear ratio', 'Spindle turns in direct drive per turn in back gear', ':1',
+                             1.5, 20, o.bg_ratio_text, o.set_bg_ratio, 'SET', allow_dot=True)
         elif key == 'motor_nm':
             ov.setup_generic('Motor rated torque', 'From the servo motor nameplate', 'Nm', 0.1, 100,
                              self.motor_nm_text, self._set_motor_nm, 'SAVE', allow_dot=True)

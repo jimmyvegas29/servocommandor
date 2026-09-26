@@ -3462,7 +3462,23 @@
                 valign: 'middle'
             BoxLayout:
                 size_hint_x: None
-                width: 112
+                width: 150
+                padding: [0, 0, 8, 0]
+                SegButton:
+                    text: 'Direct'
+                    font_size: '11sp'
+                    active: not root.bg
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_bg(False)
+                SegButton:
+                    text: 'Back gear'
+                    font_size: '11sp'
+                    active: root.bg
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_bg(True)
+            BoxLayout:
+                size_hint_x: None
+                width: 96
                 SegButton:
                     text: 'RH'
                     font_size: '12sp'
@@ -3567,6 +3583,17 @@
                     label: 'Stalls for bottom'
                     hint: 'same-depth stalls in a row'
                     value: str(root.confirm)
+                TouchGate:
+                    # only there in back gear; hidden it takes no taps
+                    size_hint_y: None
+                    height: 46 if root.bg else 0
+                    opacity: 1 if root.bg else 0
+                    live: root.bg
+                    PadRow:
+                        key: 'tap_bg_ratio'
+                        label: 'Back gear ratio'
+                        hint: 'Clausing chart 7.14: measure yours'
+                        value: root.bg_ratio_text
                 PadRow:
                     key: 'tap_rpm'
                     label: 'Speed'
