@@ -1330,6 +1330,57 @@ def tap_flow(dt):
     check('EXIT after the stop', (app.tap_mode, app.tap_state), (False, ''))
 
     app.servo, app.dro = old_servo, old_dro
+    Clock.schedule_once(picker_setup, 0.2)
+
+
+def find_widget(root, cls_name, text):
+    for w in root.walk():
+        if type(w).__name__ == cls_name and getattr(w, 'text', None) == text:
+            return w
+    return None
+
+
+def tap_on(w):
+    x, y = w.to_window(w.center_x, w.center_y)
+    Tap(x, y).tap()
+
+
+def picker_setup(dt):
+    # the thread picker with real taps, on top of the Tap setup popup
+    fake = FakeNode()
+    app._picker_saved = (app.servo, app.dro)
+    app.servo, app.dro = m.NodeServo(fake), fake
+    app.save_speed_pad(tap_thread='1/4-20')
+    app.open_tap()
+    app.open_threads()
+    Clock.schedule_once(picker_taps, 0.4)          # let it lay out
+
+
+def picker_taps(dt):
+    th = app._threads
+    tap_on(find_widget(th, 'SegButton', 'UNF'))
+    check('picker: real tap on the UNF tab', th.family, 'UNF')
+    tap_on(find_widget(th, 'SegButton', 'Metric'))
+    check('picker: real tap on the Metric tab', th.family, 'M')
+    Clock.schedule_once(picker_taps2, 0.3)
+
+
+def picker_taps2(dt):
+    th = app._threads
+    tap_on(find_widget(th, 'PickButton', 'M8'))
+    check('picker: real tap on a size picks it and closes', (app._threads, app.tap_config()['thread_key']),
+          (None, 'M8x1.25'))
+    app.open_threads()
+    Clock.schedule_once(picker_taps3, 0.4)
+
+
+def picker_taps3(dt):
+    th = app._threads
+    close = [w for w in th.walk() if type(w).__name__ == 'IconButton'][0]
+    tap_on(close)
+    check('picker: one real tap on the close button closes it', app._threads, None)
+    app.close_tap()
+    app.servo, app.dro = app._picker_saved
     print('RESULT:', 'ALL PASS' if not fails else fails)
     app.stop()
 

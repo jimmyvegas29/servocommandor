@@ -3373,13 +3373,15 @@
                 active: root.family == 'custom'
                 corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
                 on_press: root.set_family('custom')
-        BoxLayout:
+        TouchGate:
+            # hidden, it is 0 tall and its rows spill over the tabs: it must
+            # not take any taps then (a disabled widget would swallow them)
             orientation: 'vertical'
             spacing: 6
             size_hint_y: None
             height: 86 if root.family == 'custom' else 0
             opacity: 1 if root.family == 'custom' else 0
-            disabled: root.family != 'custom'
+            live: root.family == 'custom'
             TapSeg:
                 label: 'Pitch in'
                 BoxLayout:
