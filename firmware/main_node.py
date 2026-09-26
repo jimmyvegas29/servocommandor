@@ -16,9 +16,12 @@ Bluetooth LE (USB serial mirrors everything for bench work):
     spindle until it has been seen in OFF once (boot / after a link loss)
 
 BLE service 5e7a0001-... :
-  DATA  notify  '<IiiIhhHBH' seq, x, z, t_ms, rpm_0p1, torque, alarm, flags,
+  DATA  notify  '<IiiIhhHBHBBii' seq, x, z, t_ms, rpm_0p1, torque, alarm, flags,
                 avg_load (0x0018 average load ratio %, the drive's motor
-                heating model)
+                heating model), then the tap cycle: state (0 idle, 1 in,
+                2 out, 3 done, 4 halted), reason (TapCycle.R_*), counts
+                (motor encoder counts in from the origin), peak (deepest
+                point of the last in-leg)
                 flags: b0 drive online, b1 switch FWD, b2 switch REV,
                        b3 enabled (as this node last commanded),
                        b4 control allowed, b5 last command ok
@@ -37,6 +40,15 @@ BLE service 5e7a0001-... :
                       drive by itself 600 ms after the last one.  Refused
                       while the lever is not OFF or the drive is enabled
                       for any other reason.  b'j' stops a jog at once.
+                b'T' + '<hHIIHB' tap pass: signed motor rpm going in, torque
+                      cap %, target counts, back-out margin counts, stall
+                      ms, flags (b0 keep the origin of the last pass).
+                      Refused unless the lever is OFF, the drive is online
+                      and disabled.  b't' stops a pass (drive off, tap left
+                      where it is); b'U' backs a stopped tap out.  While a
+                      pass runs every other command except D (= stop) is
+                      refused, and the normal drive poll pauses: the pass
+                      reads position and torque as fast as the bus allows.
                 b'I' info: ack payload is the firmware VERSION string
                 b'F' + uint32 LE size + uint32 LE crc32: begin a firmware
                       update (the new node.py), b'f' + bytes: append a chunk,
@@ -65,7 +77,7 @@ from machine import Pin, UART, WDT, unique_id, reset
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.14'         # shown on the panel; bump on every change
+VERSION = 'node 3.15'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -356,6 +368,272 @@ def apply_speed(speed):
     return write_reg(0x0089, wire)
 
 
+# ---------------------------------------------------------------- tapping
+TAP_MAX_RPM = 1000           # motor rpm, hard cap for a tap pass
+TAP_TLIM_MAX = 150           # %, hard cap for the tap torque limit
+
+
+class TapCycle:
+    """One tapping pass, run on the node so its timing and its safety do not
+    depend on the Bluetooth link.
+
+    IN: the drive runs at the tapping speed with its torque capped by
+    Pr065/066 (the drive enforces that cap itself, instantly).  The pass
+    goes until the target depth (in motor encoder counts from the origin)
+    or until the spindle stops advancing for stall_ms (the tap bottomed or
+    jammed at the cap).  OUT: it reverses until it is margin counts back
+    past the origin, then disables.  A stall on the way out (tap jammed)
+    halts with the drive disabled.  Every exit path disables the drive,
+    puts the torque limit back to what it was and restores the panel's
+    speed setpoint.
+
+    Position: input registers 0x0005/0x0006 hold the 32-bit motor position.
+    Only the low word is used, unwrapped from sample to sample (a sample
+    never moves anywhere near 32768 counts); which of the two registers is
+    the low word is found from the motion itself.  The direction that
+    counts as "in" is taken from the first real motion of a pass.
+
+    io must provide: read_block() -> (reg5, reg6, torque) or None,
+    read_alarm() -> int or None, read_limits() -> (pr65, pr66) or None,
+    write(addr, value) -> bool, set_speed(signed) -> bool,
+    set_enabled(bool) -> bool, restore_speed(), now_ms(), log(*args)."""
+
+    IDLE, IN, OUT, DONE, HALTED = 0, 1, 2, 3, 4
+    # why a pass ended
+    R_NONE, R_DEPTH, R_STALL, R_PANEL, R_LINK, R_LEVER, R_DRIVE, R_COMM, R_JAM, R_OUT = range(10)
+    SPINUP_MS = 400          # no stall check while the spindle comes up to speed
+    MOVE_COUNTS = 60         # less than this in stall_ms counts as not moving
+    SIGN_COUNTS = 100        # motion needed to learn which way is "in"
+    FAIL_MAX = 5             # consecutive failed reads before giving up
+    ALARM_EVERY_MS = 500
+
+    def __init__(self, io):
+        self.io = io
+        self.state = self.IDLE
+        self.reason = self.R_NONE
+        self.counts = 0          # progress in the "in" direction from the origin
+        self.peak = 0            # deepest point of the last IN leg
+        self.torque = 0
+        self.rpm_0p1 = 0
+        self._limits = None
+        self._raw = [0, 0]       # unwrapped motion of register 5 and register 6
+        self._last = None
+        self._sign = 0
+
+    @property
+    def active(self):
+        return self.state in (self.IN, self.OUT)
+
+    def start(self, speed, tlim, target, margin, stall_ms, keep):
+        """Begin a pass.  The caller has checked lever / drive / link."""
+        limits = self.io.read_limits()
+        if limits is None:
+            self.io.log('TAP refused: torque limits unreadable')
+            return False
+        if not (self.io.write(65, tlim) and self.io.write(66, -tlim)):
+            self.io.write(65, limits[0])
+            self.io.write(66, limits[1])
+            self.io.log('TAP refused: torque limit not written')
+            return False
+        self._limits = limits
+        self.tlim = tlim
+        if not keep or self._last is None:
+            self._raw = [0, 0]
+            self._sign = 0
+            self._last = None
+            self.counts = 0
+        # the position baseline is read before the drive is enabled, so no
+        # motion goes uncounted
+        if not self._read_position():
+            self.io.write(65, limits[0])
+            self.io.write(66, limits[1])
+            self.io.log('TAP refused: position unreadable')
+            return False
+        self.speed = speed
+        self.target = target
+        self.margin = margin
+        self.stall_ms = stall_ms
+        self.peak = 0
+        self.reason = self.R_NONE
+        self._fails = 0
+        self._begin(self.IN, speed)
+        if not self.io.set_enabled(True):
+            self._stop(self.HALTED, self.R_COMM)
+            return False
+        self.io.log('TAP in', speed, 'rpm, cap', tlim, '%, target', target, 'margin', margin)
+        return True
+
+    def _begin(self, leg, speed):
+        self.state = leg
+        now = self.io.now_ms()
+        self._leg_t0 = now
+        self._ref_t = now
+        self._ref_c = self.counts
+        self._alarm_t = now
+        self._rate_t = now
+        self._rate_c = self.counts
+        self.io.set_speed(speed)
+
+    def reverse_out(self):
+        """From HALTED: back the tap out to margin past the origin."""
+        if self.state != self.HALTED or self._limits is None:
+            return False
+        # the halt put the normal limit back: cap it again for the way out
+        if not (self.io.write(65, self.tlim) and self.io.write(66, -self.tlim)):
+            self.io.write(65, self._limits[0])
+            self.io.write(66, self._limits[1])
+            return False
+        self.reason = self.R_OUT
+        self._fails = 0
+        self._begin(self.OUT, -self.speed)
+        if not self.io.set_enabled(True):
+            self._stop(self.HALTED, self.R_COMM)
+            return False
+        self.io.log('TAP reverse out from', self.counts)
+        return True
+
+    def abort(self, reason):
+        if self.active:
+            self._stop(self.HALTED, reason)
+
+    def link_lost(self):
+        # an unwatched pass must not keep going in: back out and stop
+        if self.state == self.IN:
+            self._to_out(self.R_LINK)
+
+    def _to_out(self, reason):
+        self.reason = reason
+        self.peak = self.counts
+        self._begin(self.OUT, -self.speed)
+        self.io.log('TAP out, reason', reason, 'at', self.counts)
+
+    def _stop(self, final, reason):
+        self.io.set_enabled(False)
+        if self._limits is not None:
+            self.io.write(65, self._limits[0])
+            self.io.write(66, self._limits[1])
+        self.io.restore_speed()
+        if reason != self.R_NONE:
+            self.reason = reason
+        self.state = final
+        self.io.log('TAP stop', final, 'reason', self.reason, 'at', self.counts, 'peak', self.peak)
+
+    def _read_position(self):
+        blk = self.io.read_block()
+        if blk is None:
+            return False
+        w5, w6, torque = blk
+        self.torque = torque - 65536 if torque > 32767 else torque
+        if self._last is None:
+            self._last = (w5, w6)
+            return True
+        for i, w in enumerate((w5, w6)):
+            d = (w - self._last[i]) & 0xFFFF
+            if d > 32767:
+                d -= 65536
+            self._raw[i] += d
+        self._last = (w5, w6)
+        # the low word is the one that moves; the high word steps by one
+        # every 65536 counts at most
+        raw = self._raw[0] if abs(self._raw[0]) >= abs(self._raw[1]) else self._raw[1]
+        if self._sign == 0 and abs(raw) >= self.SIGN_COUNTS:
+            s = 1 if raw > 0 else -1
+            self._sign = s if self.state == self.IN else -s
+        if self._sign:
+            self.counts = self._sign * raw
+        return True
+
+    def step(self):
+        """One poll: read the drive, decide.  Call it back to back while
+        the pass is active."""
+        if not self.active:
+            return
+        if not self._read_position():
+            self._fails += 1
+            if self._fails >= self.FAIL_MAX:
+                self._stop(self.HALTED, self.R_COMM)
+            return
+        self._fails = 0
+        now = self.io.now_ms()
+        dt = now - self._rate_t
+        if dt >= 100:
+            # motor rpm in 0.1 units (10000 counts per motor rev)
+            self.rpm_0p1 = int((self.counts - self._rate_c) * 600000 // (10000 * dt))
+            self._rate_t, self._rate_c = now, self.counts
+        if now - self._alarm_t >= self.ALARM_EVERY_MS:
+            self._alarm_t = now
+            alarm = self.io.read_alarm()
+            if alarm:
+                self._stop(self.HALTED, self.R_DRIVE)
+                return
+        if abs(self.counts - self._ref_c) >= self.MOVE_COUNTS:
+            self._ref_c, self._ref_t = self.counts, now
+        stalled = (now - self._ref_t >= self.stall_ms and now - self._leg_t0 >= self.SPINUP_MS)
+        if self.state == self.IN:
+            if self.counts >= self.target:
+                self._to_out(self.R_DEPTH)
+            elif stalled:
+                self._to_out(self.R_STALL)
+        else:
+            if self.counts <= -self.margin:
+                self._stop(self.DONE, self.R_NONE)
+            elif stalled:
+                self._stop(self.HALTED, self.R_JAM)
+
+
+def _s16(v):
+    return v - 65536 if v > 32767 else v
+
+
+class _TapIO:
+    """What TapCycle needs from the node (kept apart so the cycle can be
+    tested off the Pico)."""
+
+    def __init__(self):
+        self._t = 0
+        self._last = time.ticks_ms()
+
+    def read_block(self):
+        regs = read_input_regs(0x0005, 5)          # position lo/hi .. torque
+        return None if regs is None else (regs[0], regs[1], regs[4])
+
+    def read_alarm(self):
+        regs = read_input_regs(0x001A, 1)
+        return None if regs is None else regs[0]
+
+    def read_limits(self):
+        regs = read_holding_regs(65, 2)
+        return None if regs is None else (_s16(regs[0]), _s16(regs[1]))
+
+    def write(self, addr, value):
+        return write_reg(addr, value)
+
+    def set_speed(self, speed):
+        return write_reg(0x0089, -speed if INVERT_DIRECTION else speed)
+
+    def set_enabled(self, on):
+        ok = write_reg(0x0062, 1 if on else 0)
+        if ok:
+            state['enabled'] = on
+        return ok
+
+    def restore_speed(self):
+        sp = state['last_speed']
+        write_reg(0x0089, -sp if INVERT_DIRECTION else sp)
+
+    def now_ms(self):
+        now = time.ticks_ms()
+        self._t += time.ticks_diff(now, self._last)
+        self._last = now
+        return self._t
+
+    def log(self, *args):
+        print(*args)
+
+
+tap = TapCycle(_TapIO())
+
+
 ota = {'fh': None, 'size': 0, 'crc': 0, 'got': 0, 'reset_at': None}
 
 
@@ -390,7 +668,38 @@ def handle_cmd(data):
     """Execute one panel command; returns the ack payload."""
     ok = False
     payload = b''
-    if data[:1] == b'J' and len(data) >= 3:
+    if tap.active and data[:1] == b'D':
+        tap.abort(TapCycle.R_PANEL)             # disable during a pass = stop it
+        state['cmd_ok'] = True
+        return payload
+    if tap.active and data[:1] not in (b't', b'I', b'L'):
+        print('CMD', data[:1], 'refused: tap pass running')
+        state['cmd_ok'] = False
+        return payload
+    if data[:1] == b'T' and len(data) >= 16:
+        speed, tlim, target, margin, stall_ms, fl = struct.unpack('<hHIIHB', data[1:16])
+        if not CONTROL_ALLOWED:
+            print('CMD T refused: read-only build')
+        elif state['switch'] != 'neutral':
+            print('CMD T refused: lever not OFF')
+        elif not state['online']:
+            print('CMD T refused: drive offline')
+        elif state['enabled'] or state['jogging']:
+            print('CMD T refused: drive enabled')
+        elif not (0 < abs(speed) <= TAP_MAX_RPM and 5 <= tlim <= TAP_TLIM_MAX and target > 0
+                  and 50 <= stall_ms <= 2000):
+            print('CMD T refused: parameters', speed, tlim, target, stall_ms)
+        else:
+            ok = tap.start(speed, tlim, target, margin, stall_ms, bool(fl & 1))
+    elif data[:1] == b't':
+        tap.abort(TapCycle.R_PANEL)
+        ok = True
+    elif data[:1] == b'U':
+        if state['switch'] != 'neutral' or not state['online']:
+            print('CMD U refused: lever not OFF or drive offline')
+        else:
+            ok = tap.reverse_out()
+    elif data[:1] == b'J' and len(data) >= 3:
         speed = struct.unpack('<h', data[1:3])[0]
         speed = max(-JOG_MAX, min(JOG_MAX, speed))
         if state['switch'] != 'neutral':
@@ -546,6 +855,9 @@ async def drive_poller():
     fails = 0
     offline_since = None
     while True:
+        if tap.active:
+            await asyncio.sleep_ms(POLL_MS)          # the tap pass owns the bus
+            continue
         if state['save_until'] is not None:
             if time.ticks_diff(state['save_until'], time.ticks_ms()) > 0:
                 await asyncio.sleep_ms(POLL_MS)      # drive busy writing EEPROM
@@ -582,6 +894,17 @@ async def drive_poller():
         await asyncio.sleep_ms(POLL_MS)
 
 
+async def tap_task():
+    while True:
+        if tap.active:
+            tap.step()
+            state['torque'] = tap.torque
+            state['rpm'] = tap.rpm_0p1
+            await asyncio.sleep_ms(2)
+        else:
+            await asyncio.sleep_ms(50)
+
+
 async def switch_task():
     last = read_switch()
     while True:
@@ -589,7 +912,12 @@ async def switch_task():
         if cur == last and cur != state['switch']:
             state['switch'] = cur
             print('SWITCH', cur)
-            if CONTROL_ALLOWED:
+            if CONTROL_ALLOWED and tap.active:
+                # any lever movement stops a tap pass; it must go through OFF
+                # before it can start anything
+                tap.abort(TapCycle.R_LEVER)
+                state['armed'] = False
+            elif CONTROL_ALLOWED:
                 if state['jogging']:
                     jog_end('lever moved')
                 if cur == 'neutral':
@@ -663,9 +991,10 @@ async def sampler():
                 state['rpm'], state['torque'], state['alarm'], state['switch'],
                 state['online'], state['enabled'], state['poll_errors'], state['notify_fail'],
                 pin_fwd.value(), pin_rev.value()))
-        data_char.write(struct.pack('<IiiIhhHBH', seq, x, z, t, state['rpm'],
+        data_char.write(struct.pack('<IiiIhhHBHBBii', seq, x, z, t, state['rpm'],
                                     state['torque'], state['alarm'], flags(),
-                                    state['avg_load'] & 0xFFFF))
+                                    state['avg_load'] & 0xFFFF, tap.state, tap.reason,
+                                    tap.counts, tap.peak))
         conn = state['conn']
         if conn is not None:
             try:
@@ -704,8 +1033,12 @@ async def peripheral():
             state['conn'] = None
             state['linked'] = False
             # panel gone: stop the spindle and make the switch pass through
-            # OFF before it can start anything again
-            safe_disable('link lost', zero_speed=True)
+            # OFF before it can start anything again.  A tap pass going in
+            # backs out and stops by itself instead of stopping in the hole.
+            if tap.active:
+                tap.link_lost()
+            else:
+                safe_disable('link lost', zero_speed=True)
             state['armed'] = False
 
 
@@ -762,7 +1095,7 @@ async def main():
     print('machine node firmware', VERSION, 'as', NAME, '| control',
           'ALLOWED' if CONTROL_ALLOWED else 'READ-ONLY', '| panel lock', read_lock() or 'open')
     await asyncio.gather(sampler(), peripheral(), pinger(), commander(),
-                         drive_poller(), switch_task(), watchdog(), trial_confirm())
+                         drive_poller(), tap_task(), switch_task(), watchdog(), trial_confirm())
 
 
 try:

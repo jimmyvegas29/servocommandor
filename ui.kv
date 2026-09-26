@@ -484,6 +484,99 @@
         color: ((0.4, 0.85, 0.5, 1) if app.css_can_start else (0.35, 0.35, 0.35, 1)) if app.css_state == 'ready' else (1, 0.45, 0.4, 1)
         on_press: app.css_startstop()
 
+
+<TapCard@TouchGate>:
+    orientation: 'vertical'
+    padding: [14, 6, 14, 6]
+    lbl_font: '14sp'
+    dia_font: '26sp'
+    canvas.before:
+        Color:
+            rgba: PANEL
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
+    BoxLayout:
+        size_hint_y: None
+        height: 26
+        SLabel:
+            text: app.tap_badge
+            color: app.tap_badge_color
+            font_size: '17sp'
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        SLabel:
+            text: app.tap_setup_text
+            color: (0.65, 0.65, 0.65, 1)
+            font_size: '13sp'
+            text_size: self.size
+            halign: 'right'
+            valign: 'middle'
+    Widget:
+    CssBar:
+        size_hint_y: None
+        height: 40
+        frac: app.tap_frac
+        marks: app.tap_marks
+        fill: app.tap_fill
+    BoxLayout:
+        size_hint_y: None
+        height: 22
+        SLabel:
+            text: app.tap_left_text
+            font_size: root.lbl_font
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        SLabel:
+            text: app.tap_right_text
+            font_size: root.lbl_font
+            text_size: self.size
+            halign: 'right'
+            valign: 'middle'
+    Widget:
+    BoxLayout:
+        size_hint_y: None
+        height: 40
+        SLabel:
+            text: app.tap_big_label
+            font_size: root.lbl_font
+            color: (0.65, 0.65, 0.65, 1)
+            size_hint_x: None
+            width: self.texture_size[0] if app.tap_big_label else 0
+            text_size: None, None
+        SLabel:
+            text: app.tap_big_text
+            font_size: root.dia_font
+            text_size: self.size
+            halign: 'right' if app.tap_big_label else 'left'
+            valign: 'middle'
+            shorten: True
+            shorten_from: 'right'
+
+<TapButtons@TouchGate>:
+    orientation: 'vertical'
+    spacing: 5
+    fsize: '17sp'
+    big: '24sp'
+    BoxLayout:
+        spacing: 5
+        SButtonL:
+            text: 'SETUP'
+            font_size: root.fsize
+            on_press: app.open_tap()
+        SButtonR:
+            text: 'EXIT'
+            font_size: root.fsize
+            color: (1, 1, 1, 1) if app.tap_state not in ('in', 'out') else (0.35, 0.35, 0.35, 1)
+            on_press: app.tap_exit()
+    SButton:
+        text: app.tap_btn_text
+        font_size: root.big
+        color: ((0.4, 0.85, 0.5, 1) if app.tap_can_start else (0.35, 0.35, 0.35, 1)) if app.tap_state in ('ready', 'done') else ((0.95, 0.75, 0.3, 1) if app.tap_state == 'stopped' else (1, 0.45, 0.4, 1))
+        on_press: app.tap_startstop()
 <ControlsBlock@BoxLayout>:
     spacing: 8
     btn_font: 26
@@ -491,8 +584,8 @@
         size_hint_x: 0.64
         TouchGate:
             pos_hint: {'x': 0, 'y': 0}
-            opacity: 0 if app.css_mode else 1
-            live: not app.css_mode
+            opacity: 0 if (app.css_mode or app.tap_mode) else 1
+            live: not (app.css_mode or app.tap_mode)
             orientation: 'vertical'
             spacing: 5
             BoxLayout:
@@ -561,6 +654,10 @@
             pos_hint: {'x': 0, 'y': 0}
             opacity: 1 if app.css_mode else 0
             live: app.css_mode
+        TapCard:
+            pos_hint: {'x': 0, 'y': 0}
+            opacity: 1 if app.tap_mode else 0
+            live: app.tap_mode
     BoxLayout:
         orientation: 'vertical'
         size_hint_x: 0.36
@@ -569,8 +666,8 @@
             size_hint_y: 2
             TouchGate:
                 pos_hint: {'x': 0, 'y': 0}
-                opacity: 0 if app.css_mode else 1
-                live: not app.css_mode
+                opacity: 0 if (app.css_mode or app.tap_mode) else 1
+                live: not (app.css_mode or app.tap_mode)
                 orientation: 'vertical'
                 spacing: 5
                 BoxLayout:
@@ -607,6 +704,10 @@
                 pos_hint: {'x': 0, 'y': 0}
                 opacity: 1 if app.css_mode else 0
                 live: app.css_mode
+            TapButtons:
+                pos_hint: {'x': 0, 'y': 0}
+                opacity: 1 if app.tap_mode else 0
+                live: app.tap_mode
         BoxLayout:
             spacing: 5
             SButtonL:
@@ -900,8 +1001,8 @@
             size_hint_x: 0.6725
             TouchGate:
                 pos_hint: {'x': 0, 'y': 0}
-                opacity: 0 if app.css_mode else 1
-                live: not app.css_mode
+                opacity: 0 if (app.css_mode or app.tap_mode) else 1
+                live: not (app.css_mode or app.tap_mode)
                 orientation: 'vertical'
                 spacing: 5
                 padding: [0, 0, 5, 0]
@@ -978,6 +1079,14 @@
                 CssCard:
                     lbl_font: '18sp'
                     dia_font: '34sp'
+            TouchGate:
+                pos_hint: {'x': 0, 'y': 0}
+                opacity: 1 if app.tap_mode else 0
+                live: app.tap_mode
+                padding: [0, 0, 5, 0]
+                TapCard:
+                    lbl_font: '18sp'
+                    dia_font: '34sp'
         BoxLayout:
             orientation: 'vertical'
             size_hint_x: 0.3275
@@ -988,8 +1097,8 @@
                 height: 78.33 * 2 + 5
                 TouchGate:
                     pos_hint: {'x': 0, 'y': 0}
-                    opacity: 0 if app.css_mode else 1
-                    live: not app.css_mode
+                    opacity: 0 if (app.css_mode or app.tap_mode) else 1
+                    live: not (app.css_mode or app.tap_mode)
                     orientation: 'vertical'
                     spacing: 5
                     GridLayout:
@@ -1030,6 +1139,12 @@
                     pos_hint: {'x': 0, 'y': 0}
                     opacity: 1 if app.css_mode else 0
                     live: app.css_mode
+                    fsize: '22sp'
+                    big: '30sp'
+                TapButtons:
+                    pos_hint: {'x': 0, 'y': 0}
+                    opacity: 1 if app.tap_mode else 0
+                    live: app.tap_mode
                     fsize: '22sp'
                     big: '30sp'
             GridLayout:
@@ -3173,6 +3288,161 @@
             disabled: not app.css_mode and not root.learned
             on_press: root.primary()
 
+<TapSeg@BoxLayout>:
+    label: ''
+    size_hint_y: None
+    height: 34
+    padding: [8, 0]
+    SLabel:
+        text: root.label
+        font_size: '14sp'
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+
+<TapOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), min(root.height - 20, 680))
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 6
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: 'Tap'
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            BoxLayout:
+                size_hint_x: None
+                width: 112
+                SegButton:
+                    text: 'RH'
+                    font_size: '12sp'
+                    active: root.hand == 'rh'
+                    corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                    on_press: root.set_hand('rh')
+                SegButton:
+                    text: 'LH'
+                    font_size: '12sp'
+                    active: root.hand == 'lh'
+                    corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                    on_press: root.set_hand('lh')
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_tap()
+        ScrollView:
+            do_scroll_x: False
+            bar_width: 4
+            scroll_type: ['bars', 'content']
+            GridLayout:
+                cols: 1
+                spacing: 6
+                size_hint_y: None
+                height: self.minimum_height
+                TapSeg:
+                    label: 'Tap to'
+                    BoxLayout:
+                        size_hint_x: None
+                        width: 220
+                        padding: [0, 3]
+                        SegButton:
+                            text: 'A depth'
+                            font_size: '11sp'
+                            active: root.mode == 'depth'
+                            corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                            on_press: root.set_mode('depth')
+                        SegButton:
+                            text: 'The bottom'
+                            font_size: '11sp'
+                            active: root.mode == 'bottom'
+                            corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                            on_press: root.set_mode('bottom')
+                PadRow:
+                    key: 'tap_pitch'
+                    label: 'Pitch'
+                    value: root.pitch_text
+                TapSeg:
+                    label: 'Pitch in'
+                    BoxLayout:
+                        size_hint_x: None
+                        width: 140
+                        padding: [0, 3]
+                        SegButton:
+                            text: 'TPI'
+                            font_size: '11sp'
+                            active: root.unit == 'tpi'
+                            corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                            on_press: root.set_unit('tpi')
+                        SegButton:
+                            text: 'mm'
+                            font_size: '11sp'
+                            active: root.unit == 'mm'
+                            corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                            on_press: root.set_unit('mm')
+                PadRow:
+                    key: 'tap_depth'
+                    label: 'Max depth' if root.mode == 'bottom' else 'Depth'
+                    hint: 'safety stop if it never bottoms' if root.mode == 'bottom' else 'from where the tap starts'
+                    value: root.depth
+                PadRow:
+                    key: 'tap_confirm'
+                    label: 'Stalls for bottom'
+                    hint: 'same-depth stalls in a row'
+                    value: str(root.confirm)
+                PadRow:
+                    key: 'tap_rpm'
+                    label: 'Speed'
+                    hint: 'spindle rpm while tapping'
+                    value: str(root.rpm) + ' rpm'
+                PadRow:
+                    key: 'tap_tlim'
+                    label: 'Torque limit'
+                    hint: 'drive torque cap during the pass'
+                    value: str(root.tlim) + ' %'
+                PadRow:
+                    key: 'tap_margin'
+                    label: 'Back-out margin'
+                    hint: 'extra turns past the start'
+                    value: root.margin
+                SLabel:
+                    text: root.live_text
+                    font_size: '14sp'
+                    color: (1, 1, 1, 1)
+                    size_hint_y: None
+                    height: 40
+                    text_size: self.size
+                    halign: 'left'
+                    valign: 'middle'
+        SetKey:
+            markup: True
+            text: ('[font=' + app.fa + '][size=14]\uf053[/size][/font]  BACK') if app.tap_mode else ('[font=' + app.fa + '][size=14]\uf00c[/size][/font]  ACTIVATE')
+            font_size: '17sp'
+            size_hint_y: None
+            height: 54
+            color: (1, 1, 1, 1) if app.tap_mode else ((0.4, 0.85, 0.5, 1) if root.ok else (0.35, 0.35, 0.35, 1))
+            disabled: not app.tap_mode and not root.ok
+            on_press: root.primary()
+
 <ToolRow@Button>:
     title: ''
     hint: ''
@@ -3240,8 +3510,8 @@
             on_press: app.tools_pick('drill')
         ToolRow:
             title: 'Tap'
-            hint: 'Not built yet: depth by spindle turns, torque stop'
-            ready: False
+            hint: 'To a depth or to the bottom, torque-limited'
+            on_press: app.tools_pick('tap')
         ToolRow:
             title: 'Constant SFM'
             hint: 'Speed follows X while facing, with START and STOP'

@@ -383,6 +383,94 @@ class CssOverlay(ModalTouch, FloatLayout):
             app.css_activate()
 
 
+class TapOverlay(ModalTouch, FloatLayout):
+    """Tapping setup: pitch, to depth or to the bottom, depth, stalls that
+    confirm the bottom, speed, torque cap, back-out margin, thread hand.
+    ACTIVATE hands over to the tap panel that replaces the speed pad."""
+    unit = StringProperty('tpi')
+    pitch_text = StringProperty('-')
+    mode = StringProperty('depth')
+    depth = StringProperty('-')
+    confirm = NumericProperty(2)
+    rpm = NumericProperty(100)
+    tlim = NumericProperty(30)
+    margin = StringProperty('2')
+    hand = StringProperty('rh')
+    live_text = StringProperty('')
+    ok = BooleanProperty(False)
+
+    def populate(self):
+        self._evt = Clock.schedule_interval(lambda dt: self.refresh(), 0.3)
+        self.refresh()
+
+    def on_parent(self, _w, parent):
+        if parent is None and getattr(self, '_evt', None) is not None:
+            self._evt.cancel()
+            self._evt = None
+
+    def _save(self, **kw):
+        App.get_running_app().save_speed_pad(**kw)
+        self.refresh()
+
+    def set_unit(self, unit):
+        app = App.get_running_app()
+        c = app.tap_config()
+        if unit != c['unit']:
+            # keep the thread: 20 TPI <-> 1.27 mm
+            pitch = 25.4 / c['pitch'] if c['pitch'] > 0 else 0
+            self._save(tap_pitch_unit=unit, tap_pitch=round(pitch, 3 if unit == 'mm' else 1))
+
+    def set_pitch(self, v):
+        self._save(tap_pitch=float(v))
+
+    def set_mode(self, mode):
+        self._save(tap_mode=mode)
+
+    def set_depth(self, v):
+        app = App.get_running_app()
+        self._save(tap_depth_mm=float(v) * 25.4 if app.units == 'in' else float(v))
+
+    def set_confirm(self, v):
+        self._save(tap_confirm=int(v))
+
+    def set_rpm(self, v):
+        self._save(tap_rpm=int(v))
+
+    def set_tlim(self, v):
+        self._save(tap_tlim=int(v))
+
+    def set_margin(self, v):
+        self._save(tap_margin=float(v))
+
+    def set_hand(self, hand):
+        self._save(tap_hand=hand)
+
+    def refresh(self):
+        app = App.get_running_app()
+        c = app.tap_config()
+        self.unit, self.mode, self.hand = c['unit'], c['mode'], c['hand']
+        self.pitch_text = app.tap_pitch_text(c)
+        self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
+        self.confirm, self.rpm, self.tlim = c['confirm'], c['rpm'], c['tlim']
+        self.margin = fmt_num(c['margin'], 1) + ' turns'
+        problem = app.tap_problem(c)
+        self.ok = not problem
+        if problem:
+            self.live_text = problem
+        else:
+            turns = c['depth_mm'] / c['pitch_mm']
+            self.live_text = '%s %s = %s turns at %d rpm, cap %d %%' % (
+                'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
+                c['rpm'], c['tlim'])
+
+    def primary(self):
+        app = App.get_running_app()
+        if app.tap_mode:
+            app.close_tap()              # changes apply to the next pass
+        else:
+            app.tap_activate()
+
+
 class SfmOverlay(ModalTouch, FloatLayout):
     """Diameter + surface speed -> spindle rpm."""
     unit = StringProperty('inch')            # diameter unit

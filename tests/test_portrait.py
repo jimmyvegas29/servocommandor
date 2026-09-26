@@ -724,7 +724,10 @@ def after_layout(dt):
     app.open_tools()
     check('tools menu open', app._tools is not None, True)
     app.tools_pick('tap')
-    check('tap not built: menu stays', (app._tools is not None, app._drill), (True, None))
+    check('Tap opens its setup, menu closes', (app._tools, app._tap is not None), (None, True))
+    check('Tap without a 3.15 node: ACTIVATE refused', (app.tap_activate(), app.tap_mode), (False, False))
+    app.close_tap()
+    app.open_tools()
     app.tools_pick('drill')
     check('drill from the menu', (app._tools, app._drill is not None), (None, True))
     app.close_drill()
@@ -1101,6 +1104,176 @@ def taps_menu(dt):
     check('after CSS: every tap on the menu button opens the menu', missed, [])
     app.dro = None
     app.dro_stale = False
+    Clock.schedule_once(tap_flow, 0.2)
+
+
+# ---- tapping: the panel side, against a fake 3.15 node ---------------------
+import struct                                   # noqa: E402
+from dro_ble import DroBle                      # noqa: E402
+
+
+class FakeNode(DroBle):
+    """Stands in for the node over BLE: the panel's commands land in .sent,
+    the tap fields and lever position are set by the test."""
+    stale = False
+
+    def __init__(self):
+        self.sent = []
+        self.tap = {'state': 0, 'reason': 0, 'counts': 0, 'peak': 0}
+        self.switch = 'neutral'
+        self.enabled = False
+        self.node_version = 'node 3.15'
+        self.connected = True
+        self.device_name, self.rssi, self.frames, self.dropped = 'fake', None, 0, 0
+        self.ota_state, self.ota_progress = '', 0.0
+        self.is_node = True
+
+    def latest(self):
+        return {'s': 1, 'x': 0, 'z': 0, 't': 0, 'rpm': 0, 'torque': 0, 'alarm': 0, 'flags': 0,
+                'avg_load': 0, 'online': True, 'switch': self.switch, 'enabled': self.enabled,
+                'control': True, 'cmd_ok': True, 'tap': dict(self.tap)}
+
+    def send_cmd(self, data):
+        self.sent.append(bytes(data))
+        return True
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+def tap_flow(dt):
+    global rpm_m_base
+    rpm_m_base = app.command_speed
+    fake = FakeNode()
+    old_servo, old_dro = app.servo, app.dro
+    app.servo, app.dro = m.NodeServo(fake), fake
+    cpt = app.tap_counts_per_turn()
+    app.save_speed_pad(tap_pitch_unit='mm', tap_pitch=1.0, tap_mode='bottom', tap_depth_mm=10.0,
+                       tap_confirm=2, tap_rpm=100, tap_tlim=30, tap_margin=2.0, tap_hand='rh')
+    app.settings.setdefault('drive_params', {})['70'] = 300
+
+    def node(state, reason=0, turns=0.0, peak=0.0):
+        fake.tap = {'state': state, 'reason': reason, 'counts': int(turns * cpt), 'peak': int(peak * cpt)}
+        app._tap_tick(0)
+
+    def last_T():
+        cmd = [c for c in fake.sent if c[:1] == b'T'][-1]
+        return struct.unpack('<hHIIHB', cmd[1:16])
+
+    app.open_tools()
+    app.tools_pick('tap')
+    o = app._tap
+    o.refresh()
+    check('tap setup: ready to activate', (o.ok, o.live_text),
+          (True, 'Max depth %s = 10 turns at 100 rpm, cap 30 %%' % app.css_len_text(10.0)))
+    app.settings['drive_params']['70'] = 120
+    app.save_speed_pad(tap_tlim=130)
+    o.refresh()
+    check('tap: torque cap at the overload level refused', (o.ok, 'overload' in o.live_text), (False, True))
+    app.save_speed_pad(tap_tlim=200)
+    o.refresh()
+    check('tap: torque cap over 150 % refused', (o.ok, '150' in o.live_text), (False, True))
+    app.settings['drive_params']['70'] = 300
+    app.save_speed_pad(tap_tlim=30)
+    o.refresh()
+    o.primary()
+    check('tap ACTIVATE: panel in, popup closed', (app.tap_mode, app.tap_state, app._tap), (True, 'ready', None))
+    check('tap ready: can start', (app.tap_badge, app.tap_can_start, app.tap_btn_text), ('READY', True, 'START'))
+    fake.switch = 'fwd'
+    app._tap_tick(0)
+    check('lever not OFF: START blocked and says why', (app.tap_can_start, app.tap_big_text),
+          (False, 'Lever to OFF'))
+    check('START refused with the lever on', app.tap_start(), False)
+    fake.switch = 'neutral'
+    app.set_speed(600)
+    check('pad speed ignored while tapping', app.command_speed, rpm_m_base)
+
+    # pass 1: stall at 6.3 turns -> back out, re-enter
+    app.tap_startstop()
+    speed, tlim, target, margin, stall_ms, keep = last_T()
+    check('START sends the pass', (speed, tlim, target, margin, stall_ms, keep),
+          (round(100 * app.ratio), 30, round(10 * cpt), round(2 * cpt), 150, 0))
+    node(1, 0, 3.0)
+    check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
+          ('in', 'TAPPING', app.css_len_text(3.0), 0.3))
+    node(2, 2, 5.0, 6.3)
+    check('backing out', (app.tap_state, app.tap_badge), ('out', 'BACKING OUT'))
+    node(3, 2, -2.0, 6.3)
+    check('first stall: re-enter pending', (app.tap_state, app.tap_badge.startswith('RE-ENTER')), ('out', True))
+    app._tap_reenter_at = 0
+    app._tap_tick(0)
+    check('re-enter keeps the origin', last_T()[5], 1)
+    node(1, 0, 4.0)
+    node(3, 2, -2.0, 6.35)
+    check('same depth twice: bottom found', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
+          ('done', 'DONE', 'Bottom', app.css_len_text(6.3)))
+    check('bottom marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
+
+    # a deeper stall means the first one was chips
+    app.tap_startstop()
+    check('next START is a new hole', last_T()[5], 0)
+    node(1, 0, 1.0)
+    node(3, 2, -2.0, 3.0)
+    app._tap_reenter_at = 0
+    app._tap_tick(0)
+    node(1, 0, 4.0)
+    node(3, 2, -2.0, 6.0)
+    check('deeper stall: not the bottom yet', (app.tap_state, app._tap_repeat), ('in', 1))
+    app._tap_reenter_at = 0
+    app._tap_tick(0)
+    node(1, 0, 4.0)
+    node(3, 2, -2.0, 6.1)
+    check('then same depth twice: bottom at the deeper one', (app.tap_state, app.tap_big_text),
+          ('done', app.css_len_text(6.0)))
+
+    # STOP mid-hole, then REVERSE OUT
+    app.tap_startstop()
+    node(1, 0, 4.0)
+    check('while tapping the button is STOP', app.tap_btn_text, 'STOP')
+    app.tap_startstop()
+    check('STOP sends t', fake.sent[-1], b't')
+    node(4, 3, 4.0)
+    check('stopped: tap left in the hole', (app.tap_state, app.tap_badge, app.tap_btn_text, app.tap_big_label),
+          ('stopped', 'STOPPED', 'REVERSE OUT', 'Stopped'))
+    app.tap_exit()
+    check('EXIT allowed when stopped', app.tap_mode, False)
+    app.tap_activate()
+    app.tap_state = 'stopped'
+    app._tap_seen_active = True
+    app.tap_startstop()
+    check('REVERSE OUT sends U', fake.sent[-1], b'U')
+    node(2, 9, 1.0)
+    node(3, 9, -2.0, 4.0)
+    check('backed out', (app.tap_state, app.tap_big_label), ('done', 'Backed out from'))
+
+    # to a depth
+    app.save_speed_pad(tap_mode='depth', tap_depth_mm=5.0)
+    app.tap_startstop()
+    node(1, 0, 2.0)
+    node(3, 1, -2.0, 5.0)
+    check('depth reached', (app.tap_state, app.tap_big_label, app.tap_big_text), ('done', 'Depth', app.css_len_text(5.0)))
+
+    # the node refuses (e.g. drive enabled) -> say so
+    app.tap_startstop()
+    app._tap_sent_at -= 3
+    app._tap_tick(0)
+    check('node refused the pass', (app.tap_state, app.tap_big_label), ('done', 'Node refused the pass'))
+
+    # EN during a pass stops it; EXIT is refused while running
+    app.tap_startstop()
+    node(1, 0, 1.0)
+    app.toggle_enable()
+    check('EN during a pass = STOP', fake.sent[-1], b't')
+    app.tap_exit()
+    check('EXIT refused while tapping', app.tap_mode, True)
+    node(4, 3, 1.0)
+    app.tap_exit()
+    check('EXIT after the stop', (app.tap_mode, app.tap_state), (False, ''))
+
+    app.servo, app.dro = old_servo, old_dro
     print('RESULT:', 'ALL PASS' if not fails else fails)
     app.stop()
 

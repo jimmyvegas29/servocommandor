@@ -167,6 +167,46 @@ def s_css_off():
     app.css_exit()
 
 
+def s_tap():
+    app.close_tools()
+    app.close_css()
+    app._tap_node_ok = lambda: True          # picture only: pretend a 3.15 node
+    app.save_speed_pad(tap_pitch_unit='tpi', tap_pitch=20, tap_mode='bottom', tap_depth_mm=12.7,
+                       tap_confirm=2, tap_rpm=100, tap_tlim=30, tap_margin=2.0, tap_hand='rh')
+    app.open_tap()
+
+
+def s_tap_ready():
+    app.close_tap()
+    app.tap_activate()
+
+
+def s_tap_running():
+    evt = getattr(app, '_tap_evt', None)       # picture only: freeze a pass
+    if evt is not None:
+        evt.cancel()
+    app.tap_state = 'in'
+    app._tap_passes = 2
+    app.tap_badge, app.tap_badge_color = 'TAPPING', [1, 1, 1, 1]
+    app.tap_big_label, app.tap_big_text = 'Depth  pass 2', app.css_len_text(7.4)
+    app.tap_frac, app.tap_fill = 7.4 / 12.7, [0, 0.5, 1, 1]
+    app.tap_marks = [(i / 10.0, 'minor') for i in range(1, 10)] + [(8.0 / 12.7, 'major')]
+    app.tap_btn_text = 'STOP'
+
+
+def s_tap_done():
+    app.tap_state = 'done'
+    app.tap_badge, app.tap_badge_color = 'DONE', [0.4, 0.85, 0.5, 1]
+    app.tap_big_label, app.tap_big_text = 'Bottom', app.css_len_text(8.0)
+    app.tap_frac, app.tap_fill = 8.0 / 12.7, [0.4, 0.85, 0.5, 1]
+    app.tap_btn_text = 'START'
+
+
+def s_tap_off():
+    app.tap_state = 'ready'
+    app.tap_exit()
+
+
 def s_drill():
     app.close_tools()
     app.open_drill()
@@ -270,6 +310,10 @@ plan = [
     (0.2, s_tools), (0.6, lambda: cap('tools')),
     (0.2, s_css_unlearned), (0.6, lambda: cap('css_unlearned')),
     (0.2, s_css), (0.6, lambda: cap('css')),
+    (0.2, s_tap), (0.6, lambda: cap('tap')),
+    (0.2, s_tap_ready), (0.6, lambda: cap('tap_ready')),
+    (0.2, s_tap_running), (0.6, lambda: cap('tap_running')),
+    (0.2, s_tap_done), (0.6, lambda: cap('tap_done')), (0.2, s_tap_off),
     (0.2, s_css_ready), (0.6, lambda: cap('css_ready')),
     (0.2, s_css_running), (0.6, lambda: cap('css_running')), (0.2, s_css_off),
     (0.2, s_drill), (0.6, lambda: cap('drill')),
@@ -281,6 +325,8 @@ plan = [
     (0.2, s_ratio_prep), (1.6, s_ratio_cal), (1.2, lambda: cap('ratio_cal')),
     (0.2, s_nodro), (0.6, lambda: cap('portrait_nodro')),
     (0.2, s_landscape), (1.0, lambda: cap('landscape')),
+    (0.2, s_tap_ready), (0.6, lambda: cap('landscape_tap_ready')),
+    (0.2, s_tap_running), (0.6, lambda: cap('landscape_tap_running')), (0.2, s_tap_off),
     (0.2, s_css_ready), (0.6, lambda: cap('landscape_css_ready')),
     (0.2, lambda: app.open_css()), (0.6, lambda: cap('landscape_css_setup')), (0.2, lambda: app.close_css()),
     (0.2, s_css_running), (0.6, lambda: cap('landscape_css_running')), (0.2, s_css_off),

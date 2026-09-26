@@ -40,7 +40,8 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
-from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
+                      TapOverlay, fmt_num, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -164,6 +165,20 @@ class NodeServo:
 
     def jog_stop(self):
         return self._send(b'j', 'jog stop')
+
+    # tapping (node 3.15): the pass runs on the node
+    def tap_start(self, speed, tlim, target, margin, stall_ms, keep):
+        import struct as _st
+        data = b'T' + _st.pack('<hHIIHB', int(speed), int(tlim), int(target), int(margin),
+                               int(stall_ms), 1 if keep else 0)
+        return self._send(data, 'tap %d rpm cap %d%% target %d margin %d%s' % (
+            speed, tlim, target, margin, ' (same hole)' if keep else ''))
+
+    def tap_abort(self):
+        return self._send(b't', 'tap stop')
+
+    def tap_reverse(self):
+        return self._send(b'U', 'tap reverse out')
 
     # drive parameters: the node answers on the CMD notify, DroBle caches them
     @property
@@ -794,6 +809,7 @@ class ServoCommanderApp(App):
         self._drill = None
         self._tools = None
         self._css = None
+        self._tap = None
         self._sfm = None
         self._info = None
         self._copy_overlay = None
@@ -887,7 +903,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker', '_tools', '_css', '_drill', '_sfm', '_info'):
+                     '_copy_overlay', '_ble_picker', '_tools', '_css', '_tap', '_drill', '_sfm', '_info'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -2020,8 +2036,8 @@ class ServoCommanderApp(App):
     def set_speed(self, speed):
         if not self._drive_ready():
             return
-        if self.css_mode:
-            log.info('Speed change ignored: constant SFM is active')
+        if self.css_mode or self.tap_mode:
+            log.info('Speed change ignored: a tool panel is active')
             return
         self.command_speed = self._to_motor(speed)
         if self.command_speed > self.max_rpm:
@@ -2036,8 +2052,8 @@ class ServoCommanderApp(App):
     def adjust_speed(self, amount):
         if not self._drive_ready():
             return
-        if self.css_mode:
-            log.info('Speed change ignored: constant SFM is active')
+        if self.css_mode or self.tap_mode:
+            log.info('Speed change ignored: a tool panel is active')
             return
         self.command_speed += self._to_motor(amount)
         self.command_speed = max(0, min(self.max_rpm, self.command_speed))
@@ -2334,8 +2350,293 @@ class ServoCommanderApp(App):
         self.css_learn_cancel()
         self._hide('_css')
 
-    # ---- speed pad ------------------------------------------------------
-    # ---- speed pad ------------------------------------------------------
+    # ---- tapping (tools menu) ---------------------------------------------
+    # Each pass runs on the machine node (node 3.15+, TapCycle): the drive's
+    # torque cap Pr065/066 is lowered for the pass, the node taps in until the
+    # depth or until the spindle stalls at the cap, then backs out past the
+    # start.  The panel sets it up, shows it, and decides about re-entering:
+    # a stall at the same depth tap_confirm times in a row is the bottom; a
+    # deeper stall means the last one was chips.
+    tap_mode = BooleanProperty(False)
+    tap_state = StringProperty('')          # '', 'ready', 'in', 'out', 'done', 'stopped'
+    tap_badge = StringProperty('')
+    tap_badge_color = ListProperty([1, 1, 1, 1])
+    tap_setup_text = StringProperty('')
+    tap_frac = NumericProperty(0.0)
+    tap_marks = ListProperty([])
+    tap_fill = ListProperty([0, 0.5, 1, 1])
+    tap_left_text = StringProperty('')
+    tap_right_text = StringProperty('')
+    tap_big_label = StringProperty('')
+    tap_big_text = StringProperty('')
+    tap_btn_text = StringProperty('START')
+    tap_can_start = BooleanProperty(False)
+    TAP_COUNTS_PER_REV = 10000      # XP200 encoder counts per motor rev: verify at the first test
+    TAP_STALL_MS = 150
+    TAP_SAME_TURNS = 0.3            # stalls this close (spindle turns) are "the same depth"
+    TAP_MAX_PASSES = 12
+    TAP_REENTER_S = 0.6
+    TAP_NODE = (3, 15)
+    TAP_MAX_MOTOR_RPM = 1000        # the node's cap
+    # node TapCycle states and reasons
+    T_IDLE, T_IN, T_OUT, T_DONE, T_HALTED = range(5)
+    R_DEPTH, R_STALL, R_PANEL, R_LINK, R_LEVER, R_DRIVE, R_COMM, R_JAM, R_OUT = range(1, 10)
+    TAP_HALT_TEXT = {3: 'Stopped', 4: 'Link lost', 5: 'Lever moved', 6: 'Drive alarm',
+                     7: 'Drive not answering', 8: 'Tap jammed'}
+
+    def tap_config(self):
+        sp = self.settings.get('speed_pad', {})
+        unit = sp.get('tap_pitch_unit') or ('tpi' if self.units == 'in' else 'mm')
+        pitch = float(sp.get('tap_pitch') or (20 if unit == 'tpi' else 1.0))
+        pitch_mm = 25.4 / pitch if unit == 'tpi' else pitch
+        return {'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
+                'mode': 'bottom' if sp.get('tap_mode') == 'bottom' else 'depth',
+                'depth_mm': float(sp.get('tap_depth_mm', 0) or 0),
+                'confirm': max(1, int(sp.get('tap_confirm', 2))),
+                'rpm': int(sp.get('tap_rpm', 100)),
+                'tlim': int(sp.get('tap_tlim', 30)),
+                'margin': float(sp.get('tap_margin', 2.0)),
+                'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
+
+    def tap_pitch_text(self, c):
+        if c['unit'] == 'tpi':
+            return '%s TPI' % fmt_num(c['pitch'], 1)
+        return '%s mm' % fmt_num(c['pitch'], 2)
+
+    def tap_counts_per_turn(self):
+        return self.TAP_COUNTS_PER_REV * self.ratio
+
+    def tap_counts_to_mm(self, counts, c):
+        return counts / self.tap_counts_per_turn() * c['pitch_mm']
+
+    def tap_mm_to_counts(self, mm, c):
+        return int(round(mm / c['pitch_mm'] * self.tap_counts_per_turn()))
+
+    def tap_max_rpm(self):
+        return int(min(self.max_spindle_rpm(), self.TAP_MAX_MOTOR_RPM / self.ratio))
+
+    def _tap_node_ok(self):
+        return (isinstance(self.servo, NodeServo) and isinstance(self.dro, DroBle)
+                and self.dro._node_at_least(*self.TAP_NODE))
+
+    def tap_problem(self, c=None):
+        """Why a tap cycle cannot be set up as it is, or ''."""
+        c = c or self.tap_config()
+        if not self._tap_node_ok():
+            return 'Needs the machine node on firmware 3.15 or newer (UPDATE NODE)'
+        if c['depth_mm'] <= 0:
+            return 'Enter the %s' % ('max depth' if c['mode'] == 'bottom' else 'depth')
+        if not 5 <= c['rpm'] <= self.tap_max_rpm():
+            return 'Tapping speed must be 5 to %d rpm' % self.tap_max_rpm()
+        if not 5 <= c['tlim'] <= 150:
+            return 'Torque limit must be 5 to 150 %'
+        overload = self.settings.get('drive_params', {}).get('70')
+        if overload is not None and c['tlim'] >= int(overload):
+            return 'Torque limit must be below the overload level (%s %%)' % overload
+        return ''
+
+    def tap_activate(self):
+        if not self._drive_ready() or self.tap_problem():
+            return False
+        if not self.tap_mode:
+            self.tap_mode = True
+            self.tap_state = 'ready'
+            self._tap_result = ('', '')
+            self._tap_reenter_at = None
+            self._tap_ref = None
+            self._tap_passes = 0
+            self._tap_evt = Clock.schedule_interval(self._tap_tick, 0.1)
+            log.info('TAP activated: %s', self.tap_config())
+        self.close_tap()
+        self._tap_tick(0)
+        return True
+
+    def tap_exit(self):
+        if self.tap_state in ('in', 'out'):
+            return
+        evt = getattr(self, '_tap_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._tap_evt = None
+        self.tap_mode = False
+        self.tap_state = ''
+        log.info('TAP exit')
+
+    def _tap_node(self):
+        s = self.dro.latest() if self.dro is not None else None
+        t = s.get('tap') if s else None
+        return t or {'state': 0, 'reason': 0, 'counts': 0, 'peak': 0}
+
+    def _tap_lever_off(self):
+        return getattr(self.servo, 'get_hw_direction', lambda: None)() is None
+
+    def tap_start(self):
+        """START: a new hole from where the tap is now."""
+        if self.tap_state not in ('ready', 'done') or not self._drive_ready():
+            return False
+        if self.tap_problem() or not self._tap_lever_off() or self.servo_state == 'enabled':
+            log.info('TAP not started (lever / drive enabled / setup)')
+            return False
+        self._tap_ref = None
+        self._tap_repeat = 0
+        self._tap_passes = 0
+        self._tap_result = ('', '')
+        return self._tap_send_pass(False)
+
+    def _tap_send_pass(self, keep):
+        c = self.tap_config()
+        motor = int(round(c['rpm'] * self.ratio))
+        speed = motor if c['hand'] == 'rh' else -motor
+        target = self.tap_mm_to_counts(c['depth_mm'], c)
+        margin = int(round(c['margin'] * self.tap_counts_per_turn()))
+        self.servo.tap_start(speed, c['tlim'], target, margin, self.TAP_STALL_MS, keep)
+        self._tap_passes += 1
+        self._tap_seen_active = False
+        self._tap_sent_at = time.monotonic()
+        self._tap_reenter_at = None
+        self.tap_state = 'in'
+        log.info('TAP pass %d (%s): %d motor rpm, cap %d %%, target %d counts',
+                 self._tap_passes, 'same hole' if keep else 'new hole', speed, c['tlim'], target)
+        self._tap_tick(0)
+        return True
+
+    def tap_stop(self):
+        self.servo.tap_abort()
+        self._tap_reenter_at = None
+        log.info('TAP stop pressed')
+
+    def tap_reverse(self):
+        if self.tap_state != 'stopped' or not self._tap_lever_off():
+            return False
+        self.servo.tap_reverse()
+        self._tap_seen_active = False
+        self._tap_sent_at = time.monotonic()
+        self.tap_state = 'out'
+        return True
+
+    def tap_startstop(self):
+        if self.tap_state in ('ready', 'done'):
+            self.tap_start()
+        elif self.tap_state in ('in', 'out'):
+            self.tap_stop()
+        elif self.tap_state == 'stopped':
+            self.tap_reverse()
+
+    def _tap_finish(self, label, counts, c):
+        self._tap_result = (label, self.css_len_text(max(0.0, self.tap_counts_to_mm(counts, c))))
+        self.tap_state = 'done'
+        log.info('TAP finished: %s %s after %d pass(es)', label, self._tap_result[1], self._tap_passes)
+
+    def _tap_pass_done(self, node, c):
+        reason, peak = node['reason'], node['peak']
+        if reason == self.R_STALL:
+            tol = self.TAP_SAME_TURNS * self.tap_counts_per_turn()
+            ref = self._tap_ref
+            if ref is None or peak > ref + tol:
+                self._tap_ref, self._tap_repeat = peak, 1         # deeper: the last one was chips
+            elif abs(peak - ref) <= tol:
+                self._tap_repeat += 1
+            if self._tap_repeat >= c['confirm']:
+                self._tap_finish('Bottom' if c['mode'] == 'bottom' else 'Short of depth', self._tap_ref, c)
+            elif self._tap_passes >= self.TAP_MAX_PASSES:
+                self._tap_finish('Gave up at', self._tap_ref, c)
+            else:
+                self._tap_reenter_at = time.monotonic() + self.TAP_REENTER_S
+                log.info('TAP stall at %d counts (%d in a row): re-entering', peak, self._tap_repeat)
+        elif reason == self.R_DEPTH:
+            self._tap_finish('Depth' if c['mode'] == 'depth' else 'Max depth, no bottom', peak, c)
+        elif reason == self.R_LINK:
+            self._tap_finish('Link lost, backed out at', peak, c)
+        elif reason == self.R_OUT:
+            self._tap_finish('Backed out from', peak, c)
+        else:
+            self._tap_finish(self.TAP_HALT_TEXT.get(reason, 'Ended'), peak, c)
+
+    def _tap_tick(self, dt):
+        if not self.tap_mode:
+            return
+        c = self.tap_config()
+        node = self._tap_node()
+        ns = node['state']
+        now = time.monotonic()
+        if self.tap_state in ('in', 'out'):
+            if self._tap_reenter_at is not None:
+                if now >= self._tap_reenter_at:
+                    self._tap_send_pass(True)
+                    return
+            elif ns in (self.T_IN, self.T_OUT):
+                self._tap_seen_active = True
+                self.tap_state = 'in' if ns == self.T_IN else 'out'
+            elif ns == self.T_DONE and self._tap_seen_active:
+                self._tap_pass_done(node, c)
+            elif ns == self.T_HALTED and self._tap_seen_active:
+                self.tap_state = 'stopped'
+                self._tap_result = (self.TAP_HALT_TEXT.get(node['reason'], 'Stopped'),
+                                    self.css_len_text(max(0.0, self.tap_counts_to_mm(node['counts'], c))))
+                log.info('TAP halted: %s', self._tap_result[0])
+            elif not self._tap_seen_active and now - self._tap_sent_at > 2.0:
+                self.tap_state = 'done'           # so the reason shows; START works from here
+                self._tap_result = ('Node refused the pass', '')
+                log.info('TAP pass refused by the node')
+        self._tap_show(c, node)
+
+    def _tap_show(self, c, node):
+        st = self.tap_state
+        green, amber, blue = [0.4, 0.85, 0.5, 1], [0.95, 0.75, 0.3, 1], [0, 0.5, 1, 1]
+        self.tap_setup_text = '%s  %d rpm' % (self.tap_pitch_text(c), c['rpm'])
+        target = c['depth_mm']
+        now_mm = max(0.0, self.tap_counts_to_mm(node['counts'], c)) if st != 'ready' else 0.0
+        marks = [(i / 10.0, 'minor') for i in range(1, 10)]
+        ref = getattr(self, '_tap_ref', None)
+        if ref is not None and target > 0:
+            marks.append((min(1.0, self.tap_counts_to_mm(ref, c) / target), 'major'))
+        self.tap_marks = marks
+        self.tap_frac = min(1.0, now_mm / target) if target > 0 else 0.0
+        self.tap_left_text = '0'
+        self.tap_right_text = (('max ' if c['mode'] == 'bottom' else '') + self.css_len_text(target)
+                               if target > 0 else '-')
+        self.tap_btn_text = {'in': 'STOP', 'out': 'STOP', 'stopped': 'REVERSE OUT'}.get(st, 'START')
+        blocked = self.tap_problem(c)
+        if not blocked and st in ('ready', 'done'):
+            if not self._tap_lever_off():
+                blocked = 'Lever to OFF'
+            elif self.servo_state == 'enabled':
+                blocked = 'Drive enabled'
+        self.tap_can_start = st in ('ready', 'done') and not blocked
+        self.tap_fill = blue
+        if st == 'ready':
+            self.tap_badge, self.tap_badge_color = 'READY', [1, 1, 1, 1]
+            self.tap_big_label, self.tap_big_text = ('', blocked) if blocked else ('Depth', self.css_len_text(0.0))
+        elif st in ('in', 'out'):
+            passes = getattr(self, '_tap_passes', 1)
+            self.tap_badge = ('RE-ENTER' if self._tap_reenter_at is not None
+                              else ('TAPPING' if st == 'in' else 'BACKING OUT'))
+            self.tap_badge_color = [1, 1, 1, 1]
+            self.tap_big_label = 'Depth' + ('  pass %d' % passes if passes > 1 else '')
+            self.tap_big_text = self.css_len_text(now_mm)
+        elif st == 'stopped':
+            self.tap_badge, self.tap_badge_color = 'STOPPED', amber
+            self.tap_fill = amber
+            self.tap_big_label, self.tap_big_text = self._tap_result
+        else:
+            self.tap_badge, self.tap_badge_color = 'DONE', green
+            self.tap_fill = green
+            if ref is not None and target > 0:
+                self.tap_frac = min(1.0, self.tap_counts_to_mm(ref, c) / target)
+            label, value = self._tap_result
+            if blocked and not label:
+                label, value = '', blocked
+            self.tap_big_label, self.tap_big_text = label, value
+
+    def open_tap(self):
+        if not self._drive_ready():
+            return
+        ov = self._show('_tap', TapOverlay())
+        ov.populate()
+
+    def close_tap(self):
+        self._hide('_tap')
+
     # ---- speed pad ------------------------------------------------------
     jog_ok = BooleanProperty(False)
     jogging = BooleanProperty(False)
@@ -2348,8 +2649,8 @@ class ServoCommanderApp(App):
         surface speed).  Sets the speed only; never enables."""
         if not self._drive_ready():
             return False
-        if self.css_mode:
-            log.info('Speed change ignored: constant SFM is active')
+        if self.css_mode or self.tap_mode:
+            log.info('Speed change ignored: a tool panel is active')
             return False
         motor = int(round(rpm * self.ratio))
         self.command_speed = max(0, min(self.max_rpm, motor))
@@ -2450,6 +2751,41 @@ class ServoCommanderApp(App):
             unit = 'in' if self.units == 'in' else 'mm'
             ov.setup_generic('Run-over', 'How far X goes past centre before the pass is done', unit,
                              0, 0.5 if unit == 'in' else 12, o.over, o.set_over, 'SET', allow_dot=True)
+        elif key == 'tap_pitch':
+            o = self._tap
+            c = self.tap_config()
+            if c['unit'] == 'tpi':
+                ov.setup_generic('Pitch', 'Threads per inch', 'TPI', 2, 100, self.tap_pitch_text(c),
+                                 o.set_pitch, 'SET', allow_dot=True)
+            else:
+                ov.setup_generic('Pitch', 'Thread pitch', 'mm', 0.1, 10, self.tap_pitch_text(c),
+                                 o.set_pitch, 'SET', allow_dot=True)
+        elif key == 'tap_depth':
+            o = self._tap
+            c = self.tap_config()
+            unit = 'in' if self.units == 'in' else 'mm'
+            if c['mode'] == 'bottom':
+                ov.setup_generic('Max depth', 'Safety stop if it never bottoms', unit, 0.01,
+                                 99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
+            else:
+                ov.setup_generic('Depth', 'Thread depth from where the tap starts', unit, 0.01,
+                                 99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
+        elif key == 'tap_confirm':
+            o = self._tap
+            ov.setup_generic('Stalls for bottom', 'Same-depth stalls in a row that mean the bottom', '',
+                             1, 5, str(o.confirm), o.set_confirm, 'SET')
+        elif key == 'tap_rpm':
+            o = self._tap
+            ov.setup_generic('Tapping speed', 'Spindle rpm while tapping', 'rpm', 5, self.tap_max_rpm(),
+                             '%d rpm' % o.rpm, o.set_rpm, 'SET')
+        elif key == 'tap_tlim':
+            o = self._tap
+            ov.setup_generic('Torque limit', 'Drive torque cap during the pass', '%', 5, 150,
+                             '%d %%' % o.tlim, o.set_tlim, 'SET')
+        elif key == 'tap_margin':
+            o = self._tap
+            ov.setup_generic('Back-out margin', 'Extra turns backed out past the start', 'turns', 0, 10,
+                             o.margin, o.set_margin, 'SET', allow_dot=True)
         elif key == 'sfm_sfm':
             o = self._sfm
             ov.setup_generic('Surface speed', 'Feet per minute', 'SFM', 10, 5000,
@@ -2494,6 +2830,9 @@ class ServoCommanderApp(App):
         elif name == 'css':
             self.close_tools()
             self.open_css()
+        elif name == 'tap':
+            self.close_tools()
+            self.open_tap()
 
     def open_drill(self):
         if not self._drive_ready():
@@ -2568,6 +2907,8 @@ class ServoCommanderApp(App):
     def toggle_direction(self):
         if self.config.getboolean('GUI', 'no_reverse') or not self._drive_ready():
             return
+        if self.tap_mode:
+            return                        # the tap's hand is set in its setup
         new = 'rev' if self.direction == 'fwd' else 'fwd'
         if self.css_state in ('running', 'done'):
             self._css_end_pass('direction change')
@@ -2585,6 +2926,11 @@ class ServoCommanderApp(App):
         log.info('GUI direction synced from switch: %s', direction)
 
     def toggle_enable(self):
+        if self.tap_mode:
+            # the node runs the drive during a tap; EN here only stops a pass
+            if self.tap_state in ('in', 'out'):
+                self.tap_stop()
+            return
         self.set_enabled(self.servo_state != 'enabled', source='GUI')
 
     def set_enabled(self, enabled, source='GUI'):
