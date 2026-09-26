@@ -1036,6 +1036,71 @@ def after_layout(dt):
     app.toggle_units()
 
     app.stage.export_to_png(os.path.join(ROOT, 'tests', 'portrait_main.png'))
+    Clock.schedule_once(taps_setup, 0.2)
+
+
+# ---- real taps (through the window, like the touchscreen) -----------------
+from kivy.base import EventLoop                 # noqa: E402
+from kivy.input.motionevent import MotionEvent  # noqa: E402
+from dro_serial import DroSerial              # noqa: E402
+
+
+class Tap(MotionEvent):
+    """A touch dispatched through the window, like kivy.tests' UnitTestTouch."""
+    def __init__(self, x, y):
+        win = EventLoop.window
+        super().__init__('unittest', 1, [x / float(win.width), y / float(win.height)])
+
+    def depack(self, args):
+        self.is_touch = True
+        self.sx, self.sy = args[0], args[1]
+        super().depack(args)
+
+    def tap(self):
+        EventLoop.post_dispatch_input('begin', self)
+        EventLoop.post_dispatch_input('end', self)
+
+
+def points_on(w):
+    wx, wy = w.to_window(w.x, w.y)
+    return [(wx + w.width * fx, wy + w.height * fy) for fy in (0.1, 0.5, 0.9) for fx in (0.05, 0.3, 0.5, 0.7, 0.95)]
+
+
+def taps_setup(dt):
+    # the lathe sequence that broke the menu button: a CSS session with a
+    # live DRO (so the hidden card's 'Cut remaining' label has a width), EXIT
+    app.dro = DroSerial('/nonexistent')
+    app.dro.feed('DRO X:40000 Z:0 S:1 T:1')
+    app._poll_dro(0)
+    app.save_speed_pad(css_in_sign=-1, css_start_dia_mm=38.1, css_dir='in')
+    app.css_activate()
+    app._css_tick(0)
+    check('tap test: CSS card shows cut remaining', app.css_rem_label, 'Cut remaining')
+    b1 = app.control_ids()['sp_btn1']
+    speed = app.command_speed
+    for x, y in points_on(b1)[5:10]:
+        Tap(x, y).tap()
+    check('taps on the hidden 50 button do nothing in CSS mode', app.command_speed, speed)
+    Clock.schedule_once(taps_exit, 0.3)
+
+
+def taps_exit(dt):
+    app.css_exit()
+    Clock.schedule_once(taps_menu, 0.3)
+
+
+def taps_menu(dt):
+    b7 = app.control_ids()['sp_btn7']
+    missed = []
+    for x, y in points_on(b7):
+        app.close_tools()
+        Tap(x, y).tap()
+        if app._tools is None:
+            missed.append((round(x), round(y)))
+    app.close_tools()
+    check('after CSS: every tap on the menu button opens the menu', missed, [])
+    app.dro = None
+    app.dro_stale = False
     print('RESULT:', 'ALL PASS' if not fails else fails)
     app.stop()
 

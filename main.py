@@ -40,7 +40,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
-from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))

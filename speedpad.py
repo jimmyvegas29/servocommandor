@@ -206,6 +206,24 @@ class ToolsOverlay(ModalTouch, FloatLayout):
     Constant SFM are listed but not built yet."""
 
 
+class TouchGate(BoxLayout):
+    """A box that takes no touches at all while `live` is False.  The speed
+    pad and the constant-SFM panel sit on top of each other and swap with
+    opacity; the hidden one must not catch taps meant for the other.
+    (Kivy's `disabled` is no good for this: a disabled widget swallows every
+    touch that lands on it.)"""
+    live = BooleanProperty(True)
+
+    def on_touch_down(self, touch):
+        return super().on_touch_down(touch) if self.live else False
+
+    def on_touch_move(self, touch):
+        return super().on_touch_move(touch) if self.live else False
+
+    def on_touch_up(self, touch):
+        return super().on_touch_up(touch) if self.live else False
+
+
 class CssBar(Widget):
     """Constant SFM progress: a track that fills left to right with tick
     marks underneath every 10 %.  Two white lines inside the track: the end

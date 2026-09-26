@@ -391,7 +391,7 @@
             font_size: root.digit_font
             color: app.rpm_colors[3]
 
-<CssCard@BoxLayout>:
+<CssCard@TouchGate>:
     orientation: 'vertical'
     padding: [14, 6, 14, 6]
     lbl_font: '14sp'
@@ -462,7 +462,7 @@
             shorten: True
             shorten_from: 'right'
 
-<CssButtons@BoxLayout>:
+<CssButtons@TouchGate>:
     orientation: 'vertical'
     spacing: 5
     fsize: '17sp'
@@ -489,10 +489,10 @@
     btn_font: 26
     FloatLayout:
         size_hint_x: 0.64
-        BoxLayout:
+        TouchGate:
             pos_hint: {'x': 0, 'y': 0}
             opacity: 0 if app.css_mode else 1
-            disabled: app.css_mode
+            live: not app.css_mode
             orientation: 'vertical'
             spacing: 5
             BoxLayout:
@@ -559,19 +559,18 @@
                             radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
         CssCard:
             pos_hint: {'x': 0, 'y': 0}
-            size_hint: (1, 1) if app.css_mode else (0, 0)
             opacity: 1 if app.css_mode else 0
-            disabled: not app.css_mode
+            live: app.css_mode
     BoxLayout:
         orientation: 'vertical'
         size_hint_x: 0.36
         spacing: 5
         FloatLayout:
             size_hint_y: 2
-            BoxLayout:
+            TouchGate:
                 pos_hint: {'x': 0, 'y': 0}
                 opacity: 0 if app.css_mode else 1
-                disabled: app.css_mode
+                live: not app.css_mode
                 orientation: 'vertical'
                 spacing: 5
                 BoxLayout:
@@ -606,9 +605,8 @@
                     on_press: app.open_numpad()
             CssButtons:
                 pos_hint: {'x': 0, 'y': 0}
-                size_hint: (1, 1) if app.css_mode else (0, 0)
                 opacity: 1 if app.css_mode else 0
-                disabled: not app.css_mode
+                live: app.css_mode
         BoxLayout:
             spacing: 5
             SButtonL:
@@ -900,10 +898,10 @@
         padding: 10
         FloatLayout:
             size_hint_x: 0.6725
-            BoxLayout:
+            TouchGate:
                 pos_hint: {'x': 0, 'y': 0}
                 opacity: 0 if app.css_mode else 1
-                disabled: app.css_mode
+                live: not app.css_mode
                 orientation: 'vertical'
                 spacing: 5
                 padding: [0, 0, 5, 0]
@@ -972,11 +970,10 @@
                                 size: self.size
                                 pos: self.pos
                                 radius: [(0, 0), (7, 7), (7, 7), (0, 0)]
-            BoxLayout:
+            TouchGate:
                 pos_hint: {'x': 0, 'y': 0}
-                size_hint: (1, 1) if app.css_mode else (0, 0)
                 opacity: 1 if app.css_mode else 0
-                disabled: not app.css_mode
+                live: app.css_mode
                 padding: [0, 0, 5, 0]
                 CssCard:
                     lbl_font: '18sp'
@@ -989,10 +986,10 @@
             FloatLayout:
                 size_hint_y: None
                 height: 78.33 * 2 + 5
-                BoxLayout:
+                TouchGate:
                     pos_hint: {'x': 0, 'y': 0}
                     opacity: 0 if app.css_mode else 1
-                    disabled: app.css_mode
+                    live: not app.css_mode
                     orientation: 'vertical'
                     spacing: 5
                     GridLayout:
@@ -1031,9 +1028,8 @@
                             on_press: app.open_numpad()
                 CssButtons:
                     pos_hint: {'x': 0, 'y': 0}
-                    size_hint: (1, 1) if app.css_mode else (0, 0)
                     opacity: 1 if app.css_mode else 0
-                    disabled: not app.css_mode
+                    live: app.css_mode
                     fsize: '22sp'
                     big: '30sp'
             GridLayout:
