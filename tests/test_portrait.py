@@ -1128,8 +1128,10 @@ class FakeNode(DroBle):
         self.ota_state, self.ota_progress = '', 0.0
         self.is_node = True
 
+    torque = 0
+
     def latest(self):
-        return {'s': 1, 'x': 0, 'z': 0, 't': 0, 'rpm': 0, 'torque': 0, 'alarm': 0, 'flags': 0,
+        return {'s': 1, 'x': 0, 'z': 0, 't': 0, 'rpm': 0, 'torque': self.torque, 'alarm': 0, 'flags': 0,
                 'avg_load': 0, 'online': True, 'switch': self.switch, 'enabled': self.enabled,
                 'control': True, 'cmd_ok': True, 'tap': dict(self.tap)}
 
@@ -1151,9 +1153,13 @@ def tap_flow(dt):
     old_servo, old_dro = app.servo, app.dro
     app.servo, app.dro = m.NodeServo(fake), fake
     cpt = app.tap_counts_per_turn()
-    app.save_speed_pad(tap_pitch_unit='mm', tap_pitch=1.0, tap_mode='bottom', tap_depth_mm=10.0,
-                       tap_confirm=2, tap_rpm=100, tap_tlim=30, tap_margin=2.0, tap_hand='rh')
+    import tapdata
+    app.save_speed_pad(tap_thread='M6x1', tap_mode='bottom', tap_depth_mm=10.0, tap_confirm=2,
+                       tap_rpm=100, tap_tlim_manual=0, tap_margin=2.0, tap_hand='rh', tap_drag={})
+    app.settings['motor_rated_nm'] = 6.0
     app.settings.setdefault('drive_params', {})['70'] = 300
+    # M6x1 uses the #12 row (next smaller inch size): 30 in-lb clutch setting
+    auto_cap = int(round(tapdata.pct_of_spindle(30, 6.0, app.ratio)))
 
     def node(state, reason=0, turns=0.0, peak=0.0):
         fake.tap = {'state': state, 'reason': reason, 'counts': int(turns * cpt), 'peak': int(peak * cpt)}
@@ -1167,17 +1173,67 @@ def tap_flow(dt):
     app.tools_pick('tap')
     o = app._tap
     o.refresh()
-    check('tap setup: ready to activate', (o.ok, o.live_text),
-          (True, 'Max depth %s = 10 turns at 100 rpm, cap 30 %%' % app.css_len_text(10.0)))
-    app.settings['drive_params']['70'] = 120
-    app.save_speed_pad(tap_tlim=130)
+    check('tap setup: thread and auto cap', (o.thread_text, o.tlim_text, o.tlim_hint),
+          ('M6 x 1', 'auto %d %%' % auto_cap, '30 in-lb clutch setting (as #12) + drag'))
+    check('tap setup: ready to activate', (o.ok, o.live_text.split('. ')[0]),
+          (True, 'Max depth %s = 10 turns at 100 rpm, cap %d %%' % (app.css_len_text(10.0), auto_cap)))
+    check('motor torque and ratio feed the cap', tapdata.pct_of_spindle(50, 6.0, 1.65) > 56, True)
+    app.settings['motor_rated_nm'] = 3.0
+    check('smaller motor -> bigger percent for the same tap', app.tap_config()['tlim'],
+          int(round(tapdata.pct_of_spindle(30, 3.0, app.ratio))))
+    app.settings['motor_rated_nm'] = 6.0
+    # thread picker
+    app.open_pad_edit('tap_thread')
+    th = app._threads
+    check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
+    th.set_family('UNC')
+    check('UNC sizes listed', [b.text for b in th.ids.grid.children][::-1][:3], ['#1-64', '#2-56', '#3-48'])
+    th.pick('1/4-20')
+    c = app.tap_config()
+    check('picked 1/4-20: 20 TPI, 50 in-lb clutch', (app._threads, round(c['pitch_mm'], 3), c['thread']['clutch'],
+                                                     c['tlim']),
+          (None, 1.27, 50, int(round(tapdata.pct_of_spindle(50, 6.0, app.ratio)))))
+    # custom pitch has no torque data: the cap must be set by hand
+    app.open_threads()
+    th = app._threads
+    th.set_family('custom')
+    th.set_unit('mm')
+    th.set_pitch(1.0)
+    o.refresh()
+    check('custom thread: cap by hand required', (o.ok, 'by hand' in o.live_text, o.tlim_text), (False, True, '-'))
+    app.close_threads()
+    o.set_tlim(35)
+    check('manual cap', (o.ok, o.tlim_text, app.tap_config()['tlim']), (True, '35 %', 35))
+    app.settings['drive_params']['70'] = 30
     o.refresh()
     check('tap: torque cap at the overload level refused', (o.ok, 'overload' in o.live_text), (False, True))
-    app.save_speed_pad(tap_tlim=200)
-    o.refresh()
-    check('tap: torque cap over 150 % refused', (o.ok, '150' in o.live_text), (False, True))
     app.settings['drive_params']['70'] = 300
-    app.save_speed_pad(tap_tlim=30)
+    o.set_tlim(0)
+    app.save_speed_pad(tap_thread='M6x1')
+    o.refresh()
+    check('0 = back to auto', o.tlim_text, 'auto %d %%' % auto_cap)
+    # a 1/2-13 needs more than the lathe's tapping cap
+    app.save_speed_pad(tap_thread='1/2-13')
+    o.refresh()
+    check('1/2-13 past the 150 % cap', (o.ok, '150' in o.live_text), (False, True))
+    app.save_speed_pad(tap_thread='M6x1')
+    # spindle drag: a short jog, torque averaged after spin-up
+    fake.torque = 9
+    check('drag measure starts a jog', (app.tap_measure_drag(), app.tap_drag_busy, fake.sent[-1][:1]),
+          ('', True, b'J'))
+    app._drag['t0'] -= 1.5
+    for _ in range(4):
+        app._drag_tick(0)
+    app._drag['t0'] -= 2.0
+    app._drag_tick(0)
+    c = app.tap_config()
+    check('drag stored, jog stopped, cap includes it', (app.tap_drag_busy, fake.sent[-1], c['drag'], c['tlim']),
+          (False, b'j', 9, auto_cap + 9))
+    o.refresh()
+    check('drag shown', o.drag_text, '9 %')
+    app.save_speed_pad(tap_drag={})
+    fake.torque = 0
+    auto_cap_now = app.tap_config()['tlim']
     o.refresh()
     o.primary()
     check('tap ACTIVATE: panel in, popup closed', (app.tap_mode, app.tap_state, app._tap), (True, 'ready', None))
@@ -1195,7 +1251,7 @@ def tap_flow(dt):
     app.tap_startstop()
     speed, tlim, target, margin, stall_ms, keep = last_T()
     check('START sends the pass', (speed, tlim, target, margin, stall_ms, keep),
-          (round(100 * app.ratio), 30, round(10 * cpt), round(2 * cpt), 150, 0))
+          (round(100 * app.ratio), auto_cap_now, round(10 * cpt), round(2 * cpt), 150, 0))
     node(1, 0, 3.0)
     check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
           ('in', 'TAPPING', app.css_len_text(3.0), 0.3))

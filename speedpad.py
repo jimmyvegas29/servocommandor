@@ -18,6 +18,7 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.clock import Clock
 
 from portrait_ui import ModalTouch
+import tapdata
 
 # Surface speeds (ft/min) per material, one table per tool: HSS and coated
 # carbide (CBD).  Both popups use them; the user can change every value on
@@ -384,22 +385,26 @@ class CssOverlay(ModalTouch, FloatLayout):
 
 
 class TapOverlay(ModalTouch, FloatLayout):
-    """Tapping setup: pitch, to depth or to the bottom, depth, stalls that
-    confirm the bottom, speed, torque cap, back-out margin, thread hand.
-    ACTIVATE hands over to the tap panel that replaces the speed pad."""
-    unit = StringProperty('tpi')
-    pitch_text = StringProperty('-')
+    """Tapping setup: to a depth or to the bottom, the thread (from the
+    table, or a custom pitch), depth, stalls that confirm the bottom, speed,
+    measured spindle drag, torque cap (auto from the thread, or by hand),
+    back-out margin, thread hand.  ACTIVATE hands over to the tap panel."""
     mode = StringProperty('depth')
+    thread_text = StringProperty('-')
     depth = StringProperty('-')
     confirm = NumericProperty(2)
     rpm = NumericProperty(100)
-    tlim = NumericProperty(30)
+    drag_text = StringProperty('-')
+    drag_btn = StringProperty('MEASURE')
+    tlim_text = StringProperty('-')
+    tlim_hint = StringProperty('')
     margin = StringProperty('2')
     hand = StringProperty('rh')
     live_text = StringProperty('')
     ok = BooleanProperty(False)
 
     def populate(self):
+        self._note = ''
         self._evt = Clock.schedule_interval(lambda dt: self.refresh(), 0.3)
         self.refresh()
 
@@ -411,17 +416,6 @@ class TapOverlay(ModalTouch, FloatLayout):
     def _save(self, **kw):
         App.get_running_app().save_speed_pad(**kw)
         self.refresh()
-
-    def set_unit(self, unit):
-        app = App.get_running_app()
-        c = app.tap_config()
-        if unit != c['unit']:
-            # keep the thread: 20 TPI <-> 1.27 mm
-            pitch = 25.4 / c['pitch'] if c['pitch'] > 0 else 0
-            self._save(tap_pitch_unit=unit, tap_pitch=round(pitch, 3 if unit == 'mm' else 1))
-
-    def set_pitch(self, v):
-        self._save(tap_pitch=float(v))
 
     def set_mode(self, mode):
         self._save(tap_mode=mode)
@@ -437,7 +431,8 @@ class TapOverlay(ModalTouch, FloatLayout):
         self._save(tap_rpm=int(v))
 
     def set_tlim(self, v):
-        self._save(tap_tlim=int(v))
+        """0 = back to the automatic cap from the thread table."""
+        self._save(tap_tlim_manual=int(v))
 
     def set_margin(self, v):
         self._save(tap_margin=float(v))
@@ -445,23 +440,56 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_hand(self, hand):
         self._save(tap_hand=hand)
 
+    def measure(self):
+        app = App.get_running_app()
+        if app.tap_drag_busy:
+            app.tap_cancel_drag()
+            self._note = ''
+        else:
+            self._note = app.tap_measure_drag()
+        self.refresh()
+
     def refresh(self):
         app = App.get_running_app()
         c = app.tap_config()
-        self.unit, self.mode, self.hand = c['unit'], c['mode'], c['hand']
-        self.pitch_text = app.tap_pitch_text(c)
+        self.mode, self.hand = c['mode'], c['hand']
+        self.thread_text = app.tap_pitch_text(c)
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
-        self.confirm, self.rpm, self.tlim = c['confirm'], c['rpm'], c['tlim']
+        self.confirm, self.rpm = c['confirm'], c['rpm']
         self.margin = fmt_num(c['margin'], 1) + ' turns'
+        if app.tap_drag_busy:
+            self.drag_text, self.drag_btn = 'measuring...', 'CANCEL'
+        else:
+            self.drag_btn = 'MEASURE'
+            if c['drag'] is None:
+                self.drag_text = 'not measured'
+            elif c['drag_rpm'] == c['rpm']:
+                self.drag_text = '%d %%' % c['drag']
+            else:
+                self.drag_text = '%d %% (at %d rpm)' % (c['drag'], c['drag_rpm'])
+        if c['auto'] and c['tlim'] > 0:
+            self.tlim_text = 'auto %d %%' % c['tlim']
+            t = c['thread']
+            self.tlim_hint = '%d in-lb clutch setting%s + drag' % (
+                t['clutch'], ' (as %s)' % t['derived'] if t['derived'] else '')
+        elif c['auto']:
+            self.tlim_text, self.tlim_hint = '-', 'custom thread: set it by hand'
+        else:
+            self.tlim_text, self.tlim_hint = '%d %%' % c['tlim'], 'set by hand; 0 = auto'
         problem = app.tap_problem(c)
         self.ok = not problem
-        if problem:
+        if self._note:
+            self.live_text = self._note
+        elif problem:
             self.live_text = problem
         else:
             turns = c['depth_mm'] / c['pitch_mm']
-            self.live_text = '%s %s = %s turns at %d rpm, cap %d %%' % (
+            text = '%s %s = %s turns at %d rpm, cap %d %%' % (
                 'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
                 c['rpm'], c['tlim'])
+            if c['min_pct'] is not None and c['min_pct'] >= c['tlim']:
+                text += '. Even easy tapping needs %d %%: expect stalls' % round(c['min_pct'])
+            self.live_text = text
 
     def primary(self):
         app = App.get_running_app()
@@ -469,6 +497,76 @@ class TapOverlay(ModalTouch, FloatLayout):
             app.close_tap()              # changes apply to the next pass
         else:
             app.tap_activate()
+
+
+class ThreadOverlay(ModalTouch, FloatLayout):
+    """Thread picker for the Tap tool: standard sizes from the torque table
+    (UNC, UNF, metric, metric fine), or a custom pitch."""
+    family = StringProperty('UNC')
+    current = StringProperty('')
+    unit = StringProperty('tpi')
+    custom_pitch = StringProperty('-')
+
+    def populate(self):
+        app = App.get_running_app()
+        c = app.tap_config()
+        self.current = c['thread_key']
+        if c['thread'] is not None:
+            self.family = c['thread']['family']
+        elif c['thread_key'] == 'custom':
+            self.family = 'custom'
+        else:
+            self.family = 'UNC' if app.units == 'in' else 'M'
+        self._custom_refresh()
+        self.show()
+
+    def set_family(self, fam):
+        self.family = fam
+        self.show()
+
+    def show(self):
+        from kivy.factory import Factory
+        grid = self.ids.grid
+        grid.clear_widgets()
+        if self.family == 'custom':
+            return
+        for t in tapdata.family(self.family):
+            b = Factory.PickButton(text=t['label'])
+            b.active = t['key'] == self.current
+            b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
+            grid.add_widget(b)
+
+    def pick(self, key):
+        app = App.get_running_app()
+        app.save_speed_pad(tap_thread=key)
+        if app._tap is not None:
+            app._tap.refresh()
+        app.close_threads()
+
+    def _custom_refresh(self):
+        app = App.get_running_app()
+        sp = app.settings.get('speed_pad', {})
+        self.unit = sp.get('tap_pitch_unit') or ('tpi' if app.units == 'in' else 'mm')
+        pitch = sp.get('tap_pitch')
+        if pitch:
+            self.custom_pitch = ('%s TPI' % fmt_num(float(pitch), 1) if self.unit == 'tpi'
+                                 else '%s mm' % fmt_num(float(pitch), 2))
+        else:
+            self.custom_pitch = '-'
+
+    def set_unit(self, unit):
+        app = App.get_running_app()
+        if unit != self.unit:
+            app.save_speed_pad(tap_pitch_unit=unit, tap_pitch=0)
+        self._custom_refresh()
+
+    def set_pitch(self, v):
+        app = App.get_running_app()
+        app.save_speed_pad(tap_thread='custom', tap_pitch=float(v), tap_pitch_unit=self.unit)
+        self.current = 'custom'
+        self._custom_refresh()
+        if app._tap is not None:
+            app._tap.refresh()
 
 
 class SfmOverlay(ModalTouch, FloatLayout):

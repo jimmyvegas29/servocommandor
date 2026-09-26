@@ -40,8 +40,9 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
+import tapdata
 from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
-                      TapOverlay, fmt_num, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+                      TapOverlay, ThreadOverlay, fmt_num, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -810,6 +811,7 @@ class ServoCommanderApp(App):
         self._tools = None
         self._css = None
         self._tap = None
+        self._threads = None
         self._sfm = None
         self._info = None
         self._copy_overlay = None
@@ -903,7 +905,7 @@ class ServoCommanderApp(App):
         hist = list(self.graph.hist) if getattr(self, 'graph', None) else []
         for attr in ('_set_overlay', '_mode_overlay', '_calc_overlay', '_numpad',
                      '_offline', '_alarm', '_settings_overlay', '_ratio_cal',
-                     '_copy_overlay', '_ble_picker', '_tools', '_css', '_tap', '_drill', '_sfm', '_info'):
+                     '_copy_overlay', '_ble_picker', '_tools', '_css', '_tap', '_threads', '_drill', '_sfm', '_info'):
             setattr(self, attr, None)
         self.offline_flag = False
         self.alarm_flag = False
@@ -1014,6 +1016,7 @@ class ServoCommanderApp(App):
         self.show_dro = bool(self.settings['show_dro'])
         self.flip = bool(self.settings['flip'])
         self.units = 'in' if self.settings['units'] == 'in' else 'mm'
+        self.motor_nm_text = '%s Nm' % fmt_num(self.motor_rated_nm(), 2)
         self.dro_x_invert = bool(self.settings['dro_x_invert'])
         self.dro_z_invert = bool(self.settings['dro_z_invert'])
         self.dro_x_um = self.settings['dro_x_um'] if self.settings['dro_x_um'] in (1, 5, 10) else 1
@@ -2386,22 +2389,66 @@ class ServoCommanderApp(App):
 
     def tap_config(self):
         sp = self.settings.get('speed_pad', {})
-        unit = sp.get('tap_pitch_unit') or ('tpi' if self.units == 'in' else 'mm')
-        pitch = float(sp.get('tap_pitch') or (20 if unit == 'tpi' else 1.0))
-        pitch_mm = 25.4 / pitch if unit == 'tpi' else pitch
-        return {'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
+        key = sp.get('tap_thread') or ('1/4-20' if self.units == 'in' else 'M6x1')
+        thread = tapdata.BY_KEY.get(key)
+        if thread is not None:
+            unit, pitch, pitch_mm = thread['unit'], thread['pitch'], thread['pitch_mm']
+        else:                                    # custom pitch
+            key = 'custom'
+            unit = sp.get('tap_pitch_unit') or ('tpi' if self.units == 'in' else 'mm')
+            pitch = float(sp.get('tap_pitch') or (20 if unit == 'tpi' else 1.0))
+            pitch_mm = 25.4 / pitch if unit == 'tpi' else pitch
+        rpm = int(sp.get('tap_rpm', 100))
+        drag, drag_rpm = self.tap_drag_for(rpm)
+        manual = int(sp.get('tap_tlim_manual') or 0)
+        motor_nm = self.motor_rated_nm()
+        clutch_pct = min_pct = None
+        if thread is not None:
+            clutch_pct = tapdata.pct_of_spindle(thread['clutch'], motor_nm, self.ratio)
+            min_pct = (drag or 0) + tapdata.pct_of_spindle(thread['min'], motor_nm, self.ratio)
+        if manual:
+            tlim, auto = manual, False
+        elif clutch_pct is not None:
+            tlim, auto = int(round((drag or 0) + clutch_pct)), True
+        else:
+            tlim, auto = 0, True                 # custom thread: must be set by hand
+        return {'thread_key': key, 'thread': thread, 'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
                 'mode': 'bottom' if sp.get('tap_mode') == 'bottom' else 'depth',
                 'depth_mm': float(sp.get('tap_depth_mm', 0) or 0),
                 'confirm': max(1, int(sp.get('tap_confirm', 2))),
-                'rpm': int(sp.get('tap_rpm', 100)),
-                'tlim': int(sp.get('tap_tlim', 30)),
+                'rpm': rpm, 'drag': drag, 'drag_rpm': drag_rpm,
+                'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'min_pct': min_pct,
                 'margin': float(sp.get('tap_margin', 2.0)),
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
     def tap_pitch_text(self, c):
+        if c['thread'] is not None:
+            return tapdata.full_name(c['thread'])
         if c['unit'] == 'tpi':
             return '%s TPI' % fmt_num(c['pitch'], 1)
-        return '%s mm' % fmt_num(c['pitch'], 2)
+        return '%s mm pitch' % fmt_num(c['pitch'], 2)
+
+    def tap_drag_for(self, rpm):
+        """Measured spindle drag (% torque) at this speed, or the nearest
+        speed that was measured: (pct, rpm) or (None, None)."""
+        table = self.settings.get('speed_pad', {}).get('tap_drag', {})
+        if not table:
+            return None, None
+        near = min(table, key=lambda k: abs(int(k) - rpm))
+        return int(table[near]), int(near)
+
+    # motor rated torque (Drive page): turns the tap table's inch-pounds
+    # into the drive's torque percent
+    motor_nm_text = StringProperty('6 Nm')
+
+    def motor_rated_nm(self):
+        return float(self.settings.get('motor_rated_nm', 6.0) or 6.0)
+
+    def _set_motor_nm(self, value):
+        self.settings['motor_rated_nm'] = float(value)
+        self._save_settings()
+        self.motor_nm_text = '%s Nm' % fmt_num(self.motor_rated_nm(), 2)
+        log.info('Motor rated torque -> %s Nm', value)
 
     def tap_counts_per_turn(self):
         return self.TAP_COUNTS_PER_REV * self.ratio
@@ -2426,9 +2473,14 @@ class ServoCommanderApp(App):
             return 'Needs the machine node on firmware 3.15 or newer (UPDATE NODE)'
         if c['depth_mm'] <= 0:
             return 'Enter the %s' % ('max depth' if c['mode'] == 'bottom' else 'depth')
+        if c['tlim'] <= 0:
+            return 'Custom thread: set the torque limit by hand'
         if not 5 <= c['rpm'] <= self.tap_max_rpm():
             return 'Tapping speed must be 5 to %d rpm' % self.tap_max_rpm()
         if not 5 <= c['tlim'] <= 150:
+            if c['auto'] and c['tlim'] > 150:
+                return ('%s needs %d %% (clutch setting): past the 150 %% tapping cap'
+                        % (self.tap_pitch_text(c), c['tlim']))
             return 'Torque limit must be 5 to 150 %'
         overload = self.settings.get('drive_params', {}).get('70')
         if overload is not None and c['tlim'] >= int(overload):
@@ -2628,6 +2680,74 @@ class ServoCommanderApp(App):
                 label, value = '', blocked
             self.tap_big_label, self.tap_big_text = label, value
 
+    # spindle drag: a short jog at the tapping speed with nothing engaged;
+    # the average torque is what the spindle needs just to turn
+    tap_drag_busy = BooleanProperty(False)
+    DRAG_S = 2.6                    # jog length
+    DRAG_SETTLE_S = 1.0             # ignore the spin-up
+    NODE_JOG_MAX = 300              # the node's jog cap, motor rpm
+
+    def tap_measure_drag(self):
+        """Start a drag measurement; returns '' or why it cannot run."""
+        if self.tap_drag_busy:
+            return ''
+        c = self.tap_config()
+        motor = int(round(c['rpm'] * self.ratio))
+        if motor > self.NODE_JOG_MAX:
+            return 'Drag can be measured up to %d rpm' % int(self.NODE_JOG_MAX / self.ratio)
+        self._update_jog_ok()
+        if not self.jog_ok or not self._drive_ready():
+            return 'Needs the lever OFF, the drive disabled and the node linked'
+        speed = motor if c['hand'] == 'rh' else -motor
+        self._drag = {'speed': speed, 'rpm': c['rpm'], 'samples': [], 't0': time.monotonic(), 'n': 0}
+        self.tap_drag_busy = True
+        self._gui_cmd_until = time.monotonic() + self.DRAG_S + 2   # the poller must not fight the jog
+        self.servo.jog(speed)
+        self._drag_evt = Clock.schedule_interval(self._drag_tick, 0.1)
+        log.info('Tap drag: measuring at %d rpm', c['rpm'])
+        return ''
+
+    def _drag_tick(self, dt):
+        d = self._drag
+        el = time.monotonic() - d['t0']
+        if el >= self.DRAG_S:
+            self._drag_done()
+            return
+        d['n'] += 1
+        if d['n'] % 2 == 0:
+            self.servo.jog(d['speed'])           # keep-alive every 0.2 s
+        s = self.dro.latest() if self.dro is not None else None
+        if el >= self.DRAG_SETTLE_S and s is not None and 'torque' in s:
+            d['samples'].append(abs(s['torque']))
+
+    def _drag_done(self, cancelled=False):
+        evt = getattr(self, '_drag_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._drag_evt = None
+        self.servo.jog_stop()
+        self.tap_drag_busy = False
+        d = self._drag
+        if cancelled or not d['samples']:
+            log.info('Tap drag: %s', 'cancelled' if cancelled else 'no torque readings')
+            return
+        pct = int(round(sum(d['samples']) / float(len(d['samples']))))
+        sp = self.settings.setdefault('speed_pad', {})
+        sp.setdefault('tap_drag', {})[str(d['rpm'])] = pct
+        self._save_settings()
+        log.info('Tap drag: %d %% at %d rpm (%d samples)', pct, d['rpm'], len(d['samples']))
+
+    def tap_cancel_drag(self):
+        if self.tap_drag_busy:
+            self._drag_done(cancelled=True)
+
+    def open_threads(self):
+        ov = self._show('_threads', ThreadOverlay())
+        ov.populate()
+
+    def close_threads(self):
+        self._hide('_threads')
+
     def open_tap(self):
         if not self._drive_ready():
             return
@@ -2635,6 +2755,8 @@ class ServoCommanderApp(App):
         ov.populate()
 
     def close_tap(self):
+        self.tap_cancel_drag()
+        self.close_threads()
         self._hide('_tap')
 
     # ---- speed pad ------------------------------------------------------
@@ -2707,6 +2829,13 @@ class ServoCommanderApp(App):
             if self._css is not None:
                 self._css.learn()
             return
+        if key == 'tap_drag':
+            if self._tap is not None:
+                self._tap.measure()
+            return
+        if key == 'tap_thread':
+            self.open_threads()
+            return
         ov = self._show('_param_edit', ParamEditOverlay())
         if key.startswith('preset:'):
             pos = int(key.split(':')[1])
@@ -2752,13 +2881,14 @@ class ServoCommanderApp(App):
             ov.setup_generic('Run-over', 'How far X goes past centre before the pass is done', unit,
                              0, 0.5 if unit == 'in' else 12, o.over, o.set_over, 'SET', allow_dot=True)
         elif key == 'tap_pitch':
-            o = self._tap
-            c = self.tap_config()
-            if c['unit'] == 'tpi':
-                ov.setup_generic('Pitch', 'Threads per inch', 'TPI', 2, 100, self.tap_pitch_text(c),
+            o = self._threads
+            unit = self.settings.get('speed_pad', {}).get('tap_pitch_unit') or (
+                'tpi' if self.units == 'in' else 'mm')
+            if unit == 'tpi':
+                ov.setup_generic('Pitch', 'Threads per inch', 'TPI', 2, 100, o.custom_pitch,
                                  o.set_pitch, 'SET', allow_dot=True)
             else:
-                ov.setup_generic('Pitch', 'Thread pitch', 'mm', 0.1, 10, self.tap_pitch_text(c),
+                ov.setup_generic('Pitch', 'Thread pitch', 'mm', 0.1, 10, o.custom_pitch,
                                  o.set_pitch, 'SET', allow_dot=True)
         elif key == 'tap_depth':
             o = self._tap
@@ -2780,8 +2910,11 @@ class ServoCommanderApp(App):
                              '%d rpm' % o.rpm, o.set_rpm, 'SET')
         elif key == 'tap_tlim':
             o = self._tap
-            ov.setup_generic('Torque limit', 'Drive torque cap during the pass', '%', 5, 150,
-                             '%d %%' % o.tlim, o.set_tlim, 'SET')
+            ov.setup_generic('Torque limit', 'Drive torque cap for the pass; 0 = auto from the thread',
+                             '%', 0, 150, o.tlim_text, o.set_tlim, 'SET')
+        elif key == 'motor_nm':
+            ov.setup_generic('Motor rated torque', 'From the servo motor nameplate', 'Nm', 0.1, 100,
+                             self.motor_nm_text, self._set_motor_nm, 'SAVE', allow_dot=True)
         elif key == 'tap_margin':
             o = self._tap
             ov.setup_generic('Back-out margin', 'Extra turns backed out past the start', 'turns', 0, 10,

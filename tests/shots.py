@@ -171,9 +171,21 @@ def s_tap():
     app.close_tools()
     app.close_css()
     app._tap_node_ok = lambda: True          # picture only: pretend a 3.15 node
-    app.save_speed_pad(tap_pitch_unit='tpi', tap_pitch=20, tap_mode='bottom', tap_depth_mm=12.7,
-                       tap_confirm=2, tap_rpm=100, tap_tlim=30, tap_margin=2.0, tap_hand='rh')
+    app.save_speed_pad(tap_thread='1/4-20', tap_mode='bottom', tap_depth_mm=12.7, tap_confirm=2,
+                       tap_rpm=100, tap_tlim_manual=0, tap_margin=2.0, tap_hand='rh', tap_drag={'100': 8})
     app.open_tap()
+
+
+def s_threads():
+    app.open_threads()
+
+
+def s_threads_custom():
+    app._threads.set_family('custom')
+
+
+def s_threads_close():
+    app.close_threads()
 
 
 def s_tap_ready():
@@ -311,6 +323,8 @@ plan = [
     (0.2, s_css_unlearned), (0.6, lambda: cap('css_unlearned')),
     (0.2, s_css), (0.6, lambda: cap('css')),
     (0.2, s_tap), (0.6, lambda: cap('tap')),
+    (0.2, s_threads), (0.6, lambda: cap('tap_threads')),
+    (0.2, s_threads_custom), (0.6, lambda: cap('tap_threads_custom')), (0.2, s_threads_close),
     (0.2, s_tap_ready), (0.6, lambda: cap('tap_ready')),
     (0.2, s_tap_running), (0.6, lambda: cap('tap_running')),
     (0.2, s_tap_done), (0.6, lambda: cap('tap_done')), (0.2, s_tap_off),
