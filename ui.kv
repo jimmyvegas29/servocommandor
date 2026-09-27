@@ -2466,6 +2466,84 @@
                 size_hint_y: None
                 height: self.minimum_height
 
+<ParamChoiceOverlay>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0.94)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: (None, None)
+        size: (min(root.width - 20, 460), self.minimum_height)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: 10
+        spacing: 8
+        canvas.before:
+            Color:
+                rgba: PANEL_DK
+            RoundedRectangle:
+                size: self.size
+                pos: self.pos
+                radius: [(7, 7)] * 4
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            SLabel:
+                text: root.title
+                font_size: '19sp'
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+            IconButton:
+                text: '\uf057'
+                size_hint_x: None
+                width: 44
+                on_press: app.close_param_edit()
+        SLabel:
+            text: root.hint
+            font_size: '12sp'
+            color: (0.6, 0.6, 0.6, 1)
+            size_hint_y: None
+            text_size: (self.width, None)
+            height: self.texture_size[1]
+            halign: 'left'
+            valign: 'top'
+        InfoRow:
+            label: 'Current setting'
+            value: root.current
+        BoxLayout:
+            size_hint_y: None
+            height: 64
+            spacing: 6
+            SegButton:
+                text: root.choices[0][1].upper() if root.choices else ''
+                font_size: '19sp'
+                active: bool(root.choices) and root.value == root.choices[0][0]
+                on_press: root.pick(root.choices[0][0])
+            SegButton:
+                text: root.choices[1][1].upper() if len(root.choices) > 1 else ''
+                font_size: '19sp'
+                active: len(root.choices) > 1 and root.value == root.choices[1][0]
+                on_press: root.pick(root.choices[1][0])
+        SLabel:
+            text: root.problem
+            font_size: '12sp'
+            color: (0.95, 0.25, 0.2, 1)
+            size_hint_y: None
+            height: 30 if root.problem else 0
+            opacity: 1 if root.problem else 0
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        SetKey:
+            text: 'CANCEL'
+            font_size: '17sp'
+            size_hint_y: None
+            height: 54
+            on_press: app.close_param_edit()
+
 <ParamEditOverlay>:
     canvas.before:
         Color:
@@ -2525,7 +2603,7 @@
                     pos: self.pos
                     radius: [(7, 7)] * 4
             SLabel:
-                text: 'New value'
+                text: 'New value' + (('\n= ' + root.aside) if root.aside else '')
                 font_size: '13sp'
                 color: (0.6, 0.6, 0.6, 1)
                 text_size: self.size

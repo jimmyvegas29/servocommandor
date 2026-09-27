@@ -410,6 +410,33 @@ def after_ratio(ini_path, ini_before, old_ratio):
     app._poll_ui(0)                                  # second poll: re-apply
     check('kept values re-applied', (app.servo.params[70], app.servo.params[71]), (200, -200))
     app.apply_drive_param('overload_level', 140)
+    # stop on disable: Pr136 coast / brake, Pr063 stop time (ms read in seconds)
+    page.refresh()
+    check('stop rows shown', (rows['stop_mode'].value, rows['stop_decel'].value), ('Coast', '1000 ms'))
+    app.open_param_edit('stop_mode')
+    ch = app._param_edit
+    check('stop mode opens the choice editor', (type(ch).__name__, ch.current, ch.problem),
+          ('ParamChoiceOverlay', 'Coast', ''))
+    ch.pick(1)
+    check('brake written, kept by the panel', (app.servo.params[136], app._param_edit,
+                                               app.settings['drive_params'].get('136')), (1, None, 1))
+    app.open_param_edit('stop_decel')
+    ed = app._param_edit
+    check('ms editor says what a second is', '1000 ms = 1 second' in ed.hint, True)
+    check('current stop time in seconds too', ed.current, '1000 ms  (1 second)')
+    for ch_ in '500':
+        ed.add_digit(ch_)
+    check('new value shown in seconds', ed.aside, '0.5 seconds')
+    ed.accept()
+    page.refresh()
+    check('stop time written', (app.servo.params[63], rows['stop_decel'].value, rows['stop_mode'].value),
+          (500, '500 ms', 'Brake'))
+    app.open_param_edit('accel')
+    check('accel editor also in seconds', ('1000 ms = 1 second' in app._param_edit.hint,
+                                           app._param_edit.current), (True, '100 ms  (0.1 seconds)'))
+    app.close_param_edit()
+    app.apply_drive_param('stop_mode', 0)
+    app.apply_drive_param('stop_decel', 1000)
     app.settings['drive_params'] = {}
     app._save_settings()
     app.close_settings()

@@ -23,7 +23,7 @@ class ServoCommunicator:
         self.offline = False        # set True to exercise the offline overlay
         # drive parameter table (XP200 defaults) for the Drive settings page
         self.params = {60: 100, 61: 100, 63: 1000, 65: 300, 66: -300, 67: 100, 68: -100,
-                       69: 100, 70: 140, 71: -140, 72: 10000, 75: 3500}
+                       69: 100, 70: 140, 71: -140, 72: 10000, 75: 3500, 136: 0}
         self.last_write = None
         self.last_save = None
         self.saved_params = dict(self.params)

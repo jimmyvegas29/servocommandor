@@ -296,7 +296,7 @@ def read_input_regs(addr, count):
 
 
 # drive parameters the panel may change (Pr number == Modbus address)
-PARAM_WRITABLE = (60, 61, 63, 65, 66, 67, 68, 69, 70, 71, 72, 75)
+PARAM_WRITABLE = (60, 61, 63, 65, 66, 67, 68, 69, 70, 71, 72, 75, 136)
 SAVE_BUSY_MS = 5000          # manual: wait 5 s after 41H
 
 

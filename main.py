@@ -282,8 +282,34 @@ DRIVE_PARAMS = [
          addr=61, mirror=None, lo=0, hi=10000, unit='ms'),
     dict(key='max_speed', label='Max motor speed', hint='Pr075  drive-side limit',
          addr=75, mirror=None, lo=0, hi=6000, unit='rpm'),
+    # what the drive does when it is disabled (lever OFF, EN, link lost) or
+    # alarms: coast, or brake to a stop through the brake resistor
+    dict(key='stop_mode', label='Stop on disable', hint='Pr136  coast or brake to a stop',
+         addr=136, mirror=None, lo=0, hi=1, unit='', choices=((0, 'Coast'), (1, 'Brake')),
+         node=(3, 15),
+         help='Pr136: what the spindle does when the drive is disabled (lever OFF, EN, link lost) '
+              'or alarms.  Coast: power is cut and it freewheels.  Brake: the drive slows it to a '
+              'stop through its brake resistor at the Stop time rate, then cuts power.'),
+    dict(key='stop_decel', label='Stop time', hint='Pr063  1000 rpm to 0 when braking',
+         addr=63, mirror=None, lo=0, hi=10000, unit='ms'),
 ]
 DRIVE_PARAM_BY_KEY = dict((d['key'], d) for d in DRIVE_PARAMS)
+
+
+def param_text(spec, v):
+    """A drive parameter value as shown: choice name, or number and unit."""
+    if v is None:
+        return '-'
+    for n, name in spec.get('choices', ()):
+        if n == v:
+            return name
+    return ('%d %s' % (v, spec['unit'])).strip()
+
+
+def seconds_text(ms):
+    """'0.5 seconds' for 500 (ms), so a time reads in seconds too."""
+    s = ('%.3f' % (ms / 1000.0)).rstrip('0').rstrip('.')
+    return '%s second%s' % (s, '' if s == '1' else 's')
 
 
 class DrivePage(BoxLayout):
@@ -327,12 +353,10 @@ class DrivePage(BoxLayout):
         for spec in DRIVE_PARAMS:
             row = self._rows[spec['key']]
             v = params.get(spec['addr'])
-            if v is None:
-                row.value = '-'
-            elif spec['mirror'] is not None and params.get(spec['mirror']) not in (None, -v):
+            if spec['mirror'] is not None and v is not None and params.get(spec['mirror']) not in (None, -v):
                 row.value = '%d / %d %s' % (v, params.get(spec['mirror']), spec['unit'])
             else:
-                row.value = '%d %s' % (v, spec['unit'])
+                row.value = param_text(spec, v)
         if app.avg_load < 0:
             self._avg_row.value = '-'
         else:
@@ -354,6 +378,7 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
     lo = NumericProperty(0)
     hi = NumericProperty(0)
     over = BooleanProperty(False)
+    aside = StringProperty('')         # the new value in seconds, for ms values
 
     accept_text = StringProperty('WRITE TO DRIVE')
     allow_dot = BooleanProperty(False)
@@ -364,11 +389,16 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
         app = App.get_running_app()
         self.key = key
         self.title = spec['label']
-        self.hint = '%s.  Range %d to %d %s' % (spec['hint'].replace('  ', ': '), spec['lo'], spec['hi'], spec['unit'])
+        ms = spec['unit'] == 'ms'
+        self.hint = '%s.  %sRange %d to %d %s' % (spec['hint'].replace('  ', ': '),
+                                                 '1000 ms = 1 second.  ' if ms else '',
+                                                 spec['lo'], spec['hi'], spec['unit'])
         self.unit = spec['unit']
         self.lo, self.hi = spec['lo'], spec['hi']
         v = app.servo.params.get(spec['addr']) if hasattr(app.servo, 'params') else None
-        self.current = '-' if v is None else '%d %s' % (v, spec['unit'])
+        self.current = param_text(spec, v)
+        if ms and v is not None:
+            self.current += '  (%s)' % seconds_text(v)
 
     def setup_generic(self, title, hint, unit, lo, hi, current, callback, accept_text='SET',
                       allow_dot=False):
@@ -390,6 +420,7 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
     def _check(self):
         v = self._value()
         self.over = bool(self.entry) and (v is None or not (self.lo <= v <= self.hi))
+        self.aside = seconds_text(v) if (self.unit == 'ms' and self.entry and v is not None) else ''
 
     def add_digit(self, d):
         if len(self.entry) >= (7 if self.allow_dot else 5):
@@ -419,6 +450,35 @@ class ParamEditOverlay(ModalTouch, FloatLayout):
             self.callback(v)
             return
         App.get_running_app().apply_drive_param(self.key, int(self.entry))
+
+
+class ParamChoiceOverlay(ModalTouch, FloatLayout):
+    """Editor for a drive parameter that is one of a few named settings."""
+    key = StringProperty('')
+    title = StringProperty('')
+    hint = StringProperty('')
+    current = StringProperty('-')
+    value = NumericProperty(-1)
+    choices = ListProperty([])
+    problem = StringProperty('')
+
+    def setup(self, key):
+        spec = DRIVE_PARAM_BY_KEY[key]
+        app = App.get_running_app()
+        self.key = key
+        self.title = spec['label']
+        self.hint = spec.get('help', '')
+        v = app.servo.params.get(spec['addr']) if hasattr(app.servo, 'params') else None
+        self.value = -1 if v is None else v
+        self.current = param_text(spec, v)
+        self.choices = [list(c) for c in spec['choices']]
+        self.problem = app.drive_param_problem(key)
+
+    def pick(self, v):
+        if self.problem or v == self.value:
+            App.get_running_app().close_param_edit()
+            return
+        App.get_running_app().apply_drive_param(self.key, int(v))
 
 
 class InfoOverlay(ModalTouch, FloatLayout):
@@ -1237,21 +1297,31 @@ class ServoCommanderApp(App):
             return
         # reads of at most 8 registers each (one fits a single BLE notify),
         # spaced out so the node answers one before the next arrives
-        for i, (addr, count) in enumerate(((60, 4), (65, 8), (75, 1))):
+        for i, (addr, count) in enumerate(((60, 4), (65, 8), (75, 1), (136, 1))):
             Clock.schedule_once(lambda dt, a=addr, c=count: self.servo.request_params(a, c), 0.25 * i)
 
     def open_param_edit(self, key):
         if not self.drive_can_edit():
             return
-        ov = self._show('_param_edit', ParamEditOverlay())
+        spec = DRIVE_PARAM_BY_KEY[key]
+        ov = self._show('_param_edit', ParamChoiceOverlay() if spec.get('choices') else ParamEditOverlay())
         ov.setup(key)
+
+    def drive_param_problem(self, key):
+        """Why this parameter cannot be written from here, or ''."""
+        need = DRIVE_PARAM_BY_KEY[key].get('node')
+        if need and isinstance(self.servo, NodeServo) and isinstance(self.dro, DroBle) \
+                and not self.dro._node_at_least(*need):
+            return 'Needs the machine node on firmware %d.%d or newer (UPDATE NODE)' % need
+        return ''
 
     def close_param_edit(self):
         self._hide('_param_edit')
 
     def apply_drive_param(self, key, value):
         spec = DRIVE_PARAM_BY_KEY[key]
-        if not (spec['lo'] <= value <= spec['hi']) or not self.drive_can_edit():
+        if not (spec['lo'] <= value <= spec['hi']) or not self.drive_can_edit() \
+                or self.drive_param_problem(key):
             return False
         self.servo.write_param(spec['addr'], value)
         kept = self.settings.setdefault('drive_params', {})
