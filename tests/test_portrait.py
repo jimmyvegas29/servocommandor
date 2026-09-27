@@ -771,6 +771,7 @@ def after_layout(dt):
     for ch in '6.5':
         d.add_dot() if ch == '.' else d.add_digit(ch)
     check('drill typed mm', (d.entry, d.size_text, d.rpm), ('6.5', '6.5 mm', round(speedpad.rpm_for(90, 6.5 / 25.4))))
+    check('drill in mm shows m/min', ' at 27 m/min ' in d.result_text, True)
     d.backspace()
     d.backspace()
     check('drill backspace', (d.entry, d.size_text), ('6', '6 mm'))
@@ -797,8 +798,41 @@ def after_layout(dt):
     o.set_tool('cbd')
     o.set_sfm(445)
     check('sfm rpm', (o.rpm, o.material), (800, ''))
+    check('inch popup shows SFM', o.result_text.split(' on ')[0], '445 SFM')
+    # mm: the surface speed is shown and typed in m/min, stored in SFM
+    o.set_unit('mm')
+    check('mm popup shows m/min', o.result_text.split(' on ')[0], '136 m/min')
+    o.set_sfm(136)
+    check('m/min typed back to SFM', o.sfm, 446)
+    o.set_unit('inch')
+    o.set_sfm(445)
+    import speedpad as spd
+    check('surface speed helpers', (spd.surf_text(400, True), spd.surf_text(400, False),
+                                    spd.sfm_from(122, True), spd.surf_value(90, True)),
+          ('122 m/min', '400 SFM', 400, 27))
     o.accept()
     check('sfm set speed and closed', (app.command_speed, app._sfm), (round(800 * app.ratio), None))
+
+    # settings SFM tables follow the DRO units; editing in mm types m/min
+    units_before = app.units
+    app.units = 'mm'
+    app.open_settings('sfm')
+    page = app._settings_overlay.ids.content.children[0]
+    vals = [r.value for r in page.ids.rows.children]
+    check('SFM tables in m/min when the DRO is in mm', all(v.endswith(' m/min') for v in vals), True)
+    app.open_pad_edit('sfm:hss:Mild steel')
+    ed = app._param_edit
+    check('table editor in m/min', (ed.unit, ed.current), ('m/min', '27 m/min'))
+    ed.callback(30)
+    check('30 m/min stored as SFM', app.sfm_for('hss', 'Mild steel'), 98)
+    app._hide('_param_edit')
+    app._set_sfm('hss', 'Mild steel', 90)
+    app.units = 'in'
+    page.refresh()
+    check('SFM tables in SFM when the DRO is in inches',
+          all(r.value.endswith(' SFM') for r in page.ids.rows.children), True)
+    app.units = units_before
+    app.close_settings()
 
     # constant SFM: learn the way to centre (needed before ACTIVATE),
     # ACTIVATE swaps in the CSS panel, START anchors the pass where X is,
@@ -845,7 +879,7 @@ def after_layout(dt):
     check('learned: counts going down = toward centre',
           (app.css_learning, app.css_config()['in_sign'], o.learn_btn, o.learned), (False, -1, 'RELEARN', True))
     o.set_start_dia(2.0 if app.units == 'in' else 50.8)
-    check('css live line', o.live_text, '400 SFM at OD %s  ->  764 rpm at START' % o.start_dia)
+    check('css live line (DRO in mm: m/min)', o.live_text, '122 m/min at OD %s  ->  764 rpm at START' % o.start_dia)
     o.primary()
     check('css ACTIVATE: panel in, popup closed, speed untouched',
           (app.css_mode, app.css_state, app._css, app.command_speed), (True, 'ready', None, base))

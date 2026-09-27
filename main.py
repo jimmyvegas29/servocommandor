@@ -42,7 +42,7 @@ from dro_ble import DroBle, scan_boards
 import diag_upload
 import tapdata
 from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
-                      TapOverlay, ThreadOverlay, fmt_num, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+                      TapOverlay, ThreadOverlay, fmt_num, surf_text, surf_unit, surf_value, sfm_from, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2300,7 +2300,7 @@ class ServoCommanderApp(App):
             return
         c = self.css_config()
         top = min(c['top'], self.max_spindle_rpm())
-        self.css_setup_text = '%d SFM' % c['sfm']
+        self.css_setup_text = surf_text(c['sfm'], self.units == 'mm')
         state = self.css_state
         live = self._css_live()
         amber, green, blue = [0.95, 0.75, 0.3, 1], [0.4, 0.85, 0.5, 1], [0, 0.5, 1, 1]
@@ -2918,17 +2918,21 @@ class ServoCommanderApp(App):
                              lambda v: self._set_jog_rpm(v), 'SAVE')
         elif key.startswith('sfm:'):
             _, tool, name = key.split(':', 2)
+            metric = self.units == 'mm'
             ov.setup_generic(name, '%s surface speed, used by DRILL and SFM' % TOOL_NAMES[tool].capitalize(),
-                             'SFM', 10, 3000, '%d SFM' % self.sfm_for(tool, name),
-                             lambda v: self._set_sfm(tool, name, v), 'SAVE')
+                             surf_unit(metric), surf_value(10, metric), surf_value(3000, metric),
+                             surf_text(self.sfm_for(tool, name), metric),
+                             lambda v: self._set_sfm(tool, name, sfm_from(v, metric)), 'SAVE')
         elif key == 'sfm_dia':
             o = self._sfm
             ov.setup_generic('Diameter', 'Work or tool diameter', 'in' if o.unit == 'inch' else 'mm',
                              0.01, 99, o.dia_text(), o.set_diameter, 'SET', allow_dot=True)
         elif key == 'css_sfm':
             o = self._css
-            ov.setup_generic('Surface speed', 'Feet per minute, held while X moves', 'SFM', 10, 5000,
-                             '%d SFM' % o.sfm, o.set_sfm, 'SET')
+            metric = self.units == 'mm'
+            ov.setup_generic('Surface speed', '%s, held while X moves' % (
+                'Metres per minute' if metric else 'Feet per minute'), surf_unit(metric),
+                surf_value(10, metric), surf_value(5000, metric), surf_text(o.sfm, metric), o.set_sfm, 'SET')
         elif key == 'css_top':
             o = self._css
             ov.setup_generic('Top speed', 'Constant SFM never goes above this', 'rpm',
@@ -2985,8 +2989,10 @@ class ServoCommanderApp(App):
                              o.margin, o.set_margin, 'SET', allow_dot=True)
         elif key == 'sfm_sfm':
             o = self._sfm
-            ov.setup_generic('Surface speed', 'Feet per minute', 'SFM', 10, 5000,
-                             '%d SFM' % o.sfm, o.set_sfm, 'SET')
+            metric = o.unit == 'mm'
+            ov.setup_generic('Surface speed', 'Metres per minute' if metric else 'Feet per minute',
+                             surf_unit(metric), surf_value(10, metric), surf_value(5000, metric),
+                             surf_text(o.sfm, metric), o.set_sfm, 'SET')
         else:
             self._hide('_param_edit')
 

@@ -3023,7 +3023,7 @@
                 width: 44
                 on_press: app.close_sfm()
         SLabel:
-            text: 'Material - or edit the SFM below'
+            text: 'Material - or edit the surface speed below'
             font_size: '12sp'
             color: (0.6, 0.6, 0.6, 1)
             size_hint_y: None
@@ -3076,8 +3076,8 @@
         PadRow:
             key: 'sfm_sfm'
             label: 'Surface speed'
-            hint: 'ft/min (SFM)'
-            value: str(root.sfm) + ' SFM'
+            hint: 'm/min' if root.unit == 'mm' else 'ft/min (SFM)'
+            value: ('%d m/min' % round(root.sfm * 0.3048)) if root.unit == 'mm' else ('%d SFM' % root.sfm)
         SLabel:
             text: root.result_text
             font_size: '14sp'
@@ -3158,7 +3158,7 @@
                 size_hint_y: None
                 height: self.minimum_height
                 SLabel:
-                    text: 'Material - or edit the SFM below'
+                    text: 'Material - or edit the surface speed below'
                     font_size: '12sp'
                     color: (0.6, 0.6, 0.6, 1)
                     size_hint_y: None
@@ -3206,8 +3206,8 @@
                 PadRow:
                     key: 'css_sfm'
                     label: 'Surface speed'
-                    hint: 'ft/min (SFM), held while X moves'
-                    value: str(root.sfm) + ' SFM'
+                    hint: ('m/min' if app.units == 'mm' else 'ft/min (SFM)') + ', held while X moves'
+                    value: ('%d m/min' % round(root.sfm * 0.3048)) if app.units == 'mm' else ('%d SFM' % root.sfm)
                 PadRow:
                     key: 'css_top'
                     label: 'Top speed'

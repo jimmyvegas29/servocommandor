@@ -54,6 +54,29 @@ def rpm_for(sfm, dia_in):
     return sfm * 12.0 / (math.pi * dia_in)
 
 
+# surface speed: stored in SFM (ft/min) everywhere; shown and edited in
+# m/min when the user works in mm
+MMIN_PER_SFM = 0.3048
+
+
+def surf_unit(metric):
+    return 'm/min' if metric else 'SFM'
+
+
+def surf_value(sfm, metric):
+    """The number shown / typed for a surface speed stored in SFM."""
+    return int(round(sfm * MMIN_PER_SFM)) if metric else int(round(sfm))
+
+
+def surf_text(sfm, metric):
+    return '%d %s' % (surf_value(sfm, metric), surf_unit(metric))
+
+
+def sfm_from(value, metric):
+    """A typed surface speed (m/min when metric) back to SFM for storage."""
+    return int(round(float(value) / MMIN_PER_SFM)) if metric else int(round(float(value)))
+
+
 def fmt_num(v, places=3):
     s = ('%.*f' % (places, v)).rstrip('0').rstrip('.')
     return s if s else '0'
@@ -193,8 +216,9 @@ class DrillOverlay(ModalTouch, FloatLayout):
         self.capped = self.rpm > top
         self.rpm_set = min(self.rpm, top)
         note = '  (capped at %d, spindle max)' % top if self.capped else ''
-        self.result_text = '%s, %s drill, %s at %d SFM  ->  %d rpm%s' % (
-            self.size_text, TOOL_NAMES[self.tool], self.material.lower(), self.sfm, self.rpm, note)
+        self.result_text = '%s, %s drill, %s at %s  ->  %d rpm%s' % (
+            self.size_text, TOOL_NAMES[self.tool], self.material.lower(),
+            surf_text(self.sfm, self.unit == 'mm'), self.rpm, note)
 
     def accept(self):
         if self.rpm_set > 0:
@@ -306,7 +330,8 @@ class CssOverlay(ModalTouch, FloatLayout):
             self.set_material(self.material)
 
     def set_sfm(self, v):
-        self.sfm = int(v)
+        """v as typed: m/min when the DRO is in mm."""
+        self.sfm = sfm_from(v, App.get_running_app().units == 'mm')
         self.material = ''
         App.get_running_app().save_speed_pad(css_sfm=self.sfm, css_material='')
         self.refresh()
@@ -369,8 +394,8 @@ class CssOverlay(ModalTouch, FloatLayout):
         elif c['dir'] == 'in':
             rpm, capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
             self.warn = capped
-            self.live_text = '%d SFM at OD %s  ->  %d rpm at START%s' % (
-                self.sfm, self.start_dia, rpm, ' (top limit)' if capped else '')
+            self.live_text = '%s at OD %s  ->  %d rpm at START%s' % (
+                surf_text(self.sfm, app.units == 'mm'), self.start_dia, rpm, ' (top limit)' if capped else '')
         else:
             rpm, _capped = app.css_rpm(self.sfm, self.top_rpm, dia_mm / 25.4)
             self.warn = False
@@ -649,7 +674,8 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self._compute()
 
     def set_sfm(self, v):
-        self.sfm = int(v)
+        """v as typed: m/min when the popup is in mm."""
+        self.sfm = sfm_from(v, self.unit == 'mm')
         self.material = ''                   # typed by hand: no material lit
         App.get_running_app().save_speed_pad(sfm_sfm=self.sfm, sfm_material='')
         self._compute()
@@ -671,7 +697,8 @@ class SfmOverlay(ModalTouch, FloatLayout):
         self.capped = self.rpm > top
         self.rpm_set = min(self.rpm, top)
         note = '  (capped at %d, spindle max)' % top if self.capped else ''
-        self.result_text = '%d SFM on %s  ->  %d rpm%s' % (self.sfm, self.dia_text(), self.rpm, note)
+        self.result_text = '%s on %s  ->  %d rpm%s' % (surf_text(self.sfm, self.unit == 'mm'),
+                                                      self.dia_text(), self.rpm, note)
 
     def accept(self):
         if self.rpm_set > 0:
@@ -756,5 +783,5 @@ class SfmPage(BoxLayout):
                 r.key = 'sfm:%s:%s' % (tool, name)
                 r.label = name
                 r.hint = '%s surface speed' % TOOL_NAMES[tool]
-                r.value = '%d SFM' % app.sfm_for(tool, name)
+                r.value = surf_text(app.sfm_for(tool, name), app.units == 'mm')
                 rows.add_widget(r)
