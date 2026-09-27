@@ -1813,7 +1813,8 @@
     font_name: app.font
     font_size: '17sp'
     size_hint_y: None
-    height: 56
+    # landscape has ~399 px under the title bar: 7 pages x 50 + spacing fit
+    height: 56 if app.orientation == 'portrait' else 50
     background_color: (0, 0, 0, 0)
     background_normal: ''
     color: (1, 1, 1, 1) if self.active else (0.7, 0.7, 0.7, 1)

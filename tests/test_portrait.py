@@ -292,6 +292,11 @@ def after_alarm(dt):
     with open(SETTINGS, encoding='utf-8') as fh:
         saved = json.load(fh)
     check('orientation saved', saved['orientation'], 'landscape')
+    menu = app._settings_overlay.ids.menu
+    btns = list(menu.children)
+    need = sum(b.height for b in btns) + menu.spacing[1] * (len(btns) - 1)
+    room = app.stage.height - 2 * 10 - 53.21 - 8          # padding, title bar, spacing
+    check('landscape settings menu fits under the title bar', (len(btns), need <= room), (7, True))
     app.stage.export_to_png(os.path.join(ROOT, 'tests', 'landscape_settings.png'))
     app.close_settings()
     app.stage.export_to_png(os.path.join(ROOT, 'tests', 'landscape_main.png'))
