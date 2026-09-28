@@ -533,8 +533,65 @@ def after_ratio(ini_path, ini_before, old_ratio):
     Clock.schedule_once(after_layout, 0.3)     # let the rebuilt root lay out
 
 
+def one_line_fits(lbl):
+    """(fits on one line, font size) for a laid-out label."""
+    lbl.texture_update()
+    return (len(lbl._label._cached_lines) <= 1 and lbl.texture_size[0] <= lbl.width + 1, lbl.font_size)
+
+
+def pump(n=4):
+    from kivy.base import EventLoop
+    for _ in range(n):
+        EventLoop.idle()
+
+
 def after_layout(dt):
     from dro_serial import DroSerial
+    # number entry boxes: one line, one font size, whatever is typed
+    app.open_param_edit('stop_decel')
+    ed = app._param_edit
+    pump()
+    lbl = ed.ids.value
+    first = one_line_fits(lbl)
+    for ch_ in '88888':
+        ed.add_digit(ch_)
+    pump()
+    check('edit box: longest ms entry one line, same size', one_line_fits(lbl), (True, first[1]))
+    check('edit box: no New value label',
+          any(str(getattr(w, 'text', '')).startswith('New value') for w in ed.walk()), False)
+    ed.unit = 'm/min'
+    ed.allow_dot = True
+    ed.clear()
+    for ch_ in '8888888':
+        ed.add_digit(ch_)
+    pump()
+    check('edit box: 8888888 m/min one line, same size', one_line_fits(lbl), (True, first[1]))
+    app.close_param_edit()
+    for units, typed in (('mm', '-888.888'), ('inch', '-88.8888')):
+        if app.units != units:
+            app.toggle_units()
+        app.open_set('X')
+        so = app._set_overlay
+        size0 = so.font_px
+        so.toggle_sign()
+        for ch_ in typed[1:]:
+            so.add_char(ch_)
+        pump()
+        check('SET %s: size fixed while typing' % units, (so.entry, so.font_px), (typed, size0))
+        app.close_set()
+    if app.units != 'mm':
+        app.toggle_units()
+    app.open_calc()
+    co = app._calc_overlay
+    size0 = co.font_px
+    for ch_ in '123456789012345678':
+        co.add_digit(ch_)
+    pump()
+    calc_lbl = [w for w in co.walk() if getattr(w, 'shorten_from', '') == 'left'][0]
+    calc_lbl.texture_update()
+    check('calc: size fixed, long entry one line',
+          (co.font_px, len(calc_lbl._label._cached_lines) <= 1), (size0, True))
+    app.close_calc()
     # tabular digits: the decimal point and every digit slot stay put no
     # matter which digits are showing
     card = app.root_layout.ids.dro.children[-1]          # X AxisCard

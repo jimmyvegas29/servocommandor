@@ -1207,20 +1207,28 @@ class SetOverlay(ModalTouch, FloatLayout):
     font_px = NumericProperty(85)
 
     ENTRY_MAX_W = 386   # label width inside the readout box, minus margin
+    # the widest entry each unit mode allows: the readout is sized for it
+    # once, so the digits never shrink while typing
+    WIDEST = {'mm': '-888.888', 'inch': '-88.8888'}
+    _fit_cache = {}
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.font_px = self._fit_font(self.WIDEST.get(App.get_running_app().units, '-888.888'))
 
     @classmethod
     def _fit_font(cls, text):
+        if text in cls._fit_cache:
+            return cls._fit_cache[text]
         fs = 85
         while fs > 30:
             lbl = CoreLabel(text=text, font_size=fs, font_name=FONT)
             lbl.refresh()
             if lbl.texture.width <= cls.ENTRY_MAX_W:
-                return fs
+                break
             fs -= 2
+        cls._fit_cache[text] = fs
         return fs
-
-    def on_entry(self, *args):
-        self.font_px = self._fit_font(self.entry if self.entry else '+0.000')
 
     def add_char(self, ch):
         e = self.entry
@@ -1273,26 +1281,16 @@ class CalcOverlay(ModalTouch, FloatLayout):
     its number.  The result can be pushed straight into an axis SET."""
     entry = StringProperty('')
     hist = StringProperty('')
-    font_px = NumericProperty(64)
+    # one size always: an expression too long for the display shows its
+    # right-hand end, '...' on the left (the history line has the rest)
+    font_px = NumericProperty(48)
 
     OPS = '+−×÷'
-    ENTRY_MAX_W = 432
     MAX_LEN = 40
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self._result = False   # entry holds the output of '='
-
-    def on_entry(self, *args):
-        text = self.entry if self.entry else '0'
-        fs = 64
-        while fs > 24:
-            lbl = CoreLabel(text=text, font_size=fs, font_name=FONT)
-            lbl.refresh()
-            if lbl.texture.width <= self.ENTRY_MAX_W:
-                break
-            fs -= 2
-        self.font_px = fs
 
     # -- helpers ------------------------------------------------------
     def _num_start(self):
