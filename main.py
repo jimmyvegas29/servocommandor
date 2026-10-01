@@ -41,6 +41,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
+import logcap
 import tapdata
 from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
                       TapOverlay, ThreadOverlay, fmt_num, surf_text, surf_unit, surf_value, sfm_from, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
@@ -961,6 +962,9 @@ class ServoCommanderApp(App):
         if diag_upload.pending_bundles():
             self.uploader.send_now()
         Clock.schedule_interval(self._shot_hook, 0.5)
+        if os.name != 'nt':
+            # the Kivy log is the panel's black box: keep it bounded and on the card
+            logcap.start()
 
         shot = os.environ.get('SERVOCOM_SHOT')
         if shot:
