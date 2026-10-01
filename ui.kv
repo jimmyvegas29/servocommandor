@@ -3690,8 +3690,13 @@
                 PadRow:
                     key: 'tap_confirm'
                     label: 'Stalls for bottom'
-                    hint: 'backs out after each, then stops'
+                    hint: 'in a row at the same depth'
                     value: str(root.confirm)
+                PadRow:
+                    key: 'tap_peck'
+                    label: 'Chip break'
+                    hint: 'turns back after a stall'
+                    value: root.peck
                 PadRow:
                     key: 'tap_rpm'
                     label: 'Speed'

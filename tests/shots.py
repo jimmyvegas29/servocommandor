@@ -209,9 +209,9 @@ def s_tap_running():
     if evt is not None:
         evt.cancel()
     app.tap_state = 'in'
-    app._tap_passes = 2
+    app._tap_pecks = 2
     app.tap_badge, app.tap_badge_color = 'TAPPING', [1, 1, 1, 1]
-    app.tap_big_label, app.tap_big_text = 'Depth  pass 2', app.css_len_text(7.4)
+    app.tap_big_label, app.tap_big_text = 'Depth  stall 2', app.css_len_text(7.4)
     app.tap_frac, app.tap_fill = 7.4 / 12.7, [0, 0.5, 1, 1]
     app.tap_marks = [(i / 10.0, 'minor') for i in range(1, 10)] + [(8.0 / 12.7, 'major')]
     app.tap_btn_text = 'STOP'

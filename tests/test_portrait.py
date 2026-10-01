@@ -829,7 +829,7 @@ def after_layout(dt):
     check('tools menu open', app._tools is not None, True)
     app.tools_pick('tap')
     check('Tap opens its setup, menu closes', (app._tools, app._tap is not None), (None, True))
-    check('Tap without a 3.15 node: ACTIVATE refused', (app.tap_activate(), app.tap_mode), (False, False))
+    check('Tap without a 3.16 node: ACTIVATE refused', (app.tap_activate(), app.tap_mode), (False, False))
     app.close_tap()
     app.open_tools()
     app.tools_pick('drill')
@@ -1245,7 +1245,7 @@ def taps_menu(dt):
     Clock.schedule_once(tap_flow, 0.2)
 
 
-# ---- tapping: the panel side, against a fake 3.15 node ---------------------
+# ---- tapping: the panel side, against a fake 3.16 node ---------------------
 import struct                                   # noqa: E402
 from dro_ble import DroBle                      # noqa: E402
 
@@ -1260,7 +1260,7 @@ class FakeNode(DroBle):
         self.tap = {'state': 0, 'reason': 0, 'counts': 0, 'peak': 0}
         self.switch = 'neutral'
         self.enabled = False
-        self.node_version = 'node 3.15'
+        self.node_version = 'node 3.16'
         self.connected = True
         self.device_name, self.rssi, self.frames, self.dropped = 'fake', None, 0, 0
         self.ota_state, self.ota_progress = '', 0.0
@@ -1417,73 +1417,74 @@ def tap_flow(dt):
     app.set_speed(600)
     check('pad speed ignored while tapping', app.command_speed, rpm_m_base)
 
-    # pass 1: stall at 6.3 turns -> back out, re-enter
+    # one START is one hole, run by the node: stall at 6.3 turns, chip
+    # break, stall there again -> bottom, backed right out
     app.tap_startstop()
     speed, tlim, target, margin, stall_ms, keep = last_T()
-    check('START sends the pass', (speed, tlim, target, margin, stall_ms, keep),
+    check('START sends the hole', (speed, tlim, target, margin, stall_ms, keep),
           (round(100 * app.ratio), auto_cap_now, round(10 * cpt), round(2 * cpt), 150, 0))
+    cmd = [c_ for c_ in fake.sent if c_[:1] == b'T'][-1]
+    pk, confirm, same = struct.unpack('<HBB', cmd[16:20])
+    check('... with the chip break: 2 turns back, 2 stalls, half a turn is "same"',
+          (len(cmd), round(pk * 64 / cpt, 1), confirm, round(same * 256 / cpt, 1)), (20, 2.0, 2, 0.5))
     node(1, 0, 3.0)
     check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
           ('in', 'TAPPING', app.css_len_text(3.0), 0.3))
+    node(5, 0, 6.0, 6.3)
+    check('stall: shown while it backs off', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_btn_text),
+          ('in', 'STALL', 'Depth  stall 1', 'STOP'))
+    check('stall point marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
+    node(5, 0, 4.5, 6.3)
+    check('still the same stall while it backs off', app._tap_pecks, 1)
+    node(1, 0, 5.5, 6.3)
+    check('going in again', (app.tap_badge, app.tap_big_label), ('TAPPING', 'Depth  stall 1'))
+    node(5, 0, 6.2, 6.3)
+    check('second stall counted', (app.tap_badge, app._tap_pecks), ('STALL', 2))
     node(2, 2, 5.0, 6.3)
     check('backing out', (app.tap_state, app.tap_badge), ('out', 'BACK OUT'))
     node(3, 2, -2.0, 6.3)
-    check('first stall: re-enter pending', (app.tap_state, app.tap_badge.startswith('RE-ENTER')), ('out', True))
-    app._tap_reenter_at = 0
-    app._tap_tick(0)
-    check('re-enter keeps the origin', last_T()[5], 1)
-    node(1, 0, 4.0)
-    node(3, 2, -2.0, 6.35)
-    check('second stall: done, backed out', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
-          ('done', 'DONE', 'Bottom', app.css_len_text(6.35)))
+    check('bottom found: done', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
+          ('done', 'DONE', 'Bottom', app.css_len_text(6.3)))
     check('bottom marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
-    passes_sent = len([c_ for c_ in fake.sent if c_[:1] == b'T'])
+    sent = len([c_ for c_ in fake.sent if c_[:1] == b'T'])
     app._tap_tick(0)
     app._tap_tick(0)
-    check('no more passes after it is done', len([c_ for c_ in fake.sent if c_[:1] == b'T']), passes_sent)
+    check('the panel never sends a second pass', len([c_ for c_ in fake.sent if c_[:1] == b'T']), sent)
 
-    # the second stall is deeper than the first: still two trips, then done
+    # chips on the way: stalls at different depths, then the depth is reached
+    app.save_speed_pad(tap_mode='depth')
     app.tap_startstop()
-    check('next START is a new hole', last_T()[5], 0)
+    check('next START is a new hole', (last_T()[5], app._tap_pecks), (0, 0))
+    node(1, 0, 3.0)
+    node(5, 0, 3.0, 3.0)
+    node(1, 0, 5.0, 3.0)
+    node(5, 0, 6.0, 6.0)
+    node(1, 0, 8.0, 6.0)
+    node(2, 1, 9.0, 10.0)
+    node(3, 1, -2.0, 10.0)
+    check('depth reached after two chip breaks', (app.tap_state, app.tap_big_label, app.tap_big_text, app._tap_pecks),
+          ('done', 'Depth', app.css_len_text(10.0), 2))
+    app.tap_startstop()
+    node(1, 0, 3.0)
+    node(2, 2, 3.0, 4.0)
+    node(3, 2, -2.0, 4.0)
+    check('depth mode, stalled out early: says short', (app.tap_big_label, app.tap_big_text),
+          ('Short of depth', app.css_len_text(4.0)))
+    app.tap_startstop()
+    node(1, 0, 3.0)
+    node(2, 10, 3.0, 7.0)
+    node(3, 10, -2.0, 7.0)
+    check('too many stalls: gave up', (app.tap_state, app.tap_big_label, app.tap_big_text),
+          ('done', 'Gave up at', app.css_len_text(7.0)))
+    app.save_speed_pad(tap_mode='bottom', tap_peck=3.0, tap_confirm=3)
+    app.tap_startstop()
+    cmd = [c_ for c_ in fake.sent if c_[:1] == b'T'][-1]
+    pk, confirm, same = struct.unpack('<HBB', cmd[16:20])
+    check('chip break and stall count follow the setup', (round(pk * 64 / cpt, 1), confirm), (3.0, 3))
     node(1, 0, 1.0)
-    node(3, 2, -2.0, 3.0)
-    check('first stall of 2: going back in', (app._tap_reenter_at is not None, app._tap_repeat), (True, 1))
-    app._tap_reenter_at = 0
-    app._tap_tick(0)
-    node(1, 0, 4.0)
-    node(3, 2, -2.0, 6.0)
-    check('deeper second stall: done at the deeper one', (app.tap_state, app._tap_passes, app.tap_big_text),
-          ('done', 2, app.css_len_text(6.0)))
-
-    # the second stall is SHALLOWER than the first (the 2026-09-30 test: it
-    # used to go round and round because only same-depth stalls counted)
-    app.tap_startstop()
-    node(1, 0, 8.0)
-    node(3, 2, -2.0, 8.0)
-    app._tap_reenter_at = 0
-    app._tap_tick(0)
-    node(1, 0, 4.0)
-    node(3, 2, -2.0, 4.1)
-    check('shallower second stall: done, deepest reported', (app.tap_state, app._tap_passes, app.tap_big_text),
-          ('done', 2, app.css_len_text(8.0)))
-
-    # three stalls asked for: three trips in, not more
-    app.save_speed_pad(tap_confirm=3)
-    app.tap_startstop()
-    for turns in (5.0, 2.0, 3.0):
-        node(1, 0, turns)
-        node(3, 2, -2.0, turns)
-        if app.tap_state != 'done':
-            app._tap_reenter_at = 0
-            app._tap_tick(0)
-    check('3 stalls for bottom: three trips', (app.tap_state, app._tap_passes, app.tap_big_text),
-          ('done', 3, app.css_len_text(5.0)))
-    app.save_speed_pad(tap_confirm=1)
-    app.tap_startstop()
-    node(1, 0, 5.0)
-    node(3, 2, -2.0, 5.0)
-    check('1 stall for bottom: one trip', (app.tap_state, app._tap_passes), ('done', 1))
-    app.save_speed_pad(tap_confirm=2)
+    node(2, 1, 9.0, 10.0)
+    node(3, 1, -2.0, 10.0)
+    app.save_speed_pad(tap_peck=2.0, tap_confirm=2)
 
     # STOP mid-hole, then REVERSE OUT
     app.tap_startstop()
@@ -1520,10 +1521,9 @@ def tap_flow(dt):
         return cl.texture.width
 
     app.tap_state = 'out'
-    app._tap_reenter_at = 1e12
-    app._tap_tick(0)
+    node(2, 9, 1.0)
     pump()
-    check('widest badge showing', app.tap_badge, 'RE-ENTER')
+    check('widest badge showing', app.tap_badge, 'BACK OUT')
     setup = card.ids.setup
     worst = ('', 0)
     for th in tapdata.BY_KEY.values():
@@ -1538,9 +1538,7 @@ def tap_flow(dt):
             worst = (app.tap_card_text(cfg), w)
     check('longest setup line fits beside the widest badge (%s)' % worst[0], worst[1] <= setup.width, True)
     check('badge and setup do not overlap', card.ids.badge.right <= setup.x, True)
-    app._tap_reenter_at = None
-    app.tap_state = 'done'
-    app._tap_tick(0)
+    node(3, 9, -2.0, 0.0)
     check('REVERSE fits its button', text_w('REVERSE', btns.ids.go) <= btns.ids.go.width - 16, True)
 
     # to a depth

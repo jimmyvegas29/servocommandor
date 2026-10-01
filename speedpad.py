@@ -418,6 +418,7 @@ class TapOverlay(ModalTouch, FloatLayout):
     thread_text = StringProperty('-')
     depth = StringProperty('-')
     confirm = NumericProperty(2)
+    peck = StringProperty('2 turns')
     rpm = NumericProperty(100)
     drag_text = StringProperty('-')
     drag_btn = StringProperty('MEASURE')
@@ -465,6 +466,9 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_margin(self, v):
         self._save(tap_margin=float(v))
 
+    def set_peck(self, v):
+        self._save(tap_peck=float(v))
+
     def set_hand(self, hand):
         self._save(tap_hand=hand)
 
@@ -493,6 +497,7 @@ class TapOverlay(ModalTouch, FloatLayout):
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
         self.confirm, self.rpm = c['confirm'], c['rpm']
         self.margin = fmt_num(c['margin'], 1) + ' turns'
+        self.peck = fmt_num(c['peck'], 1) + ' turns'
         if app.tap_drag_busy:
             self.drag_text, self.drag_btn = 'measuring...', 'CANCEL'
         else:

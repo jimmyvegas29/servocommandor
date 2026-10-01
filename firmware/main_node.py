@@ -19,7 +19,8 @@ BLE service 5e7a0001-... :
   DATA  notify  '<IiiIhhHBHBBii' seq, x, z, t_ms, rpm_0p1, torque, alarm, flags,
                 avg_load (0x0018 average load ratio %, the drive's motor
                 heating model), then the tap cycle: state (0 idle, 1 in,
-                2 out, 3 done, 4 halted), reason (TapCycle.R_*), counts
+                2 out, 3 done, 4 halted, 5 backing off to break a chip),
+                reason (TapCycle.R_*), counts
                 (motor encoder counts in from the origin), peak (deepest
                 point of the last in-leg)
                 flags: b0 drive online, b1 switch FWD, b2 switch REV,
@@ -43,6 +44,12 @@ BLE service 5e7a0001-... :
                 b'T' + '<hHIIHB' tap pass: signed motor rpm going in, torque
                       cap %, target counts, back-out margin counts, stall
                       ms, flags (b0 keep the origin of the last pass).
+                      Optionally 4 more bytes '<HBB' (3.16): chip-break
+                      back-off in units of 64 counts, stalls in a row at
+                      the same depth that mean the bottom, "same depth"
+                      tolerance in units of 256 counts.  With a back-off
+                      the node handles stalls itself: it backs off, goes
+                      in again, and only backs right out at the bottom.
                       Refused unless the lever is OFF, the drive is online
                       and disabled.  b't' stops a pass (drive off, tap left
                       where it is); b'U' backs a stopped tap out.  While a
@@ -89,7 +96,7 @@ from machine import Pin, UART, WDT, RTC, unique_id, reset, reset_cause
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.15'         # shown on the panel; bump on every change
+VERSION = 'node 3.16'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -501,7 +508,10 @@ class TapCycle:
     Pr065/066 (the drive enforces that cap itself, instantly).  The pass
     goes until the target depth (in motor encoder counts from the origin)
     or until the spindle stops advancing for stall_ms (the tap bottomed or
-    jammed at the cap).  OUT: it reverses until it is margin counts back
+    jammed at the cap).  With a chip-break back-off (peck) a stall is not
+    the end: PECK backs the tap off that far to break the chip and IN goes
+    again; `confirm` stalls in a row within `same` counts of each other
+    are the bottom.  OUT: it reverses until it is margin counts back
     past the origin, then disables.  A stall on the way out (tap jammed)
     halts with the drive disabled.  Every exit path disables the drive,
     puts the torque limit back to what it was and restores the panel's
@@ -518,9 +528,11 @@ class TapCycle:
     write(addr, value) -> bool, set_speed(signed) -> bool,
     set_enabled(bool) -> bool, restore_speed(), now_ms(), log(*args)."""
 
-    IDLE, IN, OUT, DONE, HALTED = 0, 1, 2, 3, 4
+    IDLE, IN, OUT, DONE, HALTED, PECK = 0, 1, 2, 3, 4, 5
     # why a pass ended
-    R_NONE, R_DEPTH, R_STALL, R_PANEL, R_LINK, R_LEVER, R_DRIVE, R_COMM, R_JAM, R_OUT = range(10)
+    (R_NONE, R_DEPTH, R_STALL, R_PANEL, R_LINK, R_LEVER, R_DRIVE, R_COMM, R_JAM, R_OUT,
+     R_GIVEUP) = range(11)
+    MAX_STALLS = 25          # stalls in one hole before it gives up and backs out
     SPINUP_MS = 400          # no stall check while the spindle comes up to speed
     MOVE_COUNTS = 60         # less than this in stall_ms counts as not moving
     SIGN_COUNTS = 100        # motion needed to learn which way is "in"
@@ -542,10 +554,13 @@ class TapCycle:
 
     @property
     def active(self):
-        return self.state in (self.IN, self.OUT)
+        return self.state in (self.IN, self.OUT, self.PECK)
 
-    def start(self, speed, tlim, target, margin, stall_ms, keep):
-        """Begin a pass.  The caller has checked lever / drive / link."""
+    def start(self, speed, tlim, target, margin, stall_ms, keep, peck=0, confirm=1, same=0):
+        """Begin a pass.  The caller has checked lever / drive / link.
+        peck: counts to back off after a stall before going in again (0: a
+        stall backs straight out).  confirm: stalls in a row within `same`
+        counts of each other that mean the bottom."""
         limits = self.io.read_limits()
         if limits is None:
             self.io.log('TAP refused: torque limits unreadable')
@@ -573,6 +588,12 @@ class TapCycle:
         self.target = target
         self.margin = margin
         self.stall_ms = stall_ms
+        self.peck = peck
+        self.confirm = max(1, confirm)
+        self.same = same
+        self.stalls = 0              # stalls in this hole
+        self._same_n = 0             # ... in a row at the same depth
+        self._stall_at = None
         self.peak = 0
         self.reason = self.R_NONE
         self._fails = 0
@@ -618,14 +639,34 @@ class TapCycle:
 
     def link_lost(self):
         # an unwatched pass must not keep going in: back out and stop
-        if self.state == self.IN:
+        if self.state in (self.IN, self.PECK):
             self._to_out(self.R_LINK)
 
     def _to_out(self, reason):
         self.reason = reason
-        self.peak = self.counts
+        self.peak = max(self.peak, self.counts)
         self._begin(self.OUT, -self.speed)
         self.io.log('TAP out, reason', reason, 'at', self.counts)
+
+    def _stalled_in(self):
+        """The tap stopped at the torque cap on the way in: chips, or the
+        bottom.  Back off to break the chip and try again; the same depth
+        `confirm` times in a row is the bottom."""
+        self.peak = max(self.peak, self.counts)
+        self.stalls += 1
+        if self._stall_at is not None and abs(self.counts - self._stall_at) <= self.same:
+            self._same_n += 1
+        else:
+            self._same_n = 1
+        self._stall_at = self.counts
+        if self.peck <= 0 or self._same_n >= self.confirm:
+            self._to_out(self.R_STALL)
+        elif self.stalls >= self.MAX_STALLS:
+            self._to_out(self.R_GIVEUP)
+        else:
+            self._peck_to = self.counts - self.peck
+            self._begin(self.PECK, -self.speed)
+            self.io.log('TAP stall', self.stalls, 'at', self.counts, 'back off to', self._peck_to)
 
     def _stop(self, final, reason):
         self.io.set_enabled(False)
@@ -693,7 +734,12 @@ class TapCycle:
             if self.counts >= self.target:
                 self._to_out(self.R_DEPTH)
             elif stalled:
-                self._to_out(self.R_STALL)
+                self._stalled_in()
+        elif self.state == self.PECK:
+            if self.counts <= self._peck_to:
+                self._begin(self.IN, self.speed)         # chip broken: in again
+            elif stalled:
+                self._stop(self.HALTED, self.R_JAM)
         else:
             if self.counts <= -self.margin:
                 self._stop(self.DONE, self.R_NONE)
@@ -810,7 +856,12 @@ def handle_cmd(data):
                   and 50 <= stall_ms <= 2000):
             print('CMD T refused: parameters', speed, tlim, target, stall_ms)
         else:
-            ok = tap.start(speed, tlim, target, margin, stall_ms, bool(fl & 1))
+            peck, confirm, same = 0, 1, 0
+            if len(data) >= 20:
+                pk, confirm, sm = struct.unpack('<HBB', data[16:20])
+                peck, same = pk * 64, sm * 256
+            ok = tap.start(speed, tlim, target, margin, stall_ms, bool(fl & 1), peck,
+                           max(1, min(10, confirm)), same)
     elif data[:1] == b't':
         tap.abort(TapCycle.R_PANEL)
         ok = True

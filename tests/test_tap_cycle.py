@@ -32,7 +32,7 @@ class SimDrive:
     CPR = 10000
 
     def __init__(self, bottom=None, counts_dir=1, swap=False, start=123456789,
-                 jam_out=False, fail_reads=0, alarm_at=None):
+                 jam_out=False, fail_reads=0, alarm_at=None, chips=()):
         self.pos = start                 # absolute motor counts
         self.origin = start
         self.speed = 0                   # commanded motor rpm (signed, + = in)
@@ -40,6 +40,8 @@ class SimDrive:
         self.regs = {65: 300, 66: -300}
         self.writes = []
         self.bottom = bottom             # counts in from the origin where the tap bottoms
+        self.chips = list(chips)         # depths where packed chips stop it until it backs off
+        self.turns_in = []               # depth at every in -> back reversal
         self.counts_dir = counts_dir
         self.swap = swap
         self.jam_out = jam_out
@@ -76,6 +78,8 @@ class SimDrive:
         return True
 
     def set_speed(self, speed):
+        if self.speed > 0 and speed < 0:
+            self.turns_in.append(self.depth())
         self.speed = speed
         return True
 
@@ -103,7 +107,16 @@ class SimDrive:
         step = round(self.speed * self.CPR / 60000.0 * ms)       # counts this slice
         new_depth = self.depth() + step
         cap = self.regs[65]
-        if self.speed > 0 and self.bottom is not None and new_depth >= self.bottom:
+        if self.speed > 0 and self.chips and new_depth >= self.chips[0]:
+            new_depth = self.chips[0]                             # chips packed: stall at the cap
+            self.torque = cap
+            self.hit_chip = True
+        elif (self.speed < 0 and self.chips and getattr(self, 'hit_chip', False)
+              and new_depth <= self.chips[0] - self.CPR):
+            self.chips.pop(0)                                     # backed off a turn: that chip is broken
+            self.hit_chip = False
+            self.torque = -10
+        elif self.speed > 0 and self.bottom is not None and new_depth >= self.bottom:
             new_depth = self.bottom                               # bottomed: stall at the cap
             self.torque = cap
         elif self.speed < 0 and self.jam_out:
@@ -249,5 +262,89 @@ sim.read_limits = lambda: None
 cyc = TapCycle(sim)
 check('limits unreadable: refused, nothing enabled', (cyc.start(165, 30, 4 * turn, 0, 150, False), sim.enabled,
                                                      sim.writes), (False, False, []))
+
+# ---------------------------------------------------------------- chip break (peck), node 3.16
+PECK, SAME = 2 * turn, turn // 2
+
+# 13. blind hole: stall at the bottom, back off 2 turns, stall there again -> bottom, right out
+sim = SimDrive(bottom=int(6.3 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+states = set()
+while cyc.active and sim.t < 60000:
+    cyc.step()
+    states.add(cyc.state)
+check('peck: bottom found, backed right out', (cyc.state, cyc.reason, round(sim.depth() / turn)),
+      (TapCycle.DONE, TapCycle.R_STALL, -2))
+check('peck: two stalls, both at the bottom', (cyc.stalls, round(cyc.peak / turn, 2)), (2, 6.3))
+check('peck: the PECK state was reported', TapCycle.PECK in states, True)
+check('peck: backed off about 2 turns, not out of the hole',
+      [round(d / turn, 1) for d in sim.turns_in], [6.3, 6.3])
+low = min(round((sim.turns_in[0] - PECK) / turn, 1), 99)
+check('peck: lowest point between stalls is 2 turns back', low, 4.3)
+
+# 14. chips half way: a back-off clears them, it carries on to the depth
+sim = SimDrive(chips=[int(4 * turn)])
+cyc = TapCycle(sim)
+cyc.start(165, 30, 10 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+run(cyc, sim)
+check('chip then depth: one stall, depth reached', (cyc.state, cyc.reason, cyc.stalls, round(cyc.peak / turn, 1)),
+      (TapCycle.DONE, TapCycle.R_DEPTH, 1, 10.0))
+
+# 15. chips twice at different depths, then the real bottom: only the bottom ends it
+sim = SimDrive(chips=[int(3 * turn), int(5 * turn)], bottom=int(8 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+run(cyc, sim)
+check('chips at 3 and 5, bottom at 8', (cyc.reason, cyc.stalls, round(cyc.peak / turn, 1)),
+      (TapCycle.R_STALL, 4, 8.0))
+check('every reversal was at a stall point', [round(d / turn, 1) for d in sim.turns_in], [3.0, 5.0, 8.0, 8.0])
+
+# 16. three stalls asked for
+sim = SimDrive(bottom=int(5 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 3, SAME)
+run(cyc, sim)
+check('confirm 3: three stalls at the bottom', (cyc.reason, cyc.stalls), (TapCycle.R_STALL, 3))
+
+# 17. it never pecks forever
+sim = SimDrive(chips=[int((2 + 0.8 * i) * turn) for i in range(60)])
+cyc = TapCycle(sim)
+cyc.start(165, 30, 200 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+run(cyc, sim, limit_ms=600000)
+check('gives up after MAX_STALLS and backs out', (cyc.state, cyc.reason, cyc.stalls, sim.enabled),
+      (TapCycle.DONE, TapCycle.R_GIVEUP, TapCycle.MAX_STALLS, False))
+
+# 18. panel stop / link lost / jam while backing off
+sim = SimDrive(bottom=int(6 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+while cyc.state != TapCycle.PECK:
+    cyc.step()
+cyc.link_lost()
+run(cyc, sim)
+check('link lost while backing off: backs right out', (cyc.state, cyc.reason, round(sim.depth() / turn)),
+      (TapCycle.DONE, TapCycle.R_LINK, -2))
+sim = SimDrive(bottom=int(6 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+while cyc.state != TapCycle.PECK:
+    cyc.step()
+cyc.abort(TapCycle.R_PANEL)
+check('STOP while backing off: halted, drive off', (cyc.state, cyc.reason, sim.enabled),
+      (TapCycle.HALTED, TapCycle.R_PANEL, False))
+sim = SimDrive(bottom=int(6 * turn), jam_out=True)
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False, PECK, 2, SAME)
+run(cyc, sim)
+check('jammed while backing off: halted', (cyc.state, cyc.reason, sim.enabled),
+      (TapCycle.HALTED, TapCycle.R_JAM, False))
+
+# 19. no back-off given (an older panel): a stall still backs straight out
+sim = SimDrive(bottom=int(6 * turn))
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False)
+run(cyc, sim)
+check('no peck: first stall backs right out', (cyc.reason, cyc.stalls, len(sim.turns_in)), (TapCycle.R_STALL, 1, 1))
 
 print('RESULT:', 'ALL PASS' if not fails else fails)
