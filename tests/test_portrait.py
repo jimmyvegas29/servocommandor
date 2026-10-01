@@ -1426,7 +1426,7 @@ def tap_flow(dt):
     check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
           ('in', 'TAPPING', app.css_len_text(3.0), 0.3))
     node(2, 2, 5.0, 6.3)
-    check('backing out', (app.tap_state, app.tap_badge), ('out', 'BACKING OUT'))
+    check('backing out', (app.tap_state, app.tap_badge), ('out', 'BACK OUT'))
     node(3, 2, -2.0, 6.3)
     check('first stall: re-enter pending', (app.tap_state, app.tap_badge.startswith('RE-ENTER')), ('out', True))
     app._tap_reenter_at = 0
@@ -1434,26 +1434,56 @@ def tap_flow(dt):
     check('re-enter keeps the origin', last_T()[5], 1)
     node(1, 0, 4.0)
     node(3, 2, -2.0, 6.35)
-    check('same depth twice: bottom found', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
-          ('done', 'DONE', 'Bottom', app.css_len_text(6.3)))
+    check('second stall: done, backed out', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
+          ('done', 'DONE', 'Bottom', app.css_len_text(6.35)))
     check('bottom marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
+    passes_sent = len([c_ for c_ in fake.sent if c_[:1] == b'T'])
+    app._tap_tick(0)
+    app._tap_tick(0)
+    check('no more passes after it is done', len([c_ for c_ in fake.sent if c_[:1] == b'T']), passes_sent)
 
-    # a deeper stall means the first one was chips
+    # the second stall is deeper than the first: still two trips, then done
     app.tap_startstop()
     check('next START is a new hole', last_T()[5], 0)
     node(1, 0, 1.0)
     node(3, 2, -2.0, 3.0)
+    check('first stall of 2: going back in', (app._tap_reenter_at is not None, app._tap_repeat), (True, 1))
     app._tap_reenter_at = 0
     app._tap_tick(0)
     node(1, 0, 4.0)
     node(3, 2, -2.0, 6.0)
-    check('deeper stall: not the bottom yet', (app.tap_state, app._tap_repeat), ('in', 1))
+    check('deeper second stall: done at the deeper one', (app.tap_state, app._tap_passes, app.tap_big_text),
+          ('done', 2, app.css_len_text(6.0)))
+
+    # the second stall is SHALLOWER than the first (the 2026-09-30 test: it
+    # used to go round and round because only same-depth stalls counted)
+    app.tap_startstop()
+    node(1, 0, 8.0)
+    node(3, 2, -2.0, 8.0)
     app._tap_reenter_at = 0
     app._tap_tick(0)
     node(1, 0, 4.0)
-    node(3, 2, -2.0, 6.1)
-    check('then same depth twice: bottom at the deeper one', (app.tap_state, app.tap_big_text),
-          ('done', app.css_len_text(6.0)))
+    node(3, 2, -2.0, 4.1)
+    check('shallower second stall: done, deepest reported', (app.tap_state, app._tap_passes, app.tap_big_text),
+          ('done', 2, app.css_len_text(8.0)))
+
+    # three stalls asked for: three trips in, not more
+    app.save_speed_pad(tap_confirm=3)
+    app.tap_startstop()
+    for turns in (5.0, 2.0, 3.0):
+        node(1, 0, turns)
+        node(3, 2, -2.0, turns)
+        if app.tap_state != 'done':
+            app._tap_reenter_at = 0
+            app._tap_tick(0)
+    check('3 stalls for bottom: three trips', (app.tap_state, app._tap_passes, app.tap_big_text),
+          ('done', 3, app.css_len_text(5.0)))
+    app.save_speed_pad(tap_confirm=1)
+    app.tap_startstop()
+    node(1, 0, 5.0)
+    node(3, 2, -2.0, 5.0)
+    check('1 stall for bottom: one trip', (app.tap_state, app._tap_passes), ('done', 1))
+    app.save_speed_pad(tap_confirm=2)
 
     # STOP mid-hole, then REVERSE OUT
     app.tap_startstop()
@@ -1463,17 +1493,55 @@ def tap_flow(dt):
     check('STOP sends t', fake.sent[-1], b't')
     node(4, 3, 4.0)
     check('stopped: tap left in the hole', (app.tap_state, app.tap_badge, app.tap_btn_text, app.tap_big_label),
-          ('stopped', 'STOPPED', 'REVERSE OUT', 'Stopped'))
+          ('stopped', 'STOPPED', 'REVERSE', 'Stopped'))
     app.tap_exit()
     check('EXIT allowed when stopped', app.tap_mode, False)
     app.tap_activate()
-    app.tap_state = 'stopped'
-    app._tap_seen_active = True
-    app.tap_startstop()
-    check('REVERSE OUT sends U', fake.sent[-1], b'U')
+    app.tap_startstop()                      # START
+    node(1, 0, 4.0)
+    app.tap_startstop()                      # STOP
+    node(4, 3, 4.0)
+    app.tap_startstop()                      # REVERSE
+    check('REVERSE sends U', fake.sent[-1], b'U')
     node(2, 9, 1.0)
-    node(3, 9, -2.0, 4.0)
-    check('backed out', (app.tap_state, app.tap_big_label), ('done', 'Backed out from'))
+    node(3, 9, -2.0, 0.0)
+    check('backed out, says from how deep', (app.tap_state, app.tap_big_label, app.tap_big_text),
+          ('done', 'Backed out from', app.css_len_text(4.0)))
+
+    # the card's top line and the button: one line, nothing cut off, for
+    # every thread in the table beside the widest badge
+    from kivy.core.text import Label as CoreLabel
+    card = [w for w in app.root_layout.walk() if type(w).__name__ == 'TapCard'][0]
+    btns = [w for w in app.root_layout.walk() if type(w).__name__ == 'TapButtons'][0]
+
+    def text_w(text, lbl):
+        cl = CoreLabel(text=text, font_size=lbl.font_size, font_name=lbl.font_name)
+        cl.refresh()
+        return cl.texture.width
+
+    app.tap_state = 'out'
+    app._tap_reenter_at = 1e12
+    app._tap_tick(0)
+    pump()
+    check('widest badge showing', app.tap_badge, 'RE-ENTER')
+    setup = card.ids.setup
+    worst = ('', 0)
+    for th in tapdata.BY_KEY.values():
+        cfg = dict(app.tap_config(), thread=th, rpm=999, bg=True)
+        w = text_w(app.tap_card_text(cfg), setup)
+        if w > worst[1]:
+            worst = (app.tap_card_text(cfg), w)
+    for unit, pitch in (('tpi', 11.5), ('mm', 1.75)):
+        cfg = dict(app.tap_config(), thread=None, unit=unit, pitch=pitch, rpm=999, bg=True)
+        w = text_w(app.tap_card_text(cfg), setup)
+        if w > worst[1]:
+            worst = (app.tap_card_text(cfg), w)
+    check('longest setup line fits beside the widest badge (%s)' % worst[0], worst[1] <= setup.width, True)
+    check('badge and setup do not overlap', card.ids.badge.right <= setup.x, True)
+    app._tap_reenter_at = None
+    app.tap_state = 'done'
+    app._tap_tick(0)
+    check('REVERSE fits its button', text_w('REVERSE', btns.ids.go) <= btns.ids.go.width - 16, True)
 
     # to a depth
     app.save_speed_pad(tap_mode='depth', tap_depth_mm=5.0)

@@ -406,18 +406,22 @@
     BoxLayout:
         size_hint_y: None
         height: 26
+        spacing: 6
         SLabel:
+            # the badge takes only its own width; the setup line gets the rest
+            id: badge
             text: app.css_badge
             color: app.css_badge_color
             font_size: '17sp'
-            text_size: self.size
-            halign: 'left'
-            valign: 'middle'
+            size_hint_x: None
+            width: self.texture_size[0]
         SLabel:
+            id: setup
             text: app.css_setup_text
             color: (0.65, 0.65, 0.65, 1)
             font_size: '13sp'
             text_size: self.size
+            max_lines: 1
             halign: 'right'
             valign: 'middle'
     Widget:
@@ -500,18 +504,22 @@
     BoxLayout:
         size_hint_y: None
         height: 26
+        spacing: 6
         SLabel:
+            # the badge takes only its own width; the setup line gets the rest
+            id: badge
             text: app.tap_badge
             color: app.tap_badge_color
             font_size: '17sp'
-            text_size: self.size
-            halign: 'left'
-            valign: 'middle'
+            size_hint_x: None
+            width: self.texture_size[0]
         SLabel:
+            id: setup
             text: app.tap_setup_text
             color: (0.65, 0.65, 0.65, 1)
-            font_size: '13sp'
+            font_size: '12sp'
             text_size: self.size
+            max_lines: 1
             halign: 'right'
             valign: 'middle'
     Widget:
@@ -573,6 +581,7 @@
             color: (1, 1, 1, 1) if app.tap_state not in ('in', 'out') else (0.35, 0.35, 0.35, 1)
             on_press: app.tap_exit()
     SButton:
+        id: go
         text: app.tap_btn_text
         font_size: root.big
         color: ((0.4, 0.85, 0.5, 1) if app.tap_can_start else (0.35, 0.35, 0.35, 1)) if app.tap_state in ('ready', 'done') else ((0.95, 0.75, 0.3, 1) if app.tap_state == 'stopped' else (1, 0.45, 0.4, 1))
@@ -3681,7 +3690,7 @@
                 PadRow:
                     key: 'tap_confirm'
                     label: 'Stalls for bottom'
-                    hint: 'same-depth stalls in a row'
+                    hint: 'backs out after each, then stops'
                     value: str(root.confirm)
                 PadRow:
                     key: 'tap_rpm'

@@ -2477,8 +2477,9 @@ class ServoCommanderApp(App):
     # torque cap Pr065/066 is lowered for the pass, the node taps in until the
     # depth or until the spindle stalls at the cap, then backs out past the
     # start.  The panel sets it up, shows it, and decides about re-entering:
-    # a stall at the same depth tap_confirm times in a row is the bottom; a
-    # deeper stall means the last one was chips.
+    # one START is one hole.  Reaching the depth ends it.  A stall sends the
+    # tap back in (the first may be chips); the tap_confirm-th stall ends it,
+    # wherever it was - so a hole is never more than tap_confirm trips in.
     tap_mode = BooleanProperty(False)
     tap_state = StringProperty('')          # '', 'ready', 'in', 'out', 'done', 'stopped'
     tap_badge = StringProperty('')
@@ -2495,8 +2496,6 @@ class ServoCommanderApp(App):
     tap_can_start = BooleanProperty(False)
     TAP_COUNTS_PER_REV = 10000      # XP200 encoder counts per motor rev: verify at the first test
     TAP_STALL_MS = 150
-    TAP_SAME_TURNS = 0.3            # stalls this close (spindle turns) are "the same depth"
-    TAP_MAX_PASSES = 12
     TAP_REENTER_S = 0.6
     TAP_NODE = (3, 15)
     TAP_MAX_MOTOR_RPM = 1000        # the node's cap
@@ -2562,6 +2561,18 @@ class ServoCommanderApp(App):
         pct = (drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(),
                                                    ratio or self.ratio)
         return int(round(min(pct, self.TAP_CAP_MAX)))
+
+    def tap_card_text(self, c):
+        """Thread, speed and gear for the panel card's top line: the short
+        form (1/4-20, M12x1.75, 20 TPI) so it fits beside any badge."""
+        t = c['thread']
+        if t is not None:
+            name = t['label'] if t['unit'] == 'tpi' else t['key']
+        elif c['unit'] == 'tpi':
+            name = '%s TPI' % fmt_num(c['pitch'], 1)
+        else:
+            name = '%s mm' % fmt_num(c['pitch'], 2)
+        return '%s  %d rpm%s' % (name, c['rpm'], '  BG' if c['bg'] else '')
 
     def tap_pitch_text(self, c):
         if c['thread'] is not None:
@@ -2650,6 +2661,8 @@ class ServoCommanderApp(App):
             self._tap_reenter_at = None
             self._tap_ref = None
             self._tap_passes = 0
+            self._tap_repeat = 0
+            self._tap_deepest = 0
             self._tap_evt = Clock.schedule_interval(self._tap_tick, 0.1)
             log.info('TAP activated: %s', self.tap_config())
         self.close_tap()
@@ -2685,6 +2698,7 @@ class ServoCommanderApp(App):
         self._tap_ref = None
         self._tap_repeat = 0
         self._tap_passes = 0
+        self._tap_deepest = 0
         self._tap_result = ('', '')
         return self._tap_send_pass(False)
 
@@ -2734,28 +2748,26 @@ class ServoCommanderApp(App):
 
     def _tap_pass_done(self, node, c):
         reason, peak = node['reason'], node['peak']
+        deepest = self._tap_deepest = max(self._tap_deepest, peak)
         if reason == self.R_STALL:
-            tol = self.TAP_SAME_TURNS * self.tap_counts_per_turn(c)
-            ref = self._tap_ref
-            if ref is None or peak > ref + tol:
-                self._tap_ref, self._tap_repeat = peak, 1         # deeper: the last one was chips
-            elif abs(peak - ref) <= tol:
-                self._tap_repeat += 1
+            # every stall counts, deeper or shallower than the last: the
+            # node has already backed the tap out past the start
+            self._tap_repeat += 1
+            self._tap_ref = deepest
             if self._tap_repeat >= c['confirm']:
-                self._tap_finish('Bottom' if c['mode'] == 'bottom' else 'Short of depth', self._tap_ref, c)
-            elif self._tap_passes >= self.TAP_MAX_PASSES:
-                self._tap_finish('Gave up at', self._tap_ref, c)
+                log.info('TAP stall %d of %d at %d counts: done', self._tap_repeat, c['confirm'], peak)
+                self._tap_finish('Bottom' if c['mode'] == 'bottom' else 'Short of depth', deepest, c)
             else:
                 self._tap_reenter_at = time.monotonic() + self.TAP_REENTER_S
-                log.info('TAP stall at %d counts (%d in a row): re-entering', peak, self._tap_repeat)
+                log.info('TAP stall %d of %d at %d counts: going back in', self._tap_repeat, c['confirm'], peak)
         elif reason == self.R_DEPTH:
             self._tap_finish('Depth' if c['mode'] == 'depth' else 'Max depth, no bottom', peak, c)
         elif reason == self.R_LINK:
-            self._tap_finish('Link lost, backed out at', peak, c)
+            self._tap_finish('Link lost, backed out at', deepest, c)
         elif reason == self.R_OUT:
-            self._tap_finish('Backed out from', peak, c)
+            self._tap_finish('Backed out from', deepest, c)
         else:
-            self._tap_finish(self.TAP_HALT_TEXT.get(reason, 'Ended'), peak, c)
+            self._tap_finish(self.TAP_HALT_TEXT.get(reason, 'Ended'), deepest, c)
 
     def _tap_tick(self, dt):
         if not self.tap_mode:
@@ -2772,6 +2784,8 @@ class ServoCommanderApp(App):
             elif ns in (self.T_IN, self.T_OUT):
                 self._tap_seen_active = True
                 self.tap_state = 'in' if ns == self.T_IN else 'out'
+                if ns == self.T_IN:
+                    self._tap_deepest = max(self._tap_deepest, node['counts'])
             elif ns == self.T_DONE and self._tap_seen_active:
                 self._tap_pass_done(node, c)
             elif ns == self.T_HALTED and self._tap_seen_active:
@@ -2788,7 +2802,7 @@ class ServoCommanderApp(App):
     def _tap_show(self, c, node):
         st = self.tap_state
         green, amber, blue = [0.4, 0.85, 0.5, 1], [0.95, 0.75, 0.3, 1], [0, 0.5, 1, 1]
-        self.tap_setup_text = '%s  %d rpm%s' % (self.tap_pitch_text(c), c['rpm'], '  BG' if c['bg'] else '')
+        self.tap_setup_text = self.tap_card_text(c)
         target = c['depth_mm']
         now_mm = max(0.0, self.tap_counts_to_mm(node['counts'], c)) if st != 'ready' else 0.0
         marks = [(i / 10.0, 'minor') for i in range(1, 10)]
@@ -2800,7 +2814,7 @@ class ServoCommanderApp(App):
         self.tap_left_text = '0'
         self.tap_right_text = (('max ' if c['mode'] == 'bottom' else '') + self.css_len_text(target)
                                if target > 0 else '-')
-        self.tap_btn_text = {'in': 'STOP', 'out': 'STOP', 'stopped': 'REVERSE OUT'}.get(st, 'START')
+        self.tap_btn_text = {'in': 'STOP', 'out': 'STOP', 'stopped': 'REVERSE'}.get(st, 'START')
         blocked = self.tap_problem(c)
         if not blocked and st in ('ready', 'done'):
             if not self._tap_lever_off():
@@ -2815,7 +2829,7 @@ class ServoCommanderApp(App):
         elif st in ('in', 'out'):
             passes = getattr(self, '_tap_passes', 1)
             self.tap_badge = ('RE-ENTER' if self._tap_reenter_at is not None
-                              else ('TAPPING' if st == 'in' else 'BACKING OUT'))
+                              else ('TAPPING' if st == 'in' else 'BACK OUT'))
             self.tap_badge_color = [1, 1, 1, 1]
             self.tap_big_label = 'Depth' + ('  pass %d' % passes if passes > 1 else '')
             self.tap_big_text = self.css_len_text(now_mm)
@@ -3061,7 +3075,7 @@ class ServoCommanderApp(App):
                                  99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
         elif key == 'tap_confirm':
             o = self._tap
-            ov.setup_generic('Stalls for bottom', 'Same-depth stalls in a row that mean the bottom', '',
+            ov.setup_generic('Stalls for bottom', 'It backs out after each stall; after this many it stops', '',
                              1, 5, str(o.confirm), o.set_confirm, 'SET')
         elif key == 'tap_rpm':
             o = self._tap
