@@ -15,6 +15,20 @@ from logging.handlers import RotatingFileHandler
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
+
+class DurableFileHandler(RotatingFileHandler):
+    """Warnings and errors are written through to the card at once: the
+    record of a problem must survive the power being cut right after it."""
+
+    def emit(self, record):
+        super().emit(record)
+        if record.levelno >= logging.WARNING:
+            try:
+                self.flush()
+                os.fsync(self.stream.fileno())
+            except (OSError, ValueError, AttributeError):
+                pass
+
 log = logging.getLogger('servocom')
 
 
@@ -38,7 +52,7 @@ def _setup():
     fmt = logging.Formatter(
         '%(asctime)s.%(msecs)03d %(levelname)-8s [%(threadName)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S')
-    file_handler = RotatingFileHandler(
+    file_handler = DurableFileHandler(
         os.path.join(LOG_DIR, 'servocom.log'),
         maxBytes=1_000_000, backupCount=5)
     file_handler.setFormatter(fmt)
@@ -49,6 +63,20 @@ def _setup():
     sys.excepthook = _excepthook
     threading.excepthook = _thread_excepthook
     log.info('==================== Servo Commandor starting ====================')
+
+
+def sync_now():
+    """Write the app log, and everything else pending, through to the card
+    (in the background: a full sync can take a moment)."""
+    for h in log.handlers:
+        try:
+            h.flush()
+            if hasattr(h, 'stream') and hasattr(h.stream, 'fileno') and isinstance(h, RotatingFileHandler):
+                os.fsync(h.stream.fileno())
+        except (OSError, ValueError):
+            pass
+    if hasattr(os, 'sync'):
+        threading.Thread(target=os.sync, name='sync', daemon=True).start()
 
 
 _setup()

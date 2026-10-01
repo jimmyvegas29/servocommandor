@@ -22,6 +22,7 @@ os.environ['KIVY_METRICS_DENSITY'] = '1'
 from kivy.config import Config
 Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
+import applog
 from applog import log
 from kivy.app import App
 from kivy.factory import Factory
@@ -1619,6 +1620,13 @@ class ServoCommanderApp(App):
             self.upload_ready = ready
         self.uploader.tick()
 
+    def _node_events_soon(self, delay=2.5):
+        """Fetch the node's own event log a moment from now (it writes its
+        line a little after the panel notices a change)."""
+        ask = getattr(self.dro, 'request_node_events', None)
+        if ask is not None:
+            Clock.schedule_once(lambda dt: ask(), delay)
+
     def save_dro_capture(self):
         ring = getattr(self.dro, 'ring', None)
         if not ring:
@@ -1636,6 +1644,10 @@ class ServoCommanderApp(App):
                 fh.write('# raw lines: time seq x z (counts) rpm(0.1) torque%% alarm flags dropped rawhex\n')
                 fh.write('# UI lines: what the readouts showed for the counts just above\n')
                 fh.write('\n'.join(lines))
+                events = getattr(self.dro, 'node_events_text', lambda: '')()
+                if events:
+                    fh.write('\n\n# ---- node event log (kept on the node, as last fetched) ----\n')
+                    fh.write(events)
                 fh.write('\n\n# ---- app log tail ----\n')
                 try:
                     with open(os.path.join(LOG_DIR, 'servocom.log'), encoding='utf-8',
@@ -1643,6 +1655,9 @@ class ServoCommanderApp(App):
                         fh.write(''.join(lf.readlines()[-400:]))
                 except OSError:
                     pass
+                # written through to the card now: the power may be cut next
+                fh.flush()
+                os.fsync(fh.fileno())
         except OSError as exc:
             self.capture_status = 'Save failed: %s' % exc
             log.error('DRO capture save failed: %s', exc)
@@ -1656,6 +1671,8 @@ class ServoCommanderApp(App):
                 pass
         self.capture_status = 'Saved %d samples to logs/%s' % (len(lines), os.path.basename(path))
         log.info('DRO capture saved: %s (%d lines)', path, len(lines))
+        applog.sync_now()
+        self._node_events_soon(0.1)
         return path
 
     # ---- drive link (HAT on the Pi, or the Bluetooth machine node) ---------
@@ -3263,6 +3280,7 @@ class ServoCommanderApp(App):
                 self.offline_dismissed = False
                 self._show('_offline', OfflineOverlay())
                 log.warning('Offline overlay shown')
+                self._node_events_soon()
             return
         self._offline_polls = 0
         if not self._params_requested and (self.drive_link != 'node' or self.node_control):
@@ -3276,6 +3294,7 @@ class ServoCommanderApp(App):
             self.offline_flag = False
             self.offline_dismissed = False
             log.info('Drive back online - overlay cleared')
+            self._node_events_soon()
         alarm_status, rpm = result
         if alarm_status == 0:
             self.alarm_flag = False

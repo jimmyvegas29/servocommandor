@@ -50,6 +50,11 @@ BLE service 5e7a0001-... :
                       refused, and the normal drive poll pauses: the pass
                       reads position and torque as fast as the bus allows.
                 b'I' info: ack payload is the firmware VERSION string
+                b'Z' + yy mo dd hh mi ss (6 bytes, local time): set the
+                      node's clock so event log lines carry the real time
+                b'H' + uint8 file (0 events.log, 1 events.old) + uint32 LE
+                      offset + uint8 n: read the event log; the ack payload
+                      is file, offset, uint32 LE file size, then up to n bytes
                 b'F' + uint32 LE size + uint32 LE crc32: begin a firmware
                       update (the new node.py), b'f' + bytes: append a chunk,
                       b'G' finish: verify, stage as node_new.py and reset;
@@ -57,6 +62,13 @@ BLE service 5e7a0001-... :
                       swaps it in and rolls back if it does not confirm
         every command is acknowledged on the CMD notify: ok byte, cmd byte,
         then any payload
+
+Event log: events.log / events.old on the node's flash keep a short
+history that survives resets and power cuts - boots (with the reset cause),
+drive dropouts with what the RS-485 line did (no reply / short / bad crc),
+serial port resets and whether they brought the drive back, stops that
+failed, lever moves while the drive was away, link drops, alarms, crashes.
+Each file is capped at EVLOG_MAX bytes, so the pair never passes 12 KB.
 
 First-connect lock: the first panel that connects is remembered in
 panel.lock and any other central is dropped at once.  To forget the panel,
@@ -73,7 +85,7 @@ import binascii
 import asyncio
 import bluetooth
 import aioble
-from machine import Pin, UART, WDT, unique_id, reset
+from machine import Pin, UART, WDT, RTC, unique_id, reset, reset_cause
 import rp2
 
 # ---------------------------------------------------------------- config
@@ -225,6 +237,66 @@ def read_lock():
         return None
 
 
+# ---------------------------------------------------------------- event log
+EVLOG, EVLOG_OLD = 'events.log', 'events.old'
+EVLOG_MAX = 6000             # bytes per file; the older file is dropped when the newer fills
+EVLOG_BURST = 24             # lines allowed in a burst (flash wear, write stalls) ...
+EVLOG_REFILL_S = 5           # ... then one more every this many seconds
+BOOT_FILE = 'boot.cnt'
+
+evlog = {'boot': 0, 'up': 0, 'clock': False, 'tokens': EVLOG_BURST, 'dropped': 0}
+
+
+def _boot_count():
+    n = 0
+    try:
+        with open(BOOT_FILE) as fh:
+            n = int(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        pass
+    n = (n + 1) % 10000
+    try:
+        with open(BOOT_FILE, 'w') as fh:
+            fh.write(str(n))
+    except OSError:
+        pass
+    return n
+
+
+def ev(msg):
+    """One line into the event log (and the USB console): boot number,
+    seconds since boot, the date and time once the panel has set the clock."""
+    print('EVENT', msg)
+    if evlog['tokens'] <= 0:
+        evlog['dropped'] += 1
+        return
+    evlog['tokens'] -= 1
+    if evlog['clock']:
+        t = time.localtime()
+        stamp = '%02d-%02d %02d:%02d:%02d' % (t[1], t[2], t[3], t[4], t[5])
+    else:
+        stamp = 'no-clock'
+    if evlog['dropped']:
+        msg = '(%d not logged) %s' % (evlog['dropped'], msg)
+        evlog['dropped'] = 0
+    line = 'b%d +%ds %s %s' % (evlog['boot'], evlog['up'], stamp, msg) + chr(10)
+    try:
+        try:
+            size = os.stat(EVLOG)[6]
+        except OSError:
+            size = 0
+        if size and size + len(line) > EVLOG_MAX:
+            try:
+                os.remove(EVLOG_OLD)
+            except OSError:
+                pass
+            os.rename(EVLOG, EVLOG_OLD)
+        with open(EVLOG, 'a') as fh:
+            fh.write(line)
+    except OSError as exc:
+        print('EVENT log write failed', exc)
+
+
 # lever held in REV at power-on: forget the locked panel
 if not pin_rev.value() and pin_fwd.value() and file_exists(LOCK_FILE):
     os.remove(LOCK_FILE)
@@ -242,9 +314,48 @@ def read_switch():
 
 
 # ---------------------------------------------------------------- modbus
-uart = UART(0, baudrate=BAUD, tx=Pin(PIN_TX), rx=Pin(PIN_RX), bits=8, parity=None, stop=1,
-            timeout=0, rxbuf=256)
+def uart_open():
+    return UART(0, baudrate=BAUD, tx=Pin(PIN_TX), rx=Pin(PIN_RX), bits=8, parity=None, stop=1,
+                timeout=0, rxbuf=256)
+
+
+uart = uart_open()
 de = Pin(PIN_DE, Pin.OUT, value=0)
+
+# how each failed exchange failed, since boot: 'none' not one byte came back,
+# 'short' a reply began but was cut off, 'crc' full length but corrupted,
+# 'bad' wrong slave id, 'exc' the drive answered with a Modbus exception
+mb = {'none': 0, 'short': 0, 'crc': 0, 'bad': 0, 'exc': 0, 'last': '', 'rx': b''}
+MB_KINDS = ('none', 'short', 'crc', 'bad', 'exc')
+
+
+def _mb_fail(kind, buf):
+    mb[kind] += 1
+    mb['last'] = kind
+    mb['rx'] = bytes(buf[:10])
+    return None
+
+
+def mb_counts():
+    return tuple(mb[k] for k in MB_KINDS)
+
+
+def mb_since(snap):
+    """'none=12 crc=1': the failures since the snapshot, by kind."""
+    parts = ['%s=%d' % (k, mb[k] - snap[i]) for i, k in enumerate(MB_KINDS) if mb[k] - snap[i]]
+    return ' '.join(parts) or 'no failures'
+
+
+def uart_reinit():
+    """Close and re-open the serial port and put the transceiver back to
+    receive: clears anything stuck on this side of the RS-485 link."""
+    global uart
+    try:
+        uart.deinit()
+    except Exception:
+        pass
+    de.init(Pin.OUT, value=0)
+    uart = uart_open()
 
 
 def crc16(data):
@@ -278,12 +389,16 @@ def modbus_txn(pdu, expect_len, timeout_ms=150):
             if len(buf) >= expect_len:
                 break
         time.sleep_ms(2)
-    if len(buf) < 4 or buf[0] != SLAVE_ID:      # 41H / 43H answer with 4 bytes
-        return None
+    if not buf:
+        return _mb_fail('none', buf)
+    if len(buf) < 4:                            # 41H / 43H answer with 4 bytes
+        return _mb_fail('short', buf)
+    if buf[0] != SLAVE_ID:
+        return _mb_fail('bad', buf)
     if struct.unpack('<H', buf[-2:])[0] != crc16(buf[:-2]):
-        return None
+        return _mb_fail('short' if len(buf) < expect_len else 'crc', buf)
     if buf[1] & 0x80:                       # exception response
-        return None
+        return _mb_fail('exc', buf)
     return buf[1:-2]
 
 
@@ -358,6 +473,11 @@ def safe_disable(why, zero_speed=False):
         state['last_speed'] = 0
         ok = write_reg(0x0089, 0) and ok
     print('SAFE disable (%s)%s:' % (why, ' + speed 0' if zero_speed else ''), 'ok' if ok else 'FAILED')
+    if not ok:
+        ev('STOP FAILED (%s): the drive did not take the disable (%s), still enabled=%d' % (
+            why, mb['last'] or '?', state['enabled']))
+    elif why != 'switch neutral':
+        ev('STOP ok (%s)' % why)
     return ok
 
 
@@ -725,6 +845,26 @@ def handle_cmd(data):
     elif data[:1] == b'I':
         ok = True
         payload = VERSION.encode()
+    elif data[:1] == b'Z' and len(data) >= 7:
+        try:
+            RTC().datetime((2000 + data[1], data[2], data[3], 0, data[4], data[5], data[6], 0))
+            evlog['clock'] = True
+            ok = True
+        except Exception as exc:
+            print('CMD Z clock not set:', exc)
+    elif data[:1] == b'H' and len(data) >= 7:
+        which, off, n = struct.unpack('<BIB', data[1:7])
+        name = EVLOG_OLD if which else EVLOG
+        size, chunk = 0, b''
+        try:
+            size = os.stat(name)[6]
+            with open(name, 'rb') as fh:
+                fh.seek(off)
+                chunk = fh.read(min(n, 200))
+        except OSError:
+            pass                                # no such file: size 0, no data
+        payload = struct.pack('<BII', which, off, size) + chunk
+        ok = True
     elif data[:1] == b'L':
         # crash log: b'L' + offset byte -> up to 18 bytes of crash.txt
         off = data[1] if len(data) > 1 else 0
@@ -843,17 +983,27 @@ def handle_cmd(data):
         ok = apply_speed(speed)
     state['cmd_ok'] = ok
     print('CMD', data[:1], 'ok' if ok else 'refused/failed')
+    if not ok and (data[:1] in (b'E', b'D') or (data[:1] == b'S' and state['online'])):
+        # a speed write failing while the drive still counts as online is
+        # the first sign of a dropout; once offline they would only flood
+        ev('CMD %s FAILED (drive online=%d enabled=%d, last exchange: %s)' % (
+            chr(data[0]), state['online'], state['enabled'], mb['last'] or '?'))
     return payload
 
 
 OFFLINE_AFTER = 5            # consecutive failed polls (x POLL_MS) before 'offline'
 REAPPEAR_MS = 2000           # offline at least this long => treat as a drive power cycle
+REINIT_AFTER = 5             # failed polls past 'offline' before the port is re-opened
+REINIT_EVERY = 40            # ... and then again every this many failed polls
 
 
 async def drive_poller():
     last_online = None
     fails = 0
     offline_since = None
+    snap = mb_counts()           # failure counters at the last good poll
+    reinits = 0                  # port re-opens tried in this outage
+    reinit_at = None             # value of fails at the last re-open
     while True:
         if tap.active:
             await asyncio.sleep_ms(POLL_MS)          # the tap pass owns the bus
@@ -871,21 +1021,53 @@ async def drive_poller():
         if regs is None:
             fails += 1
             state['poll_errors'] += 1
+            if fails == 1 and state['online']:
+                ev('MISS drive reply (%s, rx=%s) rpm=%d tq=%d en=%d' % (
+                    mb['last'], binascii.hexlify(mb['rx']).decode(), state['rpm'] // 10,
+                    state['torque'], state['enabled']))
             if fails == OFFLINE_AFTER and state['online']:
                 state['online'] = False
                 offline_since = time.ticks_ms()
+                ev('DRIVE OFFLINE: %s, last rx=%s | enabled=%d lever=%s rpm=%d tq=%d alarm=%d' % (
+                    mb_since(snap), binascii.hexlify(mb['rx']).decode(), state['enabled'],
+                    state['switch'], state['rpm'] // 10, state['torque'], state['alarm']))
+            if not state['online'] and fails >= OFFLINE_AFTER + REINIT_AFTER and (
+                    fails - OFFLINE_AFTER - REINIT_AFTER) % REINIT_EVERY == 0:
+                # which end is stuck?  re-open our own port: if the drive
+                # answers straight after, it was this side
+                uart_reinit()
+                reinits += 1
+                reinit_at = fails
+                if reinits <= 3 and offline_since is not None:
+                    ev('SERIAL PORT re-opened (try %d)' % reinits)
         else:
+            if fails and state['online'] and fails > 1:
+                ev('DRIVE answered again after %d missed polls: %s' % (fails, mb_since(snap)))
+            was_fails = fails
             fails = 0
             if not state['online']:
                 state['online'] = True
                 gone_ms = time.ticks_diff(time.ticks_ms(), offline_since) if offline_since else 0
+                if offline_since is None:
+                    ev('DRIVE online (first sight since boot)')
+                elif reinit_at is not None and was_fails - reinit_at <= 1:
+                    ev('DRIVE BACK after %d ms, straight after re-opening the serial port '
+                       '(try %d): the node side was stuck. %s' % (gone_ms, reinits, mb_since(snap)))
+                else:
+                    ev('DRIVE BACK after %d ms by itself (%d port re-opens did not help): %s' % (
+                        gone_ms, reinits, mb_since(snap)))
                 if not state['boot_disable'] or gone_ms >= REAPPEAR_MS:
                     # first sight at boot, or the drive was really away (power
                     # cycle): make sure it starts disabled with setpoint 0.
                     # A short RS-485 dropout must NOT stop a cut.
                     state['boot_disable'] = safe_disable('drive online', zero_speed=True)
+            snap = mb_counts()
+            reinits, reinit_at = 0, None
             state['torque'] = regs[0] - 65536 if regs[0] > 32767 else regs[0]
             state['avg_load'] = regs[15]          # 0x0018 average load ratio %
+            if regs[17] != state['alarm'] and regs[17]:
+                ev('ALARM %d (rpm=%d tq=%d enabled=%d)' % (
+                    regs[17], state['rpm'] // 10, state['torque'], state['enabled']))
             state['alarm'] = regs[17]
             state['rpm'] = regs[18] - 65536 if regs[18] > 32767 else regs[18]
         if state['online'] != last_online:
@@ -912,6 +1094,8 @@ async def switch_task():
         if cur == last and cur != state['switch']:
             state['switch'] = cur
             print('SWITCH', cur)
+            if not state['online'] and state['boot_disable']:
+                ev('LEVER %s while the drive is offline (enabled=%d)' % (cur, state['enabled']))
             if CONTROL_ALLOWED and tap.active:
                 # any lever movement stops a tap pass; it must go through OFF
                 # before it can start anything
@@ -1024,12 +1208,16 @@ async def peripheral():
                 await conn.disconnect()
                 continue
             print('BLE connected', conn.device)
+            ev('PANEL linked')
             led.on()
             state['linked'] = True
             state['conn'] = conn
             asyncio.create_task(report_mtu(conn))
             await conn.disconnected(timeout_ms=None)
             print('BLE disconnected')
+            ev('PANEL link lost (enabled=%d rpm=%d). Since boot: missed polls %d (%s), notify fails %d' % (
+                state['enabled'], state['rpm'] // 10, state['poll_errors'],
+                mb_since((0, 0, 0, 0, 0)), state['notify_fail']))
             state['conn'] = None
             state['linked'] = False
             # panel gone: stop the spindle and make the switch pass through
@@ -1069,10 +1257,21 @@ async def commander():
 
 
 async def watchdog():
+    last = time.ticks_ms()
+    up_ms = 0
+    n = 0
     while True:
         wdt.feed()
+        now = time.ticks_ms()
+        up_ms += time.ticks_diff(now, last)
+        last = now
+        evlog['up'] = up_ms // 1000
+        n += 1
+        if n % EVLOG_REFILL_S == 0 and evlog['tokens'] < EVLOG_BURST:
+            evlog['tokens'] += 1
         if ota['reset_at'] is not None and time.ticks_diff(ota['reset_at'], time.ticks_ms()) <= 0:
             print('OTA reset')
+            ev('RESET commanded: firmware update')
             time.sleep_ms(100)
             reset()
         await asyncio.sleep_ms(1000)
@@ -1091,9 +1290,17 @@ async def trial_confirm():
     print('TRIAL confirmed', VERSION)
 
 
+# on this chip a commanded reset() also reads back as 3: a RESET line just
+# above the BOOT line tells the two apart
+RESET_CAUSES = {1: 'power-on', 3: 'watchdog or commanded reset (a hang, unless a RESET line is just above)'}
+
+
 async def main():
     print('machine node firmware', VERSION, 'as', NAME, '| control',
           'ALLOWED' if CONTROL_ALLOWED else 'READ-ONLY', '| panel lock', read_lock() or 'open')
+    evlog['boot'] = _boot_count()
+    cause = reset_cause()
+    ev('BOOT %s, reset cause: %s' % (VERSION, RESET_CAUSES.get(cause, 'soft reset / %d' % cause)))
     await asyncio.gather(sampler(), peripheral(), pinger(), commander(),
                          drive_poller(), tap_task(), switch_task(), watchdog(), trial_confirm())
 
@@ -1108,6 +1315,11 @@ except Exception as exc:
         with open('crash.txt', 'w') as fh:
             fh.write(VERSION + ' ' + str(time.ticks_ms()) + chr(10))
             sys.print_exception(exc, fh)
+    except Exception:
+        pass
+    try:
+        evlog['tokens'] = 1
+        ev('CRASH %s: %r (enabled=%d)' % (type(exc).__name__, exc, state['enabled']))
     except Exception:
         pass
     raise

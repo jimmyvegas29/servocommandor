@@ -12,8 +12,9 @@ import struct
 import threading
 import time
 import collections
+import os
 
-from applog import log
+from applog import log, LOG_DIR
 
 try:
     from bleak import BleakClient, BleakScanner
@@ -88,6 +89,10 @@ def parse_packet(data):
     return None
 
 
+def NL_JOIN(lines):
+    return ''.join(l + chr(10) for l in lines)
+
+
 class DroBle:
     def __init__(self, address=None, name_prefix='SERVOCOM-DRO'):
         self.address = address          # remembered board, or None to scan
@@ -124,6 +129,15 @@ class DroBle:
         self.ring = collections.deque(maxlen=RING_N)
         self._raw_event = threading.Event()
         self._ota_event = None
+        # the node's own event log (firmware 3.15+): fetched on connect and
+        # whenever the drive drops out or comes back
+        self.node_events_path = os.path.join(LOG_DIR, 'node_events.log')
+        self._ev_old = b''              # events.old as last fetched
+        self._ev_new = b''              # events.log as far as it has been fetched
+        self._ev_seen = self._load_seen()
+        self._hk_event = None
+        self._hk_ack = None
+        self._hk_busy = False
         self.last_ack = None
         self.acks = 0
         self.cmds_sent = 0
@@ -224,6 +238,8 @@ class DroBle:
                     except Exception:
                         pass          # plain DRO tap: no CMD characteristic
                     await self._tune_interval(target)
+                    if self.is_node:
+                        asyncio.ensure_future(self._node_housekeeping(client))
                     while not self._stop.is_set() and client.is_connected:
                         await asyncio.sleep(0.2)
                     try:
@@ -327,6 +343,10 @@ class DroBle:
                 self.last_raw = (ok, data[2:], time.time())
                 if self._raw_event is not None:
                     self._raw_event.set()
+            elif cmd in (b'H', b'Z'):
+                self._hk_ack = (ok, cmd, data[2:])
+                if self._hk_event is not None:
+                    self._hk_event.set()
             elif cmd in (b'F', b'G'):
                 got = struct.unpack('<I', data[2:6])[0] if len(data) >= 6 else 0
                 self._ota_ack = (ok, cmd, got)
@@ -334,6 +354,121 @@ class DroBle:
                     self._ota_event.set()
         except struct.error:
             pass
+
+    # ---- the node's event log (firmware 3.15+) -------------------------------
+    EVENT_ALERTS = ('OFFLINE', 'FAILED', 'MISS', 'CRASH', 'watchdog', 're-opened', 'ALARM', 'BACK')
+
+    def _load_seen(self):
+        try:
+            with open(self.node_events_path, encoding='utf-8', errors='replace') as fh:
+                return set(fh.read().splitlines())
+        except OSError:
+            return set()
+
+    def node_events_text(self):
+        """The node's event log as last fetched (oldest line first)."""
+        return (self._ev_old + self._ev_new).decode('utf-8', 'replace')
+
+    def request_node_events(self):
+        """Fetch what the node has logged since the last fetch (any thread)."""
+        if self._client is None or not self.connected or self._loop is None:
+            return False
+        if not self.is_node or not self._node_at_least(3, 15):
+            return False
+        asyncio.run_coroutine_threadsafe(self._fetch_events(self._client, False), self._loop)
+        return True
+
+    async def _node_housekeeping(self, client):
+        await asyncio.sleep(1.5)                 # the 'I' ack has the version
+        if client is self._client and self._node_at_least(3, 15):
+            await self._fetch_events(client, True)
+
+    async def _hk_cmd(self, client, data, timeout=2.0):
+        self._hk_event.clear()
+        self._hk_ack = None
+        await client.write_gatt_char(CMD_UUID, data, response=False)
+        self.cmds_sent += 1
+        try:
+            await asyncio.wait_for(self._hk_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        ack = self._hk_ack
+        return ack if ack and ack[0] and ack[1] == data[:1] else None
+
+    async def _read_event_file(self, client, which, start, chunk):
+        """Bytes of one node log file from offset start; (data, size) or None."""
+        out, off, size = b'', start, 0
+        for _ in range(2000):
+            ack = await self._hk_cmd(client, b'H' + struct.pack('<BIB', which, off, chunk))
+            if ack is None or len(ack[2]) < 9:
+                return None
+            _w, got_off, size = struct.unpack('<BII', ack[2][:9])
+            data = ack[2][9:]
+            if got_off != off:
+                return None
+            if size < off:
+                return b'', size                 # the file is shorter than it was: it rotated
+            out += data
+            off += len(data)
+            if not data or off >= size:
+                break
+        return out, size
+
+    async def _fetch_events(self, client, full):
+        if self._hk_busy or self.ota_state == 'sending':
+            return
+        self._hk_busy = True
+        try:
+            if self._hk_event is None:
+                self._hk_event = asyncio.Event()
+            try:
+                await getattr(client, '_backend', client)._acquire_mtu()
+            except Exception:
+                pass
+            mtu = getattr(client, 'mtu_size', 23) or 23
+            chunk = max(8, min(mtu - 14, 180))
+            t = time.localtime()
+            await self._hk_cmd(client, b'Z' + bytes([t.tm_year % 100, t.tm_mon, t.tm_mday,
+                                                    t.tm_hour, t.tm_min, t.tm_sec]))
+            start = 0 if full else len(self._ev_new)
+            res = await self._read_event_file(client, 0, start, chunk)
+            if res is None:
+                return
+            if res[1] < start:
+                full, start = True, 0             # rotated since the last fetch
+                res = await self._read_event_file(client, 0, 0, chunk)
+                if res is None:
+                    return
+            if full:
+                old = await self._read_event_file(client, 1, 0, chunk)
+                if old is not None:
+                    self._ev_old = old[0]
+                self._ev_new = res[0]
+            else:
+                self._ev_new += res[0]
+            self._publish_events()
+        except Exception as exc:
+            log.warning('node event log fetch failed: %s', exc)
+        finally:
+            self._hk_busy = False
+
+    def _publish_events(self):
+        """New node lines into the app log; the whole log to a file that is
+        written through to the card at once."""
+        lines = [l for l in self.node_events_text().splitlines() if l.strip()]
+        fresh = [l for l in lines if l not in self._ev_seen]
+        for l in fresh:
+            self._ev_seen.add(l)
+            (log.warning if any(k in l for k in self.EVENT_ALERTS) else log.info)('NODE EVENT %s', l)
+        if not fresh and os.path.exists(self.node_events_path):
+            return
+        try:
+            with open(self.node_events_path, 'w', encoding='utf-8') as fh:
+                fh.write(NL_JOIN(lines))
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError as exc:
+            log.warning('node event log not saved: %s', exc)
 
     # ---- diagnostics: raw Modbus PDU through the node ------------------------
     def raw_modbus(self, pdu, timeout=3.0):
