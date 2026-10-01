@@ -597,12 +597,25 @@ class ThreadOverlay(ModalTouch, FloatLayout):
             b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
             grid.add_widget(b)
 
+    PICK_SHOW_S = 0.25          # the picked size stays lit this long before the picker closes
+
     def pick(self, key):
+        """Take the size at once, light its button, then close: closing in
+        the same instant left the touch with nothing to see."""
         app = App.get_running_app()
         app.save_speed_pad(tap_thread=key)
+        self.current = key
+        label = tapdata.BY_KEY[key]['label'] if key in tapdata.BY_KEY else ''
+        for b in self.ids.grid.children:
+            b.active = b.text == label
         if app._tap is not None:
             app._tap.refresh()
-        app.close_threads()
+        Clock.schedule_once(self._picked, self.PICK_SHOW_S)
+
+    def _picked(self, *_a):
+        app = App.get_running_app()
+        if app._threads is self:               # not if it was closed or re-opened meanwhile
+            app.close_threads()
 
     def _custom_refresh(self):
         app = App.get_running_app()

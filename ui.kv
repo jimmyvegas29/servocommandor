@@ -2820,10 +2820,10 @@
     font_size: '15sp'
     background_color: (0, 0, 0, 0)
     background_normal: ''
-    color: (1, 1, 1, 1) if self.active else (0.75, 0.75, 0.75, 1)
+    color: (1, 1, 1, 1) if (self.active or self.state == 'down') else (0.75, 0.75, 0.75, 1)
     canvas.before:
         Color:
-            rgba: ACCENT if self.active else PANEL
+            rgba: ACCENT if (self.active or self.state == 'down') else PANEL
         RoundedRectangle:
             size: self.size
             pos: self.pos

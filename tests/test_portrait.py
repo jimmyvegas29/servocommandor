@@ -1331,6 +1331,9 @@ def tap_flow(dt):
     btn = {b.text: b for b in th.ids.grid.children}
     check('no greyed sizes, no note', (min(b.color[0] for b in btn.values()) > 0.5, th.note), (True, ''))
     th.pick('1/4-20')
+    check('picked size is lit and the picker is still showing it',
+          (app._threads is th, [b.text for b in th.ids.grid.children if b.active]), (True, ['1/4-20']))
+    th._picked()                                   # the quarter second is up
     c = app.tap_config()
     check('picked 1/4-20: 20 TPI, 50 in-lb clutch', (app._threads, round(c['pitch_mm'], 3), c['thread']['clutch'],
                                                      c['tlim']),
@@ -1666,10 +1669,15 @@ def picker_taps(dt):
 
 def picker_taps2(dt):
     th = app._threads
-    tap_on(find_widget(th, 'PickButton', 'M8'))
-    check('picker: real tap on a size picks it and closes', (app._threads, app.tap_config()['thread_key']),
-          (None, 'M8x1.25'))
+    m8 = find_widget(th, 'PickButton', 'M8')
+    tap_on(m8)
+    check('picker: real tap on a size picks it at once and lights it', (app.tap_config()['thread_key'], m8.active),
+          ('M8x1.25', True))
+    th._picked()
+    check('picker: then it closes', app._threads, None)
     app.open_threads()
+    th._picked()
+    check('a stale close does not shut a re-opened picker', app._threads is not None, True)
     Clock.schedule_once(picker_taps3, 0.4)
 
 
