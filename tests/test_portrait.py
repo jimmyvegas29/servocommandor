@@ -829,7 +829,7 @@ def after_layout(dt):
     check('tools menu open', app._tools is not None, True)
     app.tools_pick('tap')
     check('Tap opens its setup, menu closes', (app._tools, app._tap is not None), (None, True))
-    check('Tap without a 3.16 node: ACTIVATE refused', (app.tap_activate(), app.tap_mode), (False, False))
+    check('Tap without a 3.17 node: ACTIVATE refused', (app.tap_activate(), app.tap_mode), (False, False))
     app.close_tap()
     app.open_tools()
     app.tools_pick('drill')
@@ -1245,7 +1245,7 @@ def taps_menu(dt):
     Clock.schedule_once(tap_flow, 0.2)
 
 
-# ---- tapping: the panel side, against a fake 3.16 node ---------------------
+# ---- tapping: the panel side, against a fake 3.17 node ---------------------
 import struct                                   # noqa: E402
 from dro_ble import DroBle                      # noqa: E402
 
@@ -1260,7 +1260,7 @@ class FakeNode(DroBle):
         self.tap = {'state': 0, 'reason': 0, 'counts': 0, 'peak': 0}
         self.switch = 'neutral'
         self.enabled = False
-        self.node_version = 'node 3.16'
+        self.node_version = 'node 3.17'
         self.connected = True
         self.device_name, self.rssi, self.frames, self.dropped = 'fake', None, 0, 0
         self.ota_state, self.ota_progress = '', 0.0
@@ -1358,11 +1358,40 @@ def tap_flow(dt):
     app.save_speed_pad(tap_thread='1/2-13')
     o.refresh()
     check('1/2-13: capped by the lathe, still allowed', (o.ok, o.tlim_text, o.tlim_hint),
-          (True, 'auto 150 %', "lathe max: can't break this tap"))
+          (True, 'auto 300 %', "lathe max: can't break this tap"))
+    # sizes with a hand-set direct-drive cap use it instead of the clutch setting
+    app.save_speed_pad(tap_thread='5/16-18')
+    o.refresh()
+    check('5/16-18: 180 %, and what that is at the tap', (o.tlim_text, o.tlim_hint),
+          ('auto 180 %', 'set for this size: about %d in-lb at the tap' % round(
+              (180 - (app.tap_config()['drag'] or 0)) / 100.0 * app.motor_rated_nm() * app.ratio * 8.8507)))
+    app.save_speed_pad(tap_thread='5/16-24')
+    check('5/16-24: same size, same cap', app.tap_config()['tlim'], 180)
+    app.save_speed_pad(tap_thread='3/8-16')
+    o.refresh()
+    check('3/8-16: 300 %', (app.tap_config()['tlim'], o.tlim_text), (300, 'auto 300 %'))
+    app.save_speed_pad(tap_thread='1/4-20')
+    check('1/4-20: still the clutch setting', (app.tap_config()['cap_fixed'], app.tap_config()['tlim'] < 100),
+          (False, True))
+    o.set_tlim(140)
+    app.save_speed_pad(tap_thread='5/16-18')
+    check('a hand-typed limit still wins', (app.tap_config()['tlim'], app.tap_config()['auto']), (140, False))
+    o.set_tlim(0)
+    app.settings['back_gear_ratio'] = 11.8
+    app.save_speed_pad(tap_bg=True)
+    check('back gear: the direct-drive cap is NOT used', (app.tap_config()['cap_fixed'], app.tap_config()['tlim'] < 60),
+          (False, True))
+    app.save_speed_pad(tap_bg=False, tap_thread='1/2-13')
+    app.settings['back_gear_ratio'] = 0
+    o.refresh()
     app.save_speed_pad(tap_material='Mild steel')
     o.refresh()
-    check('1/2-13 in mild steel: needs more than the cap, warned in amber',
+    check('1/2-13 in mild steel: within the 300 % cap now, no warning', 'expect stalls' in o.live_text, False)
+    app.save_speed_pad(tap_thread='3/4-10')
+    o.refresh()
+    check('3/4-10 in mild steel: needs more than the cap, warned in amber',
           ('expect stalls' in o.live_text, o.tlim_color[2] < 0.5), (True, True))
+    app.save_speed_pad(tap_thread='1/2-13')
     app.save_speed_pad(tap_material='Aluminum')
     o.refresh()
     need = app.tap_config()['need_pct']
@@ -1570,7 +1599,7 @@ def tap_flow(dt):
                        tap_tlim_manual=0, tap_bg=False,
                        tap_drag={'50': 14, '100': 18}, tap_drag_bg={})
     c = app.tap_config()
-    check('direct: 1/2-13 capped by the lathe', (c['tlim'], c['drag']), (150, 14))
+    check('direct: 1/2-13 capped by the lathe', (c['tlim'], c['drag']), (300, 14))
     app.settings['back_gear_ratio'] = 0
     app.save_speed_pad(tap_bg=True)
     c = app.tap_config()

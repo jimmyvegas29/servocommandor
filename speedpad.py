@@ -512,6 +512,9 @@ class TapOverlay(ModalTouch, FloatLayout):
         if c['auto'] and c['lathe_capped']:
             self.tlim_text = 'auto %d %%' % c['tlim']
             self.tlim_hint = "lathe max: can't break this tap"
+        elif c['auto'] and c['cap_fixed']:
+            self.tlim_text = 'auto %d %%' % c['tlim']
+            self.tlim_hint = 'set for this size: about %d in-lb at the tap' % round(c['cap_in_lb'])
         elif c['auto'] and c['tlim'] > 0:
             self.tlim_text = 'auto %d %%' % c['tlim']
             t = c['thread']
@@ -520,7 +523,8 @@ class TapOverlay(ModalTouch, FloatLayout):
         elif c['auto']:
             self.tlim_text, self.tlim_hint = '-', 'custom thread: set it by hand'
         else:
-            self.tlim_text, self.tlim_hint = '%d %%' % c['tlim'], 'set by hand; 0 = auto'
+            self.tlim_text = '%d %%' % c['tlim']
+            self.tlim_hint = 'set by hand (about %d in-lb at the tap); 0 = auto' % round(c['cap_in_lb'])
         problem = app.tap_problem(c)
         self.ok = not problem
         if self._note:

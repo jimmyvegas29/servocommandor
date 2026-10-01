@@ -169,7 +169,7 @@ class NodeServo:
     def jog_stop(self):
         return self._send(b'j', 'jog stop')
 
-    # tapping (node 3.16): the whole hole runs on the node, chip breaks included
+    # tapping (node 3.16+): the whole hole runs on the node, chip breaks included
     def tap_start(self, speed, tlim, target, margin, stall_ms, keep, peck=0, confirm=1, same=0):
         """peck / same in motor counts: sent in units of 64 and 256 counts."""
         import struct as _st
@@ -2501,7 +2501,7 @@ class ServoCommanderApp(App):
     TAP_COUNTS_PER_REV = 10000      # XP200 encoder counts per motor rev: verify at the first test
     TAP_STALL_MS = 150
     TAP_SAME_TURNS = 0.5            # stalls this close (spindle turns) are "the same depth"
-    TAP_NODE = (3, 16)
+    TAP_NODE = (3, 17)
     TAP_MAX_MOTOR_RPM = 1000        # the node's cap
     # node TapCycle states and reasons
     T_IDLE, T_IN, T_OUT, T_DONE, T_HALTED, T_PECK = range(6)
@@ -2528,6 +2528,7 @@ class ServoCommanderApp(App):
         eff = bg_ratio if (bg and bg_ratio > 0) else self.ratio
         drag, drag_rpm = self.tap_drag_for(rpm, bg)
         manual = int(sp.get('tap_tlim_manual') or 0)
+        cap_fixed = False
         motor_nm = self.motor_rated_nm()
         material = sp.get('tap_material') or 'Mild steel'
         clutch_pct = need_pct = None
@@ -2539,7 +2540,9 @@ class ServoCommanderApp(App):
         if manual:
             tlim, auto = manual, False
         elif clutch_pct is not None:
-            tlim, auto = self.tap_auto_cap(thread, drag, eff), True
+            direct = not (bg and bg_ratio > 0)
+            tlim, auto = self.tap_auto_cap(thread, drag, eff, direct), True
+            cap_fixed = direct and tapdata.cap_pct_direct(thread) is not None
         else:
             tlim, auto = 0, True                 # custom thread: must be set by hand
         return {'thread_key': key, 'thread': thread, 'unit': unit, 'pitch': pitch, 'pitch_mm': pitch_mm,
@@ -2548,6 +2551,9 @@ class ServoCommanderApp(App):
                 'confirm': max(1, int(sp.get('tap_confirm', 2))),
                 'rpm': rpm, 'drag': drag, 'drag_rpm': drag_rpm,
                 'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'need_pct': need_pct,
+                'cap_fixed': cap_fixed,
+                # what the cap leaves for the tap itself, in-lb at the spindle
+                'cap_in_lb': max(0.0, (tlim - (drag or 0)) / 100.0 * motor_nm * eff * tapdata.IN_LB_PER_NM),
                 'material': material, 'bg': bg, 'bg_ratio': bg_ratio, 'eff_ratio': eff,
                 'lathe_capped': auto and thread is not None and tlim == self.TAP_CAP_MAX
                 and (drag or 0) + clutch_pct > self.TAP_CAP_MAX,
@@ -2555,14 +2561,18 @@ class ServoCommanderApp(App):
                 'peck': max(0.5, float(sp.get('tap_peck', 2.0))),
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
-    TAP_CAP_MAX = 150               # the node's hard cap for a tap pass
+    TAP_CAP_MAX = 300               # the node's hard cap for a tap pass (the drive's maximum)
 
-    def tap_auto_cap(self, thread, drag=None, ratio=None):
+    def tap_auto_cap(self, thread, drag=None, ratio=None, direct=True):
         """Torque cap (drive %) for a thread from the table: drag + the
         recommended clutch setting at the tap, through motor and ratio, but
         never above the lathe's tapping cap.  A big tap is capped by the
         lathe: it cannot be broken, and the stall at the cap is what stops
-        it at the bottom."""
+        it at the bottom.  In direct drive a size with a hand-set cap
+        (tapdata.CAP_PCT_DIRECT) uses that instead."""
+        fixed = tapdata.cap_pct_direct(thread) if direct else None
+        if fixed is not None:
+            return int(min(fixed, self.TAP_CAP_MAX))
         pct = (drag or 0) + tapdata.pct_of_spindle(thread['clutch'], self.motor_rated_nm(),
                                                    ratio or self.ratio)
         return int(round(min(pct, self.TAP_CAP_MAX)))
@@ -2649,11 +2659,13 @@ class ServoCommanderApp(App):
             return 'Custom thread: set the torque limit by hand'
         if not 5 <= c['rpm'] <= self.tap_max_rpm(c):
             return 'Tapping speed must be 5 to %d rpm%s' % (self.tap_max_rpm(c), ' in back gear' if c['bg'] else '')
-        if not 5 <= c['tlim'] <= 150:
-            return 'Torque limit must be 5 to 150 %'
+        if not 5 <= c['tlim'] <= self.TAP_CAP_MAX:
+            return 'Torque limit must be 5 to %d %%' % self.TAP_CAP_MAX
+        # above the drive's overload level a long cut would trip Err-29; at
+        # the level itself it cannot (torque never exceeds the cap)
         overload = self.settings.get('drive_params', {}).get('70')
-        if overload is not None and c['tlim'] >= int(overload):
-            return 'Torque limit must be below the overload level (%s %%)' % overload
+        if overload is not None and c['tlim'] > int(overload):
+            return 'Torque limit must not be above the overload level (%s %%)' % overload
         return ''
 
     def tap_activate(self):
@@ -3087,7 +3099,7 @@ class ServoCommanderApp(App):
         elif key == 'tap_tlim':
             o = self._tap
             ov.setup_generic('Torque limit', 'Drive torque cap for the pass; 0 = auto from the thread',
-                             '%', 0, 150, o.tlim_text, o.set_tlim, 'SET')
+                             '%', 0, self.TAP_CAP_MAX, o.tlim_text, o.set_tlim, 'SET')
         elif key == 'motor_nm':
             ov.setup_generic('Motor rated torque', 'From the servo motor nameplate', 'Nm', 0.1, 100,
                              self.motor_nm_text, self._set_motor_nm, 'SAVE', allow_dot=True)

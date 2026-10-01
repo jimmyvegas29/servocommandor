@@ -96,7 +96,7 @@ from machine import Pin, UART, WDT, RTC, unique_id, reset, reset_cause
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.16'         # shown on the panel; bump on every change
+VERSION = 'node 3.17'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -497,7 +497,7 @@ def apply_speed(speed):
 
 # ---------------------------------------------------------------- tapping
 TAP_MAX_RPM = 1000           # motor rpm, hard cap for a tap pass
-TAP_TLIM_MAX = 150           # %, hard cap for the tap torque limit
+TAP_TLIM_MAX = 300           # %, the most a tap pass may ask for (the drive's own maximum)
 
 
 class TapCycle:

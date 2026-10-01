@@ -21,6 +21,21 @@ Only materials with a published Ks get an estimate.
 
 IN_LB_PER_NM = 8.8507
 
+# Torque caps set by hand for a nominal size, as the drive's torque limit in
+# % (drag included), DIRECT DRIVE only.  They replace the clutch setting,
+# which stalled these taps in ordinary cutting.  Jimmy's test values,
+# 2026-10-01: 180 % is about 142 in-lb at a 5/16 tap (an HSS one breaks at
+# 150); 300 % is the drive's maximum, more than the motor gives (a 3/8 HSS
+# tap breaks at 260 in-lb, the motor reaches about 195).
+CAP_PCT_DIRECT = {'5/16': 180, '3/8': 300}
+
+
+def cap_pct_direct(thread):
+    """The hand-set direct-drive cap for this thread's size, or None."""
+    if thread is None or thread.get('unit') != 'tpi':
+        return None
+    return CAP_PCT_DIRECT.get(thread['label'].split('-')[0])
+
 # specific cutting force, N/mm2 (middle of the published range), by the
 # material names the SFM tables use; None = no published value
 KS = {
