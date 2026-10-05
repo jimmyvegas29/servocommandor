@@ -82,8 +82,13 @@ panel.lock and any other central is dropped at once.  To forget the panel,
 power the node on with the lever in REV.
   PING  write/notify echo, for round-trip timing
 
-Pins: X A/B = GP6/GP7, Z A/B = GP2/GP3, MAX485 DI = GP0, RO = GP1,
-DE+RE = GP4, switch COM = GND (pin 13), lever FWD on GP10 (pin 14), REV on GP11 (pin 15).
+Pins: chosen at boot by the board ID on GP28 (see BOARDS below).
+  v3.5 tap box PCB (GP28 strapped to GND): Z A/B = GP2/GP3, Z index GP5,
+      X A/B = GP8/GP9, MAX485 DI = GP12 (UART0 TX), RO = GP13 (RX), DE/RE =
+      GP15, lever FWD on GP10 (J3 pin 7), REV on GP11 (J3 pin 8), switch COM
+      = GND (J3 pin 9).
+  old hand-wired box (GP28 open): X A/B = GP6/GP7, Z A/B = GP2/GP3,
+      MAX485 DI = GP0, RO = GP1, DE+RE = GP4, lever FWD GP10, REV GP11.
 """
 import os
 import struct
@@ -96,7 +101,7 @@ from machine import Pin, UART, WDT, RTC, unique_id, reset, reset_cause
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.17'         # shown on the panel; bump on every change
+VERSION = 'node 3.18'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -109,9 +114,34 @@ POLL_MS = 100                # drive poll
 PERIOD_MS = 50               # BLE / USB packet cadence (20 Hz)
 ADV_INTERVAL_US = 100_000
 
-X_BASE, Z_BASE = 6, 2
-PIN_TX, PIN_RX, PIN_DE = 0, 1, 4
-PIN_FWD, PIN_REV = 10, 11     # switch wired so lever FWD grounds GP10 (rewired by Jimmy 2026-09-11)
+# ---------------------------------------------------------------- board
+# GP28 is strapped to GND on the v3.5 tap box PCB: read with the pull-up,
+# 0 = the PCB.  The same firmware then runs in either box.
+BOARD_ID_PIN = 28
+BOARDS = {
+    'v3.5 PCB': {'x': 8, 'z': 2, 'tx': 12, 'rx': 13, 'de': 15, 'fwd': 10, 'rev': 11},
+    # >>> OLD HAND-WIRED BOX - TEMPORARY (2026-10-05).  Kept only so the old
+    # box can be swapped back in while the X scale noise seen on the PCB is
+    # investigated.  When that is settled, delete this entry and the
+    # 'old box' fallback in detect_board(); nothing else refers to it.
+    'old box': {'x': 6, 'z': 2, 'tx': 0, 'rx': 1, 'de': 4, 'fwd': 10, 'rev': 11},
+    # <<< OLD HAND-WIRED BOX
+}
+
+
+def detect_board():
+    pin = Pin(BOARD_ID_PIN, Pin.IN, Pin.PULL_UP)
+    time.sleep_ms(2)
+    pcb = pin.value() == 0
+    Pin(BOARD_ID_PIN, Pin.IN)             # pull-up off again: no current into the strap
+    return 'v3.5 PCB' if pcb else 'old box'
+
+
+BOARD = detect_board()
+_pins = BOARDS[BOARD]
+X_BASE, Z_BASE = _pins['x'], _pins['z']
+PIN_TX, PIN_RX, PIN_DE = _pins['tx'], _pins['rx'], _pins['de']
+PIN_FWD, PIN_REV = _pins['fwd'], _pins['rev']   # lever FWD grounds PIN_FWD
 
 SERVICE_UUID = bluetooth.UUID('5e7a0001-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
 DATA_UUID = bluetooth.UUID('5e7a0002-8d2c-4b1e-9c3a-2f6d0a1b3c4d')
@@ -1347,11 +1377,11 @@ RESET_CAUSES = {1: 'power-on', 3: 'watchdog or commanded reset (a hang, unless a
 
 
 async def main():
-    print('machine node firmware', VERSION, 'as', NAME, '| control',
+    print('machine node firmware', VERSION, 'on the', BOARD, 'as', NAME, '| control',
           'ALLOWED' if CONTROL_ALLOWED else 'READ-ONLY', '| panel lock', read_lock() or 'open')
     evlog['boot'] = _boot_count()
     cause = reset_cause()
-    ev('BOOT %s, reset cause: %s' % (VERSION, RESET_CAUSES.get(cause, 'soft reset / %d' % cause)))
+    ev('BOOT %s on the %s, reset cause: %s' % (VERSION, BOARD, RESET_CAUSES.get(cause, 'soft reset / %d' % cause)))
     await asyncio.gather(sampler(), peripheral(), pinger(), commander(),
                          drive_poller(), tap_task(), switch_task(), watchdog(), trial_confirm())
 
