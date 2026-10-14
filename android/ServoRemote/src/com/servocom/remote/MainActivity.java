@@ -2,6 +2,7 @@ package com.servocom.remote;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
@@ -17,6 +18,7 @@ import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -36,6 +38,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.nio.charset.StandardCharsets;
@@ -70,7 +73,7 @@ public class MainActivity extends Activity {
     // the panel's own colours (ui.kv): ACCENT, PANEL, the EN-off fill, BTN_GRAY
     private static final int ACCENT = Color.rgb(0, 128, 255), PANEL = Color.rgb(41, 41, 41),
             EN_OFF = Color.rgb(27, 27, 27), PRESSED = Color.rgb(80, 80, 80), DIM = Color.rgb(80, 80, 80),
-            STATUS = Color.rgb(160, 160, 160), BG = Color.BLACK;
+            STATUS = Color.rgb(160, 160, 160), BG = Color.BLACK, RED = Color.rgb(240, 64, 51);
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private BluetoothAdapter adapter;
@@ -98,7 +101,11 @@ public class MainActivity extends Activity {
     private boolean writing;
 
     private TextView status, dir, en, jog;
-    private Typeface font;
+    private Typeface font, icons;
+    private boolean settingsOpen;
+    private TextView setPanel, setSignal, setDrive, setPairing;
+    private int rssi;                       // signal to the panel, dBm (0 = not read yet)
+    private String panelName = "";          // from the panel's advertisement
 
     // ------------------------------------------------------------------ UI
     @Override
@@ -111,6 +118,12 @@ public class MainActivity extends Activity {
         } catch (RuntimeException e) {
             font = Typeface.DEFAULT_BOLD;
         }
+        try {
+            icons = Typeface.createFromAsset(getAssets(), "fa-solid-900.ttf");    // the panel's icons
+        } catch (RuntimeException e) {
+            icons = Typeface.DEFAULT;
+        }
+        applyOrientation();
         BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         adapter = bm == null ? null : bm.getAdapter();
         buildUi();
@@ -122,7 +135,33 @@ public class MainActivity extends Activity {
     public void onConfigurationChanged(Configuration c) {
         super.onConfigurationChanged(c);
         jogRelease();
-        buildUi();
+        if (settingsOpen) showSettings();
+        else buildUi();
+    }
+
+    /** The panel's title bar: name on the left, an icon button on the right. */
+    private LinearLayout titleBar(String title, String icon, View.OnClickListener onIcon) {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackground(fill(PANEL));
+        bar.setPadding(dp(14), 0, dp(4), 0);
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTypeface(font);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        bar.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView b = new TextView(this);
+        b.setText(icon);
+        b.setTypeface(icons);
+        b.setTextColor(Color.rgb(200, 200, 200));
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        b.setGravity(Gravity.CENTER);
+        b.setClickable(true);
+        b.setOnClickListener(onIcon);
+        bar.addView(b, new LinearLayout.LayoutParams(dp(52), -1));
+        return bar;
     }
 
     /** FWD / EN / JOG in one row across the top, all the same size, in
@@ -134,12 +173,15 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setPadding(pad, dp(land ? 8 : 16), pad, pad);
+        root.setPadding(pad, dp(8), pad, pad);
+        LinearLayout.LayoutParams tb = new LinearLayout.LayoutParams(-1, dp(48));
+        tb.bottomMargin = gap;
+        root.addView(titleBar("Servo Remote", "\uf013", v -> showSettings()), tb);
 
         // square buttons, but never taller than about 40 % of a landscape screen
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
         int cell = (dm.widthPixels - 2 * pad - 2 * gap) / 3;
-        int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.4)) : cell;
+        int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.35)) : cell;
 
         dir = button("FWD");
         en = button("EN");
@@ -154,6 +196,7 @@ public class MainActivity extends Activity {
         }
         root.addView(row, new LinearLayout.LayoutParams(-1, height));
         root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
+        settingsOpen = false;
 
         status = new TextView(this);                    // always along the bottom
         status.setTypeface(font);
@@ -167,6 +210,159 @@ public class MainActivity extends Activity {
         en.setOnClickListener(v -> press(v, new byte[]{'E', (byte) (has(F_ENABLED) ? 0 : 1)}));
         jog.setOnTouchListener(this::jogTouch);
         render();
+    }
+
+    // ------------------------------------------------------------------ settings
+    private SharedPreferences prefs() {
+        return getSharedPreferences("remote", MODE_PRIVATE);
+    }
+
+    private void applyOrientation() {
+        String o = prefs().getString("orientation", "auto");
+        setRequestedOrientation("portrait".equals(o) ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                : "landscape".equals(o) ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+    }
+
+    /** Settings, styled like the panel's settings cards. */
+    private void showSettings() {
+        jogRelease();
+        settingsOpen = true;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(12), dp(8), dp(12), dp(12));
+        LinearLayout.LayoutParams tb = new LinearLayout.LayoutParams(-1, dp(48));
+        tb.bottomMargin = dp(8);
+        root.addView(titleBar("Settings", "\uf057", v -> buildUi()), tb);
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+
+        // orientation
+        LinearLayout c1 = card(list, "Orientation", "How the phone is mounted");
+        String o = prefs().getString("orientation", "auto");
+        LinearLayout seg = new LinearLayout(this);
+        String[][] opts = {{"auto", "AUTO"}, {"portrait", "PORTRAIT"}, {"landscape", "LANDSCAPE"}};
+        for (int i = 0; i < opts.length; i++) {
+            final String key = opts[i][0];
+            TextView b = segment(opts[i][1], key.equals(o));
+            b.setOnClickListener(v -> {
+                prefs().edit().putString("orientation", key).apply();
+                applyOrientation();
+                showSettings();
+            });
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(52), 1f);
+            if (i < opts.length - 1) p.setMarginEnd(dp(4));
+            seg.addView(b, p);
+        }
+        c1.addView(seg, new LinearLayout.LayoutParams(-1, -2));
+
+        // pairing
+        LinearLayout c2 = card(list, "Pairing", null);
+        setPairing = hint(c2);
+        TextView forget = segment("FORGET AND RE-PAIR", false);
+        forget.setTextColor(RED);
+        forget.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Forget the panel?")
+                .setMessage("The phone gets a new identity. Press PAIR on the panel "
+                        + "(Settings, Connection, Phone remote) to pair it again.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Forget", (d, w) -> forgetPanel())
+                .show());
+        c2.addView(forget, new LinearLayout.LayoutParams(-1, dp(52)));
+
+        // connection details
+        LinearLayout c3 = card(list, "Connection", null);
+        setPanel = hint(c3);
+        setSignal = hint(c3);
+        setDrive = hint(c3);
+        TextView ver = hint(c3);
+        ver.setText("Servo Remote " + appVersion());
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(list);
+        root.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        setContentView(root);
+        render();
+    }
+
+    private LinearLayout card(LinearLayout parent, String label, String hint) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(fill(Color.rgb(20, 20, 20)));
+        c.setPadding(dp(12), dp(8), dp(12), dp(12));
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTypeface(font);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        c.addView(t);
+        if (hint != null) hint(c).setText(hint);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+        p.bottomMargin = dp(8);
+        parent.addView(c, p);
+        return c;
+    }
+
+    private TextView hint(LinearLayout parent) {
+        TextView h = new TextView(this);
+        h.setTypeface(font);
+        h.setTextColor(STATUS);
+        h.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        h.setPadding(0, dp(2), 0, dp(8));
+        parent.addView(h);
+        return h;
+    }
+
+    /** The panel's segment button: blue when it is the current choice. */
+    private TextView segment(String text, boolean active) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTypeface(font);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setGravity(Gravity.CENTER);
+        b.setTextColor(active ? Color.WHITE : Color.rgb(180, 180, 180));
+        b.setBackground(fills(active ? ACCENT : PANEL, PRESSED));
+        b.setClickable(true);
+        return b;
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException e) {
+            return "?";
+        }
+    }
+
+    /** A new identity: the panel no longer knows this phone until PAIR. */
+    private void forgetPanel() {
+        prefs().edit().remove("id").remove("panel").apply();
+        phoneId = loadPhoneId();
+        dropLink();
+        showSettings();
+    }
+
+    private void renderSettings() {
+        if (setPanel == null) return;
+        String panel = prefs().getString("panel", "");
+        setPairing.setText(has(F_PAIRED) ? "Paired with " + (panelName.isEmpty() ? "the panel" : panelName)
+                + (panel.isEmpty() ? "" : " (" + panel + ")")
+                : has(F_REFUSED) ? "Not paired: press PAIR on the panel"
+                : panel.isEmpty() ? "Not paired yet" : "Last paired with " + panel);
+        String addr = "";
+        try {
+            if (gatt != null) addr = gatt.getDevice().getAddress();
+        } catch (SecurityException ignored) {
+        }
+        setPanel.setText(linked ? "Panel: " + (panelName.isEmpty() ? "connected" : panelName) + "  " + addr
+                : scanning ? "Panel: looking for it..." : "Panel: not connected");
+        String q = rssi == 0 ? "" : rssi > -70 ? "good" : rssi > -85 ? "fair" : "weak";
+        setSignal.setText(linked && rssi != 0 ? "Signal: " + rssi + " dBm, " + q : "Signal: -");
+        setDrive.setText(!usable() ? "Drive: -" : "Drive: " + (has(F_ONLINE) ? "online" : "OFFLINE")
+                + (has(F_ENABLED) ? ", enabled" : ", disabled")
+                + (has(F_LEVER) ? ", lever not OFF" : ", lever OFF"));
     }
 
     private TextView button(String text) {
@@ -212,6 +408,10 @@ public class MainActivity extends Activity {
      *  panel: the direction button is blue and names the direction, EN is
      *  dark until the drive is enabled, then blue, JOG is blue while held. */
     private void render() {
+        if (settingsOpen) {
+            renderSettings();
+            return;
+        }
         boolean ok = usable();
         String s;
         if (adapter == null || !adapter.isEnabled()) {
@@ -342,6 +542,12 @@ public class MainActivity extends Activity {
                 dropLink();
             }
             if (!linked && !scanning && gatt == null && !needPermissions()) startScan();
+            if (settingsOpen && linked && gatt != null) {
+                try {
+                    gatt.readRemoteRssi();
+                } catch (SecurityException ignored) {
+                }
+            }
             render();
             ui.postDelayed(this, 1000);
         }
@@ -384,6 +590,10 @@ public class MainActivity extends Activity {
             stopScan();
             BluetoothDevice d = r.getDevice();
             Log.i(TAG, "found the panel " + d.getAddress());
+            if (r.getScanRecord() != null && r.getScanRecord().getDeviceName() != null) {
+                panelName = r.getScanRecord().getDeviceName();
+            }
+            rssi = r.getRssi();
             try {
                 connectStarted = System.currentTimeMillis();
                 gatt = d.connectGatt(MainActivity.this, false, gattCb, BluetoothDevice.TRANSPORT_LE);
@@ -485,9 +695,21 @@ public class MainActivity extends Activity {
             ui.post(() -> {
                 flags = f;
                 lastState = System.currentTimeMillis();
+                if ((f & F_PAIRED) != 0 && gatt != null) {
+                    String a = gatt.getDevice().getAddress();
+                    if (!a.equals(prefs().getString("panel", ""))) prefs().edit().putString("panel", a).apply();
+                }
                 if (jogHeld && !(has(F_JOG) || has(F_JOG_OK))) jogRelease();
                 render();
             });
+        }
+
+        @Override
+        public void onReadRemoteRssi(BluetoothGatt g, int value, int st) {
+            if (st == BluetoothGatt.GATT_SUCCESS) {
+                rssi = value;
+                ui.post(MainActivity.this::render);
+            }
         }
 
         @Override
@@ -548,7 +770,7 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ identity
     /** A random id made on first run: what the panel pairs with. */
     private byte[] loadPhoneId() {
-        SharedPreferences p = getSharedPreferences("remote", MODE_PRIVATE);
+        SharedPreferences p = prefs();
         String hex = p.getString("id", null);
         if (hex == null || hex.length() != 16) {
             byte[] b = new byte[8];
