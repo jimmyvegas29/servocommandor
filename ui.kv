@@ -1976,76 +1976,103 @@
         text_size: self.size
         halign: 'left'
         valign: 'middle'
-    SettingCard:
-        SettingHead:
-            label: 'Link to the tap board'
-            hint: 'USB cable or Bluetooth'
+    ScrollView:
+        do_scroll_x: False
+        bar_width: 4
         BoxLayout:
-            spacing: 0
-            SegButton:
-                text: 'USB'
-                active: app.dro_link == 'usb'
-                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
-                on_press: app.set_dro_link('usb')
-            SegButton:
-                text: 'BLUETOOTH'
-                active: app.dro_link == 'ble'
-                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
-                on_press: app.set_dro_link('ble')
-    SettingCard:
-        SettingHead:
-            label: 'Bluetooth board'
-            hint: (app.ble_name + '  ' + app.ble_address) if app.ble_address else 'none chosen, first board found is used'
-        BoxLayout:
-            spacing: 6
-            SetKey:
-                text: 'SCANNING...' if app.ble_scanning else 'SCAN'
-                font_size: '15sp'
-                size_hint_x: None
-                width: 150
-                disabled: app.ble_scanning
-                on_press: app.start_ble_scan()
-            Widget:
-    SettingCard:
-        SettingHead:
-            label: 'Drive link'
-            hint: ('Machine node' + ('' if app.node_control else ', read-only firmware')) if app.drive_link == 'node' else 'RS-485 HAT and switch on the Pi'
-        BoxLayout:
-            spacing: 0
-            SegButton:
-                text: 'PI HAT'
-                active: app.drive_link == 'hat'
-                corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
-                on_press: app.set_drive_link('hat')
-            SegButton:
-                text: 'MACHINE NODE'
-                active: app.drive_link == 'node'
-                disabled: app.dro_link != 'ble'
-                corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
-                on_press: app.set_drive_link('node')
-    SettingCard:
-        SettingHead:
-            label: 'Node firmware'
-            hint: 'Node: ' + (app.node_version if app.node_version else 'unknown') + '    Panel has: ' + app.node_fw_available
-        BoxLayout:
-            spacing: 6
-            SetKey:
-                text: app.ota_text
-                font_size: '14sp'
-                color: (0.4, 0.85, 0.5, 1) if app.ota_ready else (0.45, 0.45, 0.45, 1)
-                disabled: not app.ota_ready
-                on_press: app.update_node()
-    SLabel:
-        text: 'Scales: ' + app.dro_status
-        font_size: '12sp'
-        color: (0.6, 0.6, 0.6, 1)
-        size_hint_y: None
-        height: 44
-        text_size: self.size
-        halign: 'left'
-        valign: 'middle'
-        padding: [6, 0]
-    Widget:
+            orientation: 'vertical'
+            spacing: 8
+            size_hint_y: None
+            height: self.minimum_height
+            SettingCard:
+                SettingHead:
+                    label: 'Link to the tap board'
+                    hint: 'USB cable or Bluetooth'
+                BoxLayout:
+                    spacing: 0
+                    SegButton:
+                        text: 'USB'
+                        active: app.dro_link == 'usb'
+                        corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                        on_press: app.set_dro_link('usb')
+                    SegButton:
+                        text: 'BLUETOOTH'
+                        active: app.dro_link == 'ble'
+                        corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                        on_press: app.set_dro_link('ble')
+            SettingCard:
+                SettingHead:
+                    label: 'Bluetooth board'
+                    hint: (app.ble_name + '  ' + app.ble_address) if app.ble_address else 'none chosen, first board found is used'
+                BoxLayout:
+                    spacing: 6
+                    SetKey:
+                        text: 'SCANNING...' if app.ble_scanning else 'SCAN'
+                        font_size: '15sp'
+                        size_hint_x: None
+                        width: 150
+                        disabled: app.ble_scanning
+                        on_press: app.start_ble_scan()
+                    Widget:
+            SettingCard:
+                SettingHead:
+                    label: 'Drive link'
+                    hint: ('Machine node' + ('' if app.node_control else ', read-only firmware')) if app.drive_link == 'node' else 'RS-485 HAT and switch on the Pi'
+                BoxLayout:
+                    spacing: 0
+                    SegButton:
+                        text: 'PI HAT'
+                        active: app.drive_link == 'hat'
+                        corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
+                        on_press: app.set_drive_link('hat')
+                    SegButton:
+                        text: 'MACHINE NODE'
+                        active: app.drive_link == 'node'
+                        disabled: app.dro_link != 'ble'
+                        corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
+                        on_press: app.set_drive_link('node')
+            SettingCard:
+                SettingHead:
+                    label: 'Node firmware'
+                    hint: 'Node: ' + (app.node_version if app.node_version else 'unknown') + '    Panel has: ' + app.node_fw_available
+                BoxLayout:
+                    spacing: 6
+                    SetKey:
+                        text: app.ota_text
+                        font_size: '14sp'
+                        color: (0.4, 0.85, 0.5, 1) if app.ota_ready else (0.45, 0.45, 0.45, 1)
+                        disabled: not app.ota_ready
+                        on_press: app.update_node()
+            SettingCard:
+                SettingHead:
+                    label: 'Phone remote'
+                    hint: app.phone_status
+                BoxLayout:
+                    spacing: 6
+                    ToggleSwitch:
+                        active: app.phone_remote_on
+                        on_press: app.set_phone_remote(not app.phone_remote_on)
+                    SetKey:
+                        text: 'PAIRING...' if app.phone_pairing else 'PAIR'
+                        font_size: '15sp'
+                        color: ACCENT if app.phone_remote_on else (0.35, 0.35, 0.35, 1)
+                        disabled: not app.phone_remote_on
+                        on_press: app.pair_phone()
+                    SetKey:
+                        text: 'FORGET'
+                        font_size: '15sp'
+                        color: (0.95, 0.25, 0.2, 1) if app.phones_paired else (0.35, 0.35, 0.35, 1)
+                        on_press: app.forget_phones()
+            SLabel:
+                text: 'Scales: ' + app.dro_status
+                font_size: '12sp'
+                color: (0.6, 0.6, 0.6, 1)
+                size_hint_y: None
+                height: 44
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                padding: [6, 0]
 
 <DroPage@BoxLayout>:
     orientation: 'vertical'

@@ -96,7 +96,8 @@ class ServoCommunicator:
         print(f"Mock servo speed set to {speed}")
 
     def jog(self, speed):
-        self._jog_saved = getattr(self, '_jog_saved', self.rpm)
+        if getattr(self, '_jog_saved', None) is None:      # the speed to come back to
+            self._jog_saved = self.rpm
         self.rpm = speed
         self.servostate = 'enabled'
         self.jog_calls = getattr(self, 'jog_calls', 0) + 1

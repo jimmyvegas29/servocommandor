@@ -41,6 +41,7 @@ from portrait_ui import (LoadGraph, FitLabel, FixedDigits, SetOverlay,   # noqa:
 from dro_serial import DroSerial
 from dro_ble import DroBle, scan_boards
 import diag_upload
+import phone_remote
 import logcap
 import tapdata
 from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
@@ -63,6 +64,9 @@ SETTINGS_DEFAULTS = {'orientation': 'portrait', 'show_dro': True, 'units': 'mm',
                      # how the tap board is reached: 'usb' or 'ble'; the
                      # chosen Bluetooth board ('' = first one found)
                      'dro_link': 'usb', 'ble_address': '', 'ble_name': '',
+                     # the Servo Remote phone app (Bluetooth): on or off, and
+                     # the phones paired with this panel ({'id', 'name'})
+                     'phone_remote': False, 'phones': [],
                      # where the drive is reached: 'hat' (RS-485 HAT + GPIO switch
                      # on the Pi) or 'node' (through the Bluetooth machine node)
                      'drive_link': 'hat',
@@ -844,6 +848,10 @@ class ServoCommanderApp(App):
     ble_address = StringProperty('')
     ble_name = StringProperty('')
     ble_scanning = BooleanProperty(False)
+    phone_remote_on = BooleanProperty(False)  # the phone remote service is running
+    phone_status = StringProperty('')         # what the Connection page shows for it
+    phone_pairing = BooleanProperty(False)    # PAIR window open
+    phones_paired = NumericProperty(0)        # how many phones are paired
     drive_link = StringProperty('hat')
     node_control = BooleanProperty(False)     # node firmware allows commands
     node_version = StringProperty('')         # firmware version the node reports
@@ -959,6 +967,13 @@ class ServoCommanderApp(App):
         Clock.schedule_once(self._set_window, 0)
         Clock.schedule_interval(self._poll_ui, DT)
         Clock.schedule_interval(self._poll_dro, 0.05)
+        self._remote = None
+        self._phone_jog = False                  # the jog running was started by the phone
+        self._phone_jog_until = 0.0
+        Clock.schedule_interval(self._phone_tick, 0.1)
+        self.phones_paired = len(self.settings.get('phones', []))
+        if self.settings.get('phone_remote'):
+            self._start_phone_remote()
         self.uploader = diag_upload.Uploader()
         self.panel_name = self._panel_name()
         Clock.schedule_interval(self._refresh_upload_status, 1.0)
@@ -3453,6 +3468,126 @@ class ServoCommanderApp(App):
     def sys_reboot(self):
         self._sys('reboot')
 
+    # ---- phone remote (Servo Remote app over Bluetooth) ---------------------
+    PHONE_JOG_TIMEOUT = 0.5          # jog stops this long after the phone's last 'held'
+
+    def _start_phone_remote(self):
+        if self._remote is not None:
+            return
+        self._remote = phone_remote.PhoneRemote(self._phone_command_threadsafe,
+                                                self._phone_is_paired, self._phone_paired)
+        self.phone_remote_on = self._remote.start()
+
+    def _stop_phone_remote(self):
+        if self._remote is None:
+            return
+        self._phone_jog_stop('phone remote turned off')
+        self._remote.stop()
+        self._remote = None
+        self.phone_remote_on = False
+
+    def set_phone_remote(self, on):
+        self.settings['phone_remote'] = bool(on)
+        self._save_settings()
+        if on:
+            self._start_phone_remote()
+        else:
+            self._stop_phone_remote()
+        log.info('Phone remote %s', 'on' if on else 'off')
+
+    def pair_phone(self):
+        if self._remote is not None:
+            self._remote.open_pairing(60)
+            log.info('Phone remote: pairing open for 60 s')
+
+    def forget_phones(self):
+        self.settings['phones'] = []
+        self.phones_paired = 0
+        self._save_settings()
+        log.info('Phone remote: paired phones forgotten')
+
+    def _phone_is_paired(self, phone_id):
+        return any(p.get('id') == phone_id for p in self.settings.get('phones', []))
+
+    def _phone_paired(self, phone_id, name):
+        Clock.schedule_once(lambda dt: self._phone_store(phone_id, name), 0)
+
+    def _phone_store(self, phone_id, name):
+        phones = [p for p in self.settings.get('phones', []) if p.get('id') != phone_id]
+        phones.append({'id': phone_id, 'name': name})
+        self.settings['phones'] = phones
+        self.phones_paired = len(phones)
+        self._save_settings()
+
+    def _phone_command_threadsafe(self, cmd, arg):
+        Clock.schedule_once(lambda dt: self.phone_command(cmd, arg), 0)
+
+    def phone_command(self, cmd, arg):
+        """A button on the phone: the same paths as the panel's own buttons."""
+        if cmd == 'dir':
+            if arg != self.direction:
+                log.info('Phone: direction %s', arg)
+                self.toggle_direction()
+        elif cmd == 'enable':
+            if (self.servo_state == 'enabled') != bool(arg):
+                log.info('Phone: %s', 'enable' if arg else 'disable')
+                self.toggle_enable()
+        elif cmd == 'jog':
+            if arg:
+                if not self.jogging:
+                    if self.jog_press():
+                        self._phone_jog = True
+                        log.info('Phone: jog held')
+                if self._phone_jog:
+                    self._phone_jog_until = time.monotonic() + self.PHONE_JOG_TIMEOUT
+            else:
+                self._phone_jog_stop('phone: jog released')
+        elif cmd == 'gone':
+            self._phone_jog_stop('phone disconnected')
+
+    def _phone_jog_stop(self, why):
+        if self._phone_jog:
+            self._phone_jog = False
+            if self.jogging:
+                self.jog_release()
+            log.info('JOG stopped (%s)', why)
+
+    def _phone_flags(self):
+        f = 0
+        if self.servo_state == 'enabled':
+            f |= phone_remote.F_ENABLED
+        if self.direction == 'rev':
+            f |= phone_remote.F_REV
+        if self.jogging:
+            f |= phone_remote.F_JOG
+        if not self.offline_flag:
+            f |= phone_remote.F_ONLINE
+        if self.jog_ok:
+            f |= phone_remote.F_JOG_OK
+        if getattr(self.servo, 'get_hw_direction', lambda: None)() is not None:
+            f |= phone_remote.F_LEVER
+        return f
+
+    def _phone_tick(self, dt):
+        r = self._remote
+        if self._phone_jog and time.monotonic() > self._phone_jog_until:
+            self._phone_jog_stop('no word from the phone')
+        if r is None:
+            if self.phone_status != 'off':
+                self.phone_status = 'off'
+            return
+        r.set_state(self._phone_flags(), round(self.command_speed / self.ratio) if self.ratio else 0)
+        status = r.status
+        if r.pairing:
+            status = 'PAIR open: open Servo Remote on the phone (%d s)' % max(0, r.pairing_until - time.monotonic())
+        phones = self.settings.get('phones', [])
+        if not phones and not r.pairing and not r.connected:
+            status += ', no phone paired yet'
+        if status != self.phone_status:
+            self.phone_status = status
+        if r.pairing != self.phone_pairing:
+            self.phone_pairing = r.pairing
+
     def on_stop(self):
         # never leave the drive enabled when the GUI goes away
         try:
@@ -3462,6 +3597,8 @@ class ServoCommanderApp(App):
             log.error('on_stop: %s', exc)
         if self.dro is not None:
             self.dro.stop()
+        if getattr(self, '_remote', None) is not None:
+            self._remote.stop()
         self._save_datums()
         log.info('App stopped')
 

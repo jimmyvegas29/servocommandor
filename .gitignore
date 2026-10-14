@@ -7,3 +7,6 @@ tests/shots/
 settings.json
 datums.json
 tests/*.json
+
+# phone app build output
+android/ServoRemote/out/

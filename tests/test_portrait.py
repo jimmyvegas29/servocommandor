@@ -1092,6 +1092,51 @@ def after_layout(dt):
     app._poll_ui(0)
     check('no jog while enabled', (app.jog_ok, app.jog_press()), (False, False))
     app.toggle_enable()
+
+    # phone remote: the phone's buttons run the panel's own paths
+    import phone_remote as pr
+    import time
+    app.phone_command('dir', 'rev')
+    check('phone REV: direction, speed zeroed like the panel button', (app.direction, app.command_speed), ('rev', 0))
+    app.phone_command('dir', 'rev')
+    check('phone REV again: no change', app.direction, 'rev')
+    app.phone_command('dir', 'fwd')
+    app.set_speed(600)
+    app.phone_command('enable', True)
+    check('phone EN on', (app.servo_state, app.servo.servostate), ('enabled', 'enabled'))
+    app.phone_command('enable', True)
+    check('phone EN on again: stays on (no toggle off)', app.servo_state, 'enabled')
+    check('state to the phone: enabled, fwd, online', app._phone_flags() & (pr.F_ENABLED | pr.F_REV | pr.F_ONLINE),
+          pr.F_ENABLED | pr.F_ONLINE)
+    app.phone_command('enable', False)
+    check('phone EN off', (app.servo_state, app.servo.servostate), ('disabled', 'disabled'))
+    app._poll_ui(0)
+    app.phone_command('jog', True)
+    check('phone jog held: jogging, started by the phone', (app.jogging, app._phone_jog), (True, True))
+    app._phone_jog_until = time.monotonic() + 0.3
+    app._phone_tick(0)
+    check('keep-alives keep it going', app.jogging, True)
+    app._phone_jog_until = time.monotonic() - 0.01      # the phone went quiet
+    app._phone_tick(0)
+    check('no word from the phone: jog stops by itself', (app.jogging, app._phone_jog, app.servo.servostate),
+          (False, False, 'disabled'))
+    app.phone_command('jog', True)
+    app.phone_command('jog', False)
+    check('phone jog released: stops', app.jogging, False)
+    app.phone_command('jog', True)
+    app.phone_command('gone', None)
+    check('phone disconnects mid-jog: stops at once', app.jogging, False)
+    app.jog_press()                                   # the panel's own JOG button
+    app.phone_command('jog', False)
+    check("phone release does not stop the panel's own jog", app.jogging, True)
+    app.jog_release()
+    app.toggle_enable()
+    app._poll_ui(0)
+    app.phone_command('jog', True)
+    check('no phone jog while enabled', (app.jogging, app._phone_jog), (False, False))
+    app.toggle_enable()
+    check('phone remote off by default', (app.settings.get('phone_remote'), app._remote, app.phone_status),
+          (False, None, 'off'))
     app.settings['speed_pad'] = {}
     app._save_settings()
     app._apply_presets(app.root_layout)

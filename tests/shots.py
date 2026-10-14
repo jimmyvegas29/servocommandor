@@ -357,6 +357,7 @@ plan = [
     (0.2, lambda: app.open_css()), (0.6, lambda: cap('landscape_css_setup')), (0.2, lambda: app.close_css()),
     (0.2, s_css_running), (0.6, lambda: cap('landscape_css_running')), (0.2, s_css_off),
     (0.2, s_landscape_settings), (0.6, lambda: cap('landscape_settings')),
+    (0.2, lambda: app._settings_overlay.select('connection')), (0.6, lambda: cap('landscape_settings_connection')),
     (0.2, s_landscape_running), (2.5, lambda: cap('landscape_running')),
     (0.2, s_landscape_cards), (1.0, lambda: cap('landscape_cards')),
     (0.2, s_done),
