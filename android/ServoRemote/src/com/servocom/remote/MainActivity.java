@@ -688,6 +688,13 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ lifecycle
+    /** Back closes Settings or the keypad; on the main buttons it does nothing,
+     *  so a stray press never closes the remote. */
+    @Override
+    public void onBackPressed() {
+        if (settingsOpen || keypadOpen) buildUi();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
