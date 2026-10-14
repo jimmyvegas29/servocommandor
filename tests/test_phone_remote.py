@@ -26,7 +26,7 @@ class FakeChr:
     def __init__(self):
         self.value = b''
 
-    def set_value(self, v):
+    def set_value(self, v, force=False):
         self.value = bytes(v)
 
 
@@ -93,6 +93,25 @@ r._push_state()
 f, rpm, ver = struct.unpack('<BHB', r._state_chr.value)
 check('state: flags, rpm, version', (f & ~phone_remote.F_PAIRED, rpm, ver),
       (phone_remote.F_ENABLED | phone_remote.F_REV | phone_remote.F_ONLINE, 600, phone_remote.PROTOCOL))
+
+# the heartbeat goes out every second even when nothing changed
+class CountingChr(FakeChr):
+    sent = 0
+
+    def set_value(self, v, force=False):
+        if force or bytes(v) != self.value:
+            CountingChr.sent += 1
+        FakeChr.set_value(self, v)
+
+
+r._state_chr = CountingChr()
+r._push_state()
+n0 = CountingChr.sent
+r._push_state()
+check('unchanged state: no extra notify on a change push', CountingChr.sent, n0)
+r._push_state(force=True)
+r._push_state(force=True)
+check('heartbeat: notifies every time', CountingChr.sent, n0 + 2)
 
 # the phone disconnecting: forgotten until its next hello, the app is told
 class Msg:

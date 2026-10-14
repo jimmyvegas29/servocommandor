@@ -111,9 +111,11 @@ if ServiceInterface is not None:
         def StopNotify(self):
             self.notifying = False
 
-        def set_value(self, value):
+        def set_value(self, value, force=False):
+            """force: notify even if unchanged (the once-a-second heartbeat
+            the phone uses to know the panel is still there)."""
             value = bytes(value)
-            if value == self._value:
+            if value == self._value and not force:
                 return
             self._value = value
             if self.notifying:
@@ -211,9 +213,9 @@ class PhoneRemote:
             f |= F_REFUSED
         return pack_state(f, self._rpm)
 
-    def _push_state(self):
+    def _push_state(self, force=False):
         if self._state_chr is not None:
-            self._state_chr.set_value(self._state_value())
+            self._state_chr.set_value(self._state_value(), force)
 
     def _on_write(self, data, device):
         if not data:
@@ -306,7 +308,7 @@ class PhoneRemote:
                     await asyncio.wait_for(self._stop.wait(), 1.0)
                 except asyncio.TimeoutError:
                     pass
-                self._push_state()                       # once a second: the phone sees we are alive
+                self._push_state(force=True)             # once a second: the phone sees we are alive
                 if not self._accepted and not self.status.startswith('error'):
                     self.status = 'pairing: open the app on the phone' if self.pairing else 'waiting for the phone'
         finally:

@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
 
     private static final int JOG_REPEAT_MS = 150;
     private static final int STATE_TIMEOUT_MS = 3000;     // the panel sends state every second
+    private static final int CONNECT_TIMEOUT_MS = 12000;  // a connection attempt that never finishes
 
     private static final int BLUE = Color.rgb(0, 128, 255), GREEN = Color.rgb(64, 200, 110),
             PANEL = Color.rgb(44, 46, 52), DIM = Color.rgb(110, 110, 110), BG = Color.rgb(18, 20, 24),
@@ -76,6 +77,7 @@ public class MainActivity extends Activity {
     private boolean scanning, linked, jogHeld;
     private int flags = -1;
     private long lastState;
+    private long connectStarted;
     private byte[] phoneId;
 
     /** One queued write: the bytes, and whether it goes without a response. */
@@ -306,11 +308,15 @@ public class MainActivity extends Activity {
     private final Runnable watchdog = new Runnable() {
         @Override
         public void run() {
-            if (linked && flags >= 0 && System.currentTimeMillis() - lastState > 3 * STATE_TIMEOUT_MS) {
+            long now = System.currentTimeMillis();
+            if (linked && flags >= 0 && now - lastState > 3 * STATE_TIMEOUT_MS) {
                 Log.i(TAG, "no state from the panel: reconnecting");
                 dropLink();
+            } else if (!linked && gatt != null && now - connectStarted > CONNECT_TIMEOUT_MS) {
+                Log.i(TAG, "connection attempt timed out: retrying");
+                dropLink();
             }
-            if (!linked && !scanning && !needPermissions()) startScan();
+            if (!linked && !scanning && gatt == null && !needPermissions()) startScan();
             render();
             ui.postDelayed(this, 1000);
         }
@@ -318,7 +324,8 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ Bluetooth
     private void startScan() {
-        if (adapter == null || !adapter.isEnabled() || linked || scanning) {
+        // never scan while a connection is being made: Android drops the attempt (status 133)
+        if (adapter == null || !adapter.isEnabled() || linked || scanning || gatt != null) {
             render();
             return;
         }
@@ -353,6 +360,7 @@ public class MainActivity extends Activity {
             BluetoothDevice d = r.getDevice();
             Log.i(TAG, "found the panel " + d.getAddress());
             try {
+                connectStarted = System.currentTimeMillis();
                 gatt = d.connectGatt(MainActivity.this, false, gattCb, BluetoothDevice.TRANSPORT_LE);
             } catch (SecurityException e) {
                 Log.w(TAG, "connect refused", e);
