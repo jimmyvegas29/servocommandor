@@ -1114,6 +1114,18 @@ def after_layout(dt):
     app.set_speed(600)
     app.phone_command('step', -1)
     check('phone -: same as the panel - button', (app.command_speed, want_down < want_up), (want_down, True))
+    for pos in (1, 3, 6):
+        app.set_speed(0)
+        app.phone_command('preset', pos)
+        want = app.command_speed
+        app.set_speed(app.preset_value(pos))
+        check('phone preset %d: same as the panel button' % pos, want, app.command_speed)
+    app.phone_command('custom', 333)
+    custom = app.command_speed
+    app.set_speed(333)
+    check('phone custom: same as the numpad', custom, app.command_speed)
+    app.phone_command('custom', app.display_max() + 1)
+    check('phone custom over the top: refused', app.command_speed, custom)
     app.set_speed(600)
     app.phone_command('enable', True)
     check('phone EN on', (app.servo_state, app.servo.servostate), ('enabled', 'enabled'))

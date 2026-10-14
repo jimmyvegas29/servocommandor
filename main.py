@@ -3547,6 +3547,18 @@ class ServoCommanderApp(App):
             step = self.step_value() * (1 if arg > 0 else -1)
             log.info('Phone: %+d', step)
             self.adjust_speed(step)
+        elif cmd == 'preset':
+            # the panel's preset button: the same speed and the same rules
+            speed = self.preset_value(int(arg))
+            log.info('Phone: preset %d (%d)', arg, speed)
+            self.set_speed(speed)
+        elif cmd == 'custom':
+            # the panel's CUSTOM numpad: refused above what the panel accepts
+            if int(arg) > self.display_max():
+                log.info('Phone: custom %d refused (over %d)', arg, self.display_max())
+            else:
+                log.info('Phone: custom %d', arg)
+                self.set_speed(int(arg))
         elif cmd == 'gone':
             self._phone_jog_stop('phone disconnected')
 
@@ -3582,7 +3594,7 @@ class ServoCommanderApp(App):
                 self.phone_status = 'off'
             return
         r.set_state(self._phone_flags(), round(self.command_speed / self.ratio) if self.ratio else 0,
-                    self.step_value())
+                    self.step_value(), [self.preset_value(i) for i in range(1, 7)], self.display_max())
         status = r.status
         if r.pairing:
             status = 'PAIR open: open Servo Remote on the phone (%d s)' % max(0, r.pairing_until - time.monotonic())

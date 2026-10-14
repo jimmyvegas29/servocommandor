@@ -102,6 +102,13 @@ public class MainActivity extends Activity {
 
     private TextView status, dir, en, jog, plus, minus;
     private int step;                       // the panel's +/- step: from its state, remembered
+    private final int[] presetVals = new int[6];   // the panel's presets 1-6: from its state, remembered
+    private int top;                        // the largest speed the panel accepts
+    private final TextView[] presets = new TextView[6];
+    private TextView custom;
+    private boolean keypadOpen;
+    private String entry = "";
+    private TextView entryView, entryHint, setKey;
     private Typeface font, icons;
     private boolean settingsOpen;
     private TextView setPanel, setSignal, setDrive, setPairing;
@@ -126,6 +133,10 @@ public class MainActivity extends Activity {
         }
         applyOrientation();
         step = prefs().getInt("step", 0);         // the last step the panel sent, shown while away
+        String savedPresets = prefs().getString("presets", "");
+        String[] parts = savedPresets.split(",");
+        for (int i = 0; i < 6 && parts.length == 6; i++) presetVals[i] = Integer.parseInt(parts[i]);
+        top = prefs().getInt("top", 0);
         BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         adapter = bm == null ? null : bm.getAdapter();
         buildUi();
@@ -138,7 +149,12 @@ public class MainActivity extends Activity {
         super.onConfigurationChanged(c);
         jogRelease();
         if (settingsOpen) showSettings();
-        else buildUi();
+        else if (keypadOpen) {
+            String keep = entry;
+            showKeypad();
+            entry = keep;
+            render();
+        } else buildUi();
     }
 
     /** The panel's title bar: name on the left, an icon button on the right. */
@@ -185,7 +201,7 @@ public class MainActivity extends Activity {
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
         int across = land ? 5 : 3;
         int cell = (dm.widthPixels - 2 * pad - (across - 1) * gap) / across;
-        int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.35)) : cell;
+        int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.30)) : cell;
 
         dir = button("FWD");
         en = button("EN");
@@ -199,6 +215,22 @@ public class MainActivity extends Activity {
             stp.topMargin = gap;
             root.addView(rowOf(new TextView[]{plus, minus}, gap), stp);
         }
+
+        // the panel's speed presets 1-6, and CUSTOM under them
+        for (int i = 0; i < 6; i++) {
+            presets[i] = button("-");
+            presets[i].setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        }
+        custom = button("CUSTOM");
+        custom.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        int presetH = (int) (height * 0.6);
+        if (land) {
+            root.addView(rowOf(presets, gap), spaced(presetH, gap));
+        } else {
+            root.addView(rowOf(new TextView[]{presets[0], presets[1], presets[2]}, gap), spaced(presetH, gap));
+            root.addView(rowOf(new TextView[]{presets[3], presets[4], presets[5]}, gap), spaced(presetH, gap));
+        }
+        root.addView(custom, spaced(land ? (int) (height * 0.45) : presetH, gap));
 
         root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
         settingsOpen = false;
@@ -216,7 +248,129 @@ public class MainActivity extends Activity {
         jog.setOnTouchListener(this::jogTouch);
         plus.setOnClickListener(v -> press(v, new byte[]{'+'}));
         minus.setOnClickListener(v -> press(v, new byte[]{'-'}));
+        for (int i = 0; i < 6; i++) {
+            final byte pos = (byte) (i + 1);
+            presets[i].setOnClickListener(v -> press(v, new byte[]{'P', pos}));
+        }
+        custom.setOnClickListener(v -> {
+            if (usable()) showKeypad();
+        });
+        keypadOpen = false;
         render();
+    }
+
+    private LinearLayout.LayoutParams spaced(int height, int gap) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, height);
+        p.topMargin = gap;
+        return p;
+    }
+
+    // ------------------------------------------------------------------ custom speed
+    /** The panel's CUSTOM numpad: type a speed, SET sends it. */
+    private void showKeypad() {
+        jogRelease();
+        keypadOpen = true;
+        entry = "";
+        boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        int gap = dp(8);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(12), dp(8), dp(12), dp(12));
+        LinearLayout.LayoutParams tb = new LinearLayout.LayoutParams(-1, dp(48));
+        tb.bottomMargin = gap;
+        root.addView(titleBar("Custom speed", "\uf057", v -> buildUi()), tb);
+
+        entryView = new TextView(this);
+        entryView.setTypeface(font);
+        entryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 48);
+        entryView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        entryView.setPadding(dp(16), 0, dp(16), 0);
+        entryView.setBackground(fill(Color.rgb(20, 20, 20)));
+        entryHint = new TextView(this);
+        entryHint.setTypeface(font);
+        entryHint.setTextColor(STATUS);
+        entryHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        entryHint.setPadding(dp(4), dp(6), dp(4), dp(6));
+        setKey = button("SET");
+        setKey.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        setKey.setOnClickListener(v -> keypadSet());
+
+        String[] keys = {"7", "8", "9", "4", "5", "6", "1", "2", "3", "C", "0", "\uf55a"};
+        LinearLayout pad = new LinearLayout(this);
+        pad.setOrientation(LinearLayout.VERTICAL);
+        for (int r = 0; r < 4; r++) {
+            TextView[] row = new TextView[3];
+            for (int c = 0; c < 3; c++) {
+                final String k = keys[r * 3 + c];
+                TextView b = button(k);
+                b.setTypeface(k.equals("\uf55a") ? icons : font);
+                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+                b.setBackground(fills(PANEL, ACCENT));
+                b.setOnClickListener(v -> keypadKey(k));
+                row[c] = b;
+            }
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, 0, 1f);
+            if (r > 0) rp.topMargin = gap;
+            pad.addView(rowOf(row, gap), rp);
+        }
+
+        if (land) {
+            LinearLayout body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(entryView, new LinearLayout.LayoutParams(-1, dp(80)));
+            left.addView(entryHint, new LinearLayout.LayoutParams(-1, -2));
+            left.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));
+            left.addView(setKey, new LinearLayout.LayoutParams(-1, dp(64)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
+            lp.setMarginEnd(gap);
+            body.addView(left, lp);
+            body.addView(pad, new LinearLayout.LayoutParams(0, -1, 1f));
+            root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
+        } else {
+            root.addView(entryView, new LinearLayout.LayoutParams(-1, dp(88)));
+            root.addView(entryHint, new LinearLayout.LayoutParams(-1, -2));
+            root.addView(pad, new LinearLayout.LayoutParams(-1, 0, 1f));
+            root.addView(setKey, spaced(dp(72), gap));
+        }
+        setContentView(root);
+        render();
+    }
+
+    private void keypadKey(String k) {
+        if (k.equals("C")) {
+            entry = "";
+        } else if (k.equals("\uf55a")) {
+            if (!entry.isEmpty()) entry = entry.substring(0, entry.length() - 1);
+        } else if (entry.length() < 5) {
+            entry = entry.equals("0") ? k : entry + k;
+        }
+        render();
+    }
+
+    private boolean keypadOver() {
+        return !entry.isEmpty() && top > 0 && Integer.parseInt(entry) > top;
+    }
+
+    private void keypadSet() {
+        if (entry.isEmpty() || keypadOver() || !usable()) return;
+        int v = Integer.parseInt(entry);
+        send(new byte[]{'C', (byte) (v & 0xFF), (byte) ((v >> 8) & 0xFF)}, true);
+        buildUi();
+    }
+
+    private void renderKeypad() {
+        if (entryView == null) return;
+        boolean over = keypadOver();
+        entryView.setText((entry.isEmpty() ? "0" : entry) + " rpm");
+        entryView.setTextColor(over ? RED : entry.isEmpty() ? DIM : Color.WHITE);
+        entryHint.setText(top > 0 ? "0 to " + top + " rpm, the panel's limit" : "Spindle rpm");
+        boolean ok = usable() && !entry.isEmpty() && !over;
+        setKey.setBackground(fills(PANEL, ACCENT));
+        setKey.setTextColor(ok ? Color.rgb(102, 217, 128) : DIM);
+        setKey.setEnabled(ok);
     }
 
     /** Buttons side by side, equal widths, a gap between. */
@@ -247,6 +401,7 @@ public class MainActivity extends Activity {
     private void showSettings() {
         jogRelease();
         settingsOpen = true;
+        keypadOpen = false;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
@@ -431,6 +586,10 @@ public class MainActivity extends Activity {
             renderSettings();
             return;
         }
+        if (keypadOpen) {
+            renderKeypad();
+            return;
+        }
         boolean ok = usable();
         String s;
         if (adapter == null || !adapter.isEnabled()) {
@@ -468,6 +627,17 @@ public class MainActivity extends Activity {
             b.setTextColor(ok ? Color.WHITE : DIM);
             b.setEnabled(ok);
         }
+
+        // presets: the panel's values, its preset look (blue while pressed)
+        for (int i = 0; i < 6; i++) {
+            presets[i].setText(presetVals[i] > 0 ? String.valueOf(presetVals[i]) : "-");
+            presets[i].setBackground(fills(PANEL, ACCENT));
+            presets[i].setTextColor(ok && presetVals[i] > 0 ? Color.WHITE : DIM);
+            presets[i].setEnabled(ok && presetVals[i] > 0);
+        }
+        custom.setBackground(fills(PANEL, ACCENT));
+        custom.setTextColor(ok ? Color.WHITE : DIM);
+        custom.setEnabled(ok);
 
         boolean canJog = ok && (has(F_JOG_OK) || has(F_JOG) || jogHeld);
         jog.setBackground(fill(canJog && (jogHeld || has(F_JOG)) ? ACCENT : PANEL));
@@ -721,11 +891,27 @@ public class MainActivity extends Activity {
             if (v == null || v.length < 1) return;
             final int f = v[0] & 0xFF;
             final int st2 = v.length >= 6 ? (v[4] & 0xFF) | ((v[5] & 0xFF) << 8) : 0;
+            final int[] pv = new int[7];
+            final boolean hasPresets = v.length >= 20;
+            for (int i = 0; hasPresets && i < 7; i++) pv[i] = (v[6 + 2 * i] & 0xFF) | ((v[7 + 2 * i] & 0xFF) << 8);
             ui.post(() -> {
                 flags = f;
                 if (st2 > 0 && st2 != step) {
                     step = st2;
                     prefs().edit().putInt("step", step).apply();
+                }
+                if (hasPresets) {
+                    boolean changed = pv[6] != top;
+                    for (int i = 0; i < 6; i++) changed |= pv[i] != presetVals[i];
+                    if (changed) {
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < 6; i++) {
+                            presetVals[i] = pv[i];
+                            sb.append(i > 0 ? "," : "").append(pv[i]);
+                        }
+                        top = pv[6];
+                        prefs().edit().putString("presets", sb.toString()).putInt("top", top).apply();
+                    }
                 }
                 lastState = System.currentTimeMillis();
                 if ((f & F_PAIRED) != 0 && gatt != null) {
