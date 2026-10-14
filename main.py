@@ -3559,6 +3559,13 @@ class ServoCommanderApp(App):
             else:
                 log.info('Phone: custom %d', arg)
                 self.set_speed(int(arg))
+        elif cmd == 'tool':
+            # opens the tool on the panel, as its own buttons do (nothing moves)
+            log.info('Phone: open %s', arg)
+            if arg == 'sfm':
+                self.open_sfm()
+            else:
+                self.tools_pick(arg)
         elif cmd == 'gone':
             self._phone_jog_stop('phone disconnected')
 
