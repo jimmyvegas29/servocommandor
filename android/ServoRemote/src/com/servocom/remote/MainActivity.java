@@ -17,10 +17,12 @@ import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -65,9 +67,10 @@ public class MainActivity extends Activity {
     private static final int STATE_TIMEOUT_MS = 3000;     // the panel sends state every second
     private static final int CONNECT_TIMEOUT_MS = 12000;  // a connection attempt that never finishes
 
-    private static final int BLUE = Color.rgb(0, 128, 255), GREEN = Color.rgb(64, 200, 110),
-            PANEL = Color.rgb(44, 46, 52), DIM = Color.rgb(110, 110, 110), BG = Color.rgb(18, 20, 24),
-            RED = Color.rgb(240, 70, 60);
+    // the panel's own colours (ui.kv): ACCENT, PANEL, the EN-off fill, BTN_GRAY
+    private static final int ACCENT = Color.rgb(0, 128, 255), PANEL = Color.rgb(41, 41, 41),
+            EN_OFF = Color.rgb(27, 27, 27), PRESSED = Color.rgb(80, 80, 80), DIM = Color.rgb(80, 80, 80),
+            STATUS = Color.rgb(160, 160, 160), BG = Color.BLACK;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private BluetoothAdapter adapter;
@@ -94,7 +97,8 @@ public class MainActivity extends Activity {
     private final ArrayDeque<Pending> queue = new ArrayDeque<>();
     private boolean writing;
 
-    private TextView status, fwd, rev, en, jog;
+    private TextView status, dir, en, jog;
+    private Typeface font;
 
     // ------------------------------------------------------------------ UI
     @Override
@@ -102,71 +106,104 @@ public class MainActivity extends Activity {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         phoneId = loadPhoneId();
+        try {
+            font = Typeface.createFromAsset(getAssets(), "Orbitron-Medium.ttf");   // the panel's font
+        } catch (RuntimeException e) {
+            font = Typeface.DEFAULT_BOLD;
+        }
+        BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        adapter = bm == null ? null : bm.getAdapter();
+        buildUi();
+        ui.postDelayed(watchdog, 1000);
+    }
 
+    /** Turning the phone rebuilds the screen only: the Bluetooth link stays up. */
+    @Override
+    public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        jogRelease();
+        buildUi();
+    }
+
+    /** Portrait: direction and EN side by side, JOG below.  Landscape:
+     *  direction above EN on the left, JOG on the right. */
+    private void buildUi() {
+        boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        int gap = dp(8);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        int pad = dp(16);
-        root.setPadding(pad, dp(28), pad, pad);
+        root.setPadding(dp(12), dp(land ? 8 : 20), dp(12), dp(12));
 
         status = new TextView(this);
-        status.setTextColor(Color.rgb(200, 200, 200));
-        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        status.setPadding(dp(4), 0, dp(4), dp(12));
+        status.setTypeface(font);
+        status.setTextColor(STATUS);
+        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        status.setPadding(dp(4), 0, dp(4), dp(land ? 6 : 12));
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
-        LinearLayout dirRow = new LinearLayout(this);
-        dirRow.setOrientation(LinearLayout.HORIZONTAL);
-        fwd = button("FWD");
-        rev = button("REV");
-        LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -1, 1f);
-        half.setMarginEnd(dp(8));
-        dirRow.addView(fwd, half);
-        dirRow.addView(rev, new LinearLayout.LayoutParams(0, -1, 1f));
-        root.addView(dirRow, rowParams(1f));
-
+        dir = button("FWD");
         en = button("EN");
-        root.addView(en, rowParams(1.2f));
-
         jog = button("JOG");
-        root.addView(jog, rowParams(1.6f));
+        if (land) {
+            LinearLayout body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams top = new LinearLayout.LayoutParams(-1, 0, 1f);
+            top.bottomMargin = gap;
+            left.addView(dir, top);
+            left.addView(en, new LinearLayout.LayoutParams(-1, 0, 1f));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
+            lp.setMarginEnd(gap);
+            body.addView(left, lp);
+            body.addView(jog, new LinearLayout.LayoutParams(0, -1, 1.2f));
+            root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
+        } else {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -1, 1f);
+            half.setMarginEnd(gap);
+            row.addView(dir, half);
+            row.addView(en, new LinearLayout.LayoutParams(0, -1, 1f));
+            root.addView(row, new LinearLayout.LayoutParams(-1, 0, 1f));
+            LinearLayout.LayoutParams jp = new LinearLayout.LayoutParams(-1, 0, 1.4f);
+            jp.topMargin = gap;
+            root.addView(jog, jp);
+        }
         setContentView(root);
 
-        fwd.setOnClickListener(v -> press(v, new byte[]{'D', 'F'}));
-        rev.setOnClickListener(v -> press(v, new byte[]{'D', 'R'}));
+        dir.setOnClickListener(v -> press(v, new byte[]{'D', (byte) (has(F_REV) ? 'F' : 'R')}));
         en.setOnClickListener(v -> press(v, new byte[]{'E', (byte) (has(F_ENABLED) ? 0 : 1)}));
         jog.setOnTouchListener(this::jogTouch);
-
-        BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
-        adapter = bm == null ? null : bm.getAdapter();
         render();
-        ui.postDelayed(watchdog, 1000);
     }
 
     private TextView button(String text) {
         TextView b = new TextView(this);
         b.setText(text);
         b.setGravity(Gravity.CENTER);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 44);
-        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 40);
+        b.setTypeface(font);
         b.setTextColor(Color.WHITE);
         b.setClickable(true);
         b.setHapticFeedbackEnabled(true);
-        paint(b, PANEL);
         return b;
     }
 
-    private LinearLayout.LayoutParams rowParams(float weight) {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, 0, weight);
-        p.topMargin = dp(10);
-        return p;
-    }
-
-    private void paint(TextView b, int color) {
+    private GradientDrawable fill(int color) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
-        d.setCornerRadius(dp(14));
-        b.setBackground(d);
+        d.setCornerRadius(dp(10));
+        return d;
+    }
+
+    /** A fill, and the panel's grey while the finger is on it. */
+    private StateListDrawable fills(int normal, int pressed) {
+        StateListDrawable s = new StateListDrawable();
+        s.addState(new int[]{android.R.attr.state_pressed}, fill(pressed));
+        s.addState(new int[]{}, fill(normal));
+        return s;
     }
 
     private int dp(int v) {
@@ -181,7 +218,9 @@ public class MainActivity extends Activity {
         return linked && has(F_PAIRED) && has(F_ONLINE) && System.currentTimeMillis() - lastState < STATE_TIMEOUT_MS;
     }
 
-    /** Buttons and status line from the panel's last state. */
+    /** Buttons and status line from the panel's last state, styled like the
+     *  panel: the direction button is blue and names the direction, EN is
+     *  dark until the drive is enabled, then blue, JOG is blue while held. */
     private void render() {
         boolean ok = usable();
         String s;
@@ -195,30 +234,26 @@ public class MainActivity extends Activity {
             s = "Not paired: press PAIR on the panel (Settings, Connection, Phone remote)";
         } else if (!has(F_ONLINE)) {
             s = "Panel connected, drive OFFLINE";
+        } else if (has(F_LEVER)) {
+            s = "Connected  -  lever is not OFF";
         } else {
-            s = "Connected to the panel" + (has(F_LEVER) ? "  -  lever is not OFF" : "");
+            s = "Connected";
         }
         status.setText(s);
 
-        boolean rv = has(F_REV);
-        paint(fwd, ok && !rv ? BLUE : PANEL);
-        paint(rev, ok && rv ? BLUE : PANEL);
-        fwd.setTextColor(ok ? Color.WHITE : DIM);
-        rev.setTextColor(ok ? Color.WHITE : DIM);
-        fwd.setEnabled(ok);
-        rev.setEnabled(ok);
+        dir.setText(has(F_REV) ? "REV" : "FWD");
+        dir.setBackground(fills(ok ? ACCENT : PANEL, PRESSED));
+        dir.setTextColor(ok ? Color.WHITE : DIM);
+        dir.setEnabled(ok);
 
         boolean on = has(F_ENABLED);
-        en.setText(on ? "ENABLED" : "EN");
-        paint(en, ok && on ? GREEN : PANEL);
+        en.setBackground(fills(ok && on ? ACCENT : EN_OFF, PRESSED));
         en.setTextColor(ok ? Color.WHITE : DIM);
         en.setEnabled(ok);
 
         boolean canJog = ok && (has(F_JOG_OK) || has(F_JOG) || jogHeld);
-        paint(jog, canJog && (jogHeld || has(F_JOG)) ? BLUE : PANEL);
+        jog.setBackground(fill(canJog && (jogHeld || has(F_JOG)) ? ACCENT : PANEL));
         jog.setTextColor(canJog ? Color.WHITE : DIM);
-        jog.setText(ok && !canJog ? (on ? "JOG\n(drive enabled)" : "JOG\n(lever not OFF)") : "JOG");
-        jog.setTextSize(TypedValue.COMPLEX_UNIT_SP, ok && !canJog ? 28 : 44);
         jog.setEnabled(canJog);
     }
 

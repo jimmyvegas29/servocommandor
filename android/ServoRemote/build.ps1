@@ -1,4 +1,4 @@
-﻿# Build Servo Remote without Gradle: javac -> d8 -> aapt2 -> zipalign -> apksigner.
+# Build Servo Remote without Gradle: javac -> d8 -> aapt2 -> zipalign -> apksigner.
 # Needs the Android SDK (platform 31, build-tools 34.0.0) and a JDK.
 #   powershell -File build.ps1            build out\ServoRemote.apk
 #   powershell -File build.ps1 -Install   ... and install it on the phone over adb
@@ -12,8 +12,8 @@ $jar = "$sdk\platforms\android-31\android.jar"
 $out = "$here\out"
 # the signing key lives outside the repo; the same key must sign every update
 $ks = "$env:USERPROFILE\.android\servoremote.jks"
-$versionCode = 2
-$versionName = '1.1'
+$versionCode = 3
+$versionName = '1.2'
 
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$out\classes", "$out\dex" | Out-Null
@@ -28,7 +28,10 @@ $classes = Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Objec
 & "$sdk\cmdline-tools\latest\bin\d8.bat" --release --min-api 31 --lib $jar --output "$out\dex" $classes
 if ($LASTEXITCODE) { throw 'd8 failed' }
 
-& "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" `
+# the panel's own font, taken from the panel's assets at build time
+New-Item -ItemType Directory -Force "$out\assets" | Out-Null
+Copy-Item "$here\..\..\assets\Orbitron-Medium.ttf" "$out\assets\"
+& "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" -A "$out\assets" `
     --min-sdk-version 31 --target-sdk-version 31 --version-code $versionCode --version-name $versionName
 if ($LASTEXITCODE) { throw 'aapt2 link failed' }
 
