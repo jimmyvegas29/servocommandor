@@ -12,8 +12,8 @@ $jar = "$sdk\platforms\android-31\android.jar"
 $out = "$here\out"
 # the signing key lives outside the repo; the same key must sign every update
 $ks = "$env:USERPROFILE\.android\servoremote.jks"
-$versionCode = 4
-$versionName = '1.3'
+$versionCode = 5
+$versionName = '1.4'
 
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$out\classes", "$out\dex" | Out-Null

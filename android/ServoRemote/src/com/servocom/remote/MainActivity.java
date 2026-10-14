@@ -126,8 +126,8 @@ public class MainActivity extends Activity {
     }
 
     /** FWD / EN / JOG in one row across the top, all the same size, in
-     *  either orientation; the status line under them; the rest of the
-     *  screen is left free. */
+     *  either orientation; the status line along the bottom; the space
+     *  between is left free. */
     private void buildUi() {
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         int gap = dp(8), pad = dp(12);
@@ -153,12 +153,13 @@ public class MainActivity extends Activity {
             row.addView(buttons[i], p);
         }
         root.addView(row, new LinearLayout.LayoutParams(-1, height));
+        root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
 
-        status = new TextView(this);
+        status = new TextView(this);                    // always along the bottom
         status.setTypeface(font);
         status.setTextColor(STATUS);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        status.setPadding(dp(4), dp(10), dp(4), 0);
+        status.setPadding(dp(4), dp(6), dp(4), 0);
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
 
