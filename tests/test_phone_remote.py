@@ -75,14 +75,11 @@ r._on_write(b'-', PHONE)
 r._on_write(b'P\x03', PHONE)
 r._on_write(b'P\x07', PHONE)
 r._on_write(b'C' + struct.pack('<H', 1234), PHONE)
-r._on_write(b'T\x01', PHONE)
-r._on_write(b'T\x04', PHONE)
-r._on_write(b'T\x09', PHONE)
 r._on_write(b'DX', PHONE)
 r._on_write(b'?', PHONE)
 check('commands passed on', cmds, [('dir', 'fwd'), ('dir', 'rev'), ('enable', True), ('enable', False),
                                    ('jog', True), ('jog', False), ('step', 1), ('step', -1),
-                                   ('preset', 3), ('custom', 1234), ('tool', 'drill'), ('tool', 'sfm')])
+                                   ('preset', 3), ('custom', 1234)])
 
 # a second device that did not say hello cannot command
 del cmds[:]

@@ -106,7 +106,6 @@ public class MainActivity extends Activity {
     private int top;                        // the largest speed the panel accepts
     private final TextView[] presets = new TextView[6];
     private TextView custom;
-    private final TextView[] tools = new TextView[4];   // DRILL, TAP, CSFM, SFM: open on the panel
     private boolean keypadOpen;
     private String entry = "";
     private TextView entryView, entryHint, setKey;
@@ -183,15 +182,12 @@ public class MainActivity extends Activity {
         return bar;
     }
 
-    /** Portrait: FWD / EN / JOG across the top, + / - full width under them,
-     *  the presets 2 x 3, then CUSTOM, DRILL, TAP, CSFM, SFM down the screen.
-     *  Landscape: all five in one row across the top, the same size, presets
-     *  1 x 6, then CUSTOM and the four tools in one row.  The status line
-     *  along the bottom; the space between is left free. */
+    /** Portrait: FWD / EN / JOG across the top, + / - full width under them.
+     *  Landscape: all five in one row across the top, the same size.  The
+     *  status line along the bottom; the space between is left free. */
     private void buildUi() {
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         int gap = dp(8), pad = dp(12);
-        LinearLayout plusMinusRow = null;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
@@ -215,8 +211,9 @@ public class MainActivity extends Activity {
         TextView[] top = land ? new TextView[]{dir, en, jog, plus, minus} : new TextView[]{dir, en, jog};
         root.addView(rowOf(top, gap), new LinearLayout.LayoutParams(-1, height));
         if (!land) {
-            plusMinusRow = rowOf(new TextView[]{plus, minus}, gap);
-            root.addView(plusMinusRow);
+            LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(-1, (int) (height * 0.6));
+            stp.topMargin = gap;
+            root.addView(rowOf(new TextView[]{plus, minus}, gap), stp);
         }
 
         // the panel's speed presets 1-6, and CUSTOM under them
@@ -226,35 +223,14 @@ public class MainActivity extends Activity {
         }
         custom = button("CUSTOM");
         custom.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        String[] toolNames = {"DRILL", "TAP", "CSFM", "SFM"};
-        for (int i = 0; i < 4; i++) {
-            tools[i] = button(toolNames[i]);
-            tools[i].setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        }
         int presetH = (int) (height * 0.6);
-        if (!land) {
-            // eight rows under FWD / EN / JOG (+/-, presets x2, CUSTOM, four
-            // tools), all one height: shrunk to fit the screen if they must
-            int sb = getResources().getIdentifier("status_bar_height", "dimen", "android");
-            int avail = dm.heightPixels - (sb > 0 ? getResources().getDimensionPixelSize(sb) : dp(24))
-                    - dp(8) - dp(48) - gap - height - pad - dp(32);
-            presetH = Math.min(presetH, avail / 8 - gap);
-        }
         if (land) {
             root.addView(rowOf(presets, gap), spaced(presetH, gap));
         } else {
             root.addView(rowOf(new TextView[]{presets[0], presets[1], presets[2]}, gap), spaced(presetH, gap));
             root.addView(rowOf(new TextView[]{presets[3], presets[4], presets[5]}, gap), spaced(presetH, gap));
         }
-        if (land) {
-            // CUSTOM shrinks to the left, the tools beside it, all the same size
-            root.addView(rowOf(new TextView[]{custom, tools[0], tools[1], tools[2], tools[3]}, gap),
-                    spaced((int) (height * 0.45), gap));
-        } else {
-            plusMinusRow.setLayoutParams(spaced(presetH, gap));
-            root.addView(custom, spaced(presetH, gap));
-            for (TextView t : tools) root.addView(t, spaced(presetH, gap));
-        }
+        root.addView(custom, spaced(land ? (int) (height * 0.45) : presetH, gap));
 
         root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
         settingsOpen = false;
@@ -279,10 +255,6 @@ public class MainActivity extends Activity {
         custom.setOnClickListener(v -> {
             if (usable()) showKeypad();
         });
-        for (int i = 0; i < 4; i++) {
-            final byte id = (byte) (i + 1);
-            tools[i].setOnClickListener(v -> press(v, new byte[]{'T', id}));
-        }
         keypadOpen = false;
         render();
     }
@@ -663,11 +635,9 @@ public class MainActivity extends Activity {
             presets[i].setTextColor(ok && presetVals[i] > 0 ? Color.WHITE : DIM);
             presets[i].setEnabled(ok && presetVals[i] > 0);
         }
-        for (TextView b : new TextView[]{custom, tools[0], tools[1], tools[2], tools[3]}) {
-            b.setBackground(fills(PANEL, ACCENT));
-            b.setTextColor(ok ? Color.WHITE : DIM);
-            b.setEnabled(ok);
-        }
+        custom.setBackground(fills(PANEL, ACCENT));
+        custom.setTextColor(ok ? Color.WHITE : DIM);
+        custom.setEnabled(ok);
 
         boolean canJog = ok && (has(F_JOG_OK) || has(F_JOG) || jogHeld);
         jog.setBackground(fill(canJog && (jogHeld || has(F_JOG)) ? ACCENT : PANEL));

@@ -20,8 +20,6 @@ Service 5e7a1001-...:
                     b'+' / b'-'          speed up / down by the panel's step
                     b'P' + 1..6          the panel's speed preset
                     b'C' + uint16 LE     a typed speed (display units)
-                    b'T' + 1..4          open a tool on the panel: 1 drill,
-                                         2 tap, 3 constant SFM, 4 SFM
   STATE  read/notify  flags byte, uint16 LE commanded spindle rpm, version,
                     uint16 LE the panel's +/- step (protocol 2), six
                     uint16 LE preset speeds and uint16 LE the largest speed
@@ -46,7 +44,6 @@ APP_PATH = '/com/servocom/remote'
 ADV_PATH = '/com/servocom/remote/adv0'
 ADAPTER = '/org/bluez/hci0'
 PROTOCOL = 3
-TOOLS = {1: 'drill', 2: 'tap', 3: 'css', 4: 'sfm'}
 
 F_PAIRED, F_ENABLED, F_REV, F_JOG, F_ONLINE, F_JOG_OK, F_LEVER, F_REFUSED = (1 << i for i in range(8))
 
@@ -258,8 +255,6 @@ class PhoneRemote:
             self.on_command('preset', data[1])
         elif cmd == b'C' and len(data) >= 3:
             self.on_command('custom', struct.unpack('<H', data[1:3])[0])
-        elif cmd == b'T' and len(data) >= 2 and data[1] in TOOLS:
-            self.on_command('tool', TOOLS[data[1]])
 
     def _hello(self, payload, device):
         if len(payload) < 8:
