@@ -165,9 +165,9 @@ public class MainActivity extends Activity {
         return bar;
     }
 
-    /** FWD / EN / JOG in one row across the top, all the same size, in
-     *  either orientation; the status line along the bottom; the space
-     *  between is left free. */
+    /** Portrait: FWD / EN / JOG across the top, + / - full width under them.
+     *  Landscape: all five in one row across the top, the same size.  The
+     *  status line along the bottom; the space between is left free. */
     private void buildUi() {
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         int gap = dp(8), pad = dp(12);
@@ -179,36 +179,25 @@ public class MainActivity extends Activity {
         tb.bottomMargin = gap;
         root.addView(titleBar("Servo Remote", "\uf013", v -> showSettings()), tb);
 
-        // square buttons, but never taller than about 40 % of a landscape screen
+        // portrait: FWD / EN / JOG in a row of squares, + / - full width under
+        // them.  landscape: all five in one row, the same size.
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        int cell = (dm.widthPixels - 2 * pad - 2 * gap) / 3;
+        int across = land ? 5 : 3;
+        int cell = (dm.widthPixels - 2 * pad - (across - 1) * gap) / across;
         int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.35)) : cell;
 
         dir = button("FWD");
         en = button("EN");
         jog = button("JOG");
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView[] buttons = {dir, en, jog};
-        for (int i = 0; i < buttons.length; i++) {
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -1, 1f);
-            if (i < buttons.length - 1) p.setMarginEnd(gap);
-            row.addView(buttons[i], p);
-        }
-        root.addView(row, new LinearLayout.LayoutParams(-1, height));
-
-        // + / - by the panel's own step, full width under the top row
         plus = button("+");
         minus = button("-");
-        LinearLayout steps = new LinearLayout(this);
-        steps.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, -1, 1f);
-        sp.setMarginEnd(gap);
-        steps.addView(plus, sp);
-        steps.addView(minus, new LinearLayout.LayoutParams(0, -1, 1f));
-        LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(-1, (int) (height * 0.6));
-        stp.topMargin = gap;
-        root.addView(steps, stp);
+        TextView[] top = land ? new TextView[]{dir, en, jog, plus, minus} : new TextView[]{dir, en, jog};
+        root.addView(rowOf(top, gap), new LinearLayout.LayoutParams(-1, height));
+        if (!land) {
+            LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(-1, (int) (height * 0.6));
+            stp.topMargin = gap;
+            root.addView(rowOf(new TextView[]{plus, minus}, gap), stp);
+        }
 
         root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
         settingsOpen = false;
@@ -227,6 +216,18 @@ public class MainActivity extends Activity {
         plus.setOnClickListener(v -> press(v, new byte[]{'+'}));
         minus.setOnClickListener(v -> press(v, new byte[]{'-'}));
         render();
+    }
+
+    /** Buttons side by side, equal widths, a gap between. */
+    private LinearLayout rowOf(TextView[] buttons, int gap) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < buttons.length; i++) {
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -1, 1f);
+            if (i < buttons.length - 1) p.setMarginEnd(gap);
+            row.addView(buttons[i], p);
+        }
+        return row;
     }
 
     // ------------------------------------------------------------------ settings
