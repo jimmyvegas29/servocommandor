@@ -1102,6 +1102,19 @@ def after_layout(dt):
     check('phone REV again: no change', app.direction, 'rev')
     app.phone_command('dir', 'fwd')
     app.set_speed(600)
+    step = app.step_value()
+    app.adjust_speed(step)                            # the panel's own + button
+    want_up = app.command_speed
+    app.set_speed(600)
+    app.phone_command('step', 1)
+    check('phone +: same as the panel + button', app.command_speed, want_up)
+    app.set_speed(600)
+    app.adjust_speed(-step)
+    want_down = app.command_speed
+    app.set_speed(600)
+    app.phone_command('step', -1)
+    check('phone -: same as the panel - button', (app.command_speed, want_down < want_up), (want_down, True))
+    app.set_speed(600)
     app.phone_command('enable', True)
     check('phone EN on', (app.servo_state, app.servo.servostate), ('enabled', 'enabled'))
     app.phone_command('enable', True)

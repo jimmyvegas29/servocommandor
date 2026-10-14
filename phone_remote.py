@@ -17,7 +17,9 @@ Service 5e7a1001-...:
                     b'E' + 1 / 0         enable / disable
                     b'J'                 jog: held (repeat every 150 ms)
                     b'j'                 jog released
-  STATE  read/notify  flags byte, uint16 LE commanded spindle rpm, version
+                    b'+' / b'-'          speed up / down by the panel's step
+  STATE  read/notify  flags byte, uint16 LE commanded spindle rpm, version,
+                    uint16 LE the panel's +/- step (protocol 2)
                     flags: b0 a paired phone is connected, b1 enabled,
                     b2 direction REV, b3 jogging, b4 drive online,
                     b5 jog allowed, b6 lever not OFF, b7 last hello refused
@@ -37,7 +39,7 @@ LOCAL_NAME = 'SC Panel'            # 8 characters: fits beside the 128-bit UUID
 APP_PATH = '/com/servocom/remote'
 ADV_PATH = '/com/servocom/remote/adv0'
 ADAPTER = '/org/bluez/hci0'
-PROTOCOL = 1
+PROTOCOL = 2
 
 F_PAIRED, F_ENABLED, F_REV, F_JOG, F_ONLINE, F_JOG_OK, F_LEVER, F_REFUSED = (1 << i for i in range(8))
 
@@ -49,8 +51,9 @@ except Exception:                       # not on the Pi (tests, Windows)
     ServiceInterface = None
 
 
-def pack_state(flags, rpm):
-    return struct.pack('<BHB', flags & 0xFF, max(0, min(65535, int(rpm))), PROTOCOL)
+def pack_state(flags, rpm, step=0):
+    return struct.pack('<BHBH', flags & 0xFF, max(0, min(65535, int(rpm))), PROTOCOL,
+                       max(0, min(65535, int(step))))
 
 
 if ServiceInterface is not None:
@@ -161,6 +164,7 @@ class PhoneRemote:
         self._refused = False
         self._flags = 0
         self._rpm = 0
+        self._step = 0
         self._loop = None
         self._thread = None
         self._stop = None
@@ -198,9 +202,9 @@ class PhoneRemote:
     def connected(self):
         return bool(self._accepted)
 
-    def set_state(self, flags, rpm):
+    def set_state(self, flags, rpm, step=0):
         """The app's current state (UI thread); sent if it changed."""
-        self._flags, self._rpm = flags, rpm
+        self._flags, self._rpm, self._step = flags, rpm, step
         if self._loop is not None and self._state_chr is not None:
             self._loop.call_soon_threadsafe(self._push_state)
 
@@ -211,7 +215,7 @@ class PhoneRemote:
             f |= F_PAIRED
         if self._refused:
             f |= F_REFUSED
-        return pack_state(f, self._rpm)
+        return pack_state(f, self._rpm, self._step)
 
     def _push_state(self, force=False):
         if self._state_chr is not None:
@@ -234,6 +238,8 @@ class PhoneRemote:
             self.on_command('jog', True)
         elif cmd == b'j':
             self.on_command('jog', False)
+        elif cmd in (b'+', b'-'):
+            self.on_command('step', 1 if cmd == b'+' else -1)
 
     def _hello(self, payload, device):
         if len(payload) < 8:

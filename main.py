@@ -3542,6 +3542,11 @@ class ServoCommanderApp(App):
                     self._phone_jog_until = time.monotonic() + self.PHONE_JOG_TIMEOUT
             else:
                 self._phone_jog_stop('phone: jog released')
+        elif cmd == 'step':
+            # the panel's own +/- buttons: its step, its rules
+            step = self.step_value() * (1 if arg > 0 else -1)
+            log.info('Phone: %+d', step)
+            self.adjust_speed(step)
         elif cmd == 'gone':
             self._phone_jog_stop('phone disconnected')
 
@@ -3576,7 +3581,8 @@ class ServoCommanderApp(App):
             if self.phone_status != 'off':
                 self.phone_status = 'off'
             return
-        r.set_state(self._phone_flags(), round(self.command_speed / self.ratio) if self.ratio else 0)
+        r.set_state(self._phone_flags(), round(self.command_speed / self.ratio) if self.ratio else 0,
+                    self.step_value())
         status = r.status
         if r.pairing:
             status = 'PAIR open: open Servo Remote on the phone (%d s)' % max(0, r.pairing_until - time.monotonic())

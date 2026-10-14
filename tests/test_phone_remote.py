@@ -70,10 +70,12 @@ r._on_write(b'E\x01', PHONE)
 r._on_write(b'E\x00', PHONE)
 r._on_write(b'J', PHONE)
 r._on_write(b'j', PHONE)
+r._on_write(b'+', PHONE)
+r._on_write(b'-', PHONE)
 r._on_write(b'DX', PHONE)
 r._on_write(b'?', PHONE)
 check('commands passed on', cmds, [('dir', 'fwd'), ('dir', 'rev'), ('enable', True), ('enable', False),
-                                   ('jog', True), ('jog', False)])
+                                   ('jog', True), ('jog', False), ('step', 1), ('step', -1)])
 
 # a second device that did not say hello cannot command
 del cmds[:]
@@ -88,11 +90,11 @@ r2._on_write(b'E\x01', OTHER)
 check('paired phone on a new link: accepted', (r2.connected, cmds[-1]), (True, ('enable', True)))
 
 # state packing: flags, rpm, version
-r.set_state(phone_remote.F_ENABLED | phone_remote.F_REV | phone_remote.F_ONLINE, 600)
+r.set_state(phone_remote.F_ENABLED | phone_remote.F_REV | phone_remote.F_ONLINE, 600, 15)
 r._push_state()
-f, rpm, ver = struct.unpack('<BHB', r._state_chr.value)
-check('state: flags, rpm, version', (f & ~phone_remote.F_PAIRED, rpm, ver),
-      (phone_remote.F_ENABLED | phone_remote.F_REV | phone_remote.F_ONLINE, 600, phone_remote.PROTOCOL))
+f, rpm, ver, step = struct.unpack('<BHBH', r._state_chr.value)
+check('state: flags, rpm, version, step', (f & ~phone_remote.F_PAIRED, rpm, ver, step),
+      (phone_remote.F_ENABLED | phone_remote.F_REV | phone_remote.F_ONLINE, 600, phone_remote.PROTOCOL, 15))
 
 # the heartbeat goes out every second even when nothing changed
 class CountingChr(FakeChr):

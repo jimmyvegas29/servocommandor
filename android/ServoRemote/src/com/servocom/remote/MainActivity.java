@@ -100,7 +100,8 @@ public class MainActivity extends Activity {
     private final ArrayDeque<Pending> queue = new ArrayDeque<>();
     private boolean writing;
 
-    private TextView status, dir, en, jog;
+    private TextView status, dir, en, jog, plus, minus;
+    private int step;                       // the panel's +/- step (from its state)
     private Typeface font, icons;
     private boolean settingsOpen;
     private TextView setPanel, setSignal, setDrive, setPairing;
@@ -195,6 +196,20 @@ public class MainActivity extends Activity {
             row.addView(buttons[i], p);
         }
         root.addView(row, new LinearLayout.LayoutParams(-1, height));
+
+        // + / - by the panel's own step, full width under the top row
+        plus = button("+");
+        minus = button("-");
+        LinearLayout steps = new LinearLayout(this);
+        steps.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, -1, 1f);
+        sp.setMarginEnd(gap);
+        steps.addView(plus, sp);
+        steps.addView(minus, new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout.LayoutParams stp = new LinearLayout.LayoutParams(-1, (int) (height * 0.6));
+        stp.topMargin = gap;
+        root.addView(steps, stp);
+
         root.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1f));   // free space
         settingsOpen = false;
 
@@ -209,6 +224,8 @@ public class MainActivity extends Activity {
         dir.setOnClickListener(v -> press(v, new byte[]{'D', (byte) (has(F_REV) ? 'F' : 'R')}));
         en.setOnClickListener(v -> press(v, new byte[]{'E', (byte) (has(F_ENABLED) ? 0 : 1)}));
         jog.setOnTouchListener(this::jogTouch);
+        plus.setOnClickListener(v -> press(v, new byte[]{'+'}));
+        minus.setOnClickListener(v -> press(v, new byte[]{'-'}));
         render();
     }
 
@@ -440,6 +457,15 @@ public class MainActivity extends Activity {
         en.setBackground(fills(ok && on ? ACCENT : EN_OFF, PRESSED));
         en.setTextColor(ok ? Color.WHITE : DIM);
         en.setEnabled(ok);
+
+        // the panel's step buttons: grey, blue while pressed, labelled with its step
+        plus.setText(step > 0 ? "+" + step : "+");
+        minus.setText(step > 0 ? "-" + step : "-");
+        for (TextView b : new TextView[]{plus, minus}) {
+            b.setBackground(fills(ok ? PRESSED : PANEL, ACCENT));
+            b.setTextColor(ok ? Color.WHITE : DIM);
+            b.setEnabled(ok);
+        }
 
         boolean canJog = ok && (has(F_JOG_OK) || has(F_JOG) || jogHeld);
         jog.setBackground(fill(canJog && (jogHeld || has(F_JOG)) ? ACCENT : PANEL));
@@ -692,8 +718,10 @@ public class MainActivity extends Activity {
             byte[] v = c.getValue();
             if (v == null || v.length < 1) return;
             final int f = v[0] & 0xFF;
+            final int st2 = v.length >= 6 ? (v[4] & 0xFF) | ((v[5] & 0xFF) << 8) : 0;
             ui.post(() -> {
                 flags = f;
+                step = st2;
                 lastState = System.currentTimeMillis();
                 if ((f & F_PAIRED) != 0 && gatt != null) {
                     String a = gatt.getDevice().getAddress();
