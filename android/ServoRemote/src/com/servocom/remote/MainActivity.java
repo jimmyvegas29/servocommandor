@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
     private boolean writing;
 
     private TextView status, dir, en, jog, plus, minus;
-    private int step;                       // the panel's +/- step (from its state)
+    private int step;                       // the panel's +/- step: from its state, remembered
     private Typeface font, icons;
     private boolean settingsOpen;
     private TextView setPanel, setSignal, setDrive, setPairing;
@@ -125,6 +125,7 @@ public class MainActivity extends Activity {
             icons = Typeface.DEFAULT;
         }
         applyOrientation();
+        step = prefs().getInt("step", 0);         // the last step the panel sent, shown while away
         BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         adapter = bm == null ? null : bm.getAdapter();
         buildUi();
@@ -722,7 +723,10 @@ public class MainActivity extends Activity {
             final int st2 = v.length >= 6 ? (v[4] & 0xFF) | ((v[5] & 0xFF) << 8) : 0;
             ui.post(() -> {
                 flags = f;
-                step = st2;
+                if (st2 > 0 && st2 != step) {
+                    step = st2;
+                    prefs().edit().putInt("step", step).apply();
+                }
                 lastState = System.currentTimeMillis();
                 if ((f & F_PAIRED) != 0 && gatt != null) {
                     String a = gatt.getDevice().getAddress();
