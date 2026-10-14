@@ -125,52 +125,41 @@ public class MainActivity extends Activity {
         buildUi();
     }
 
-    /** Portrait: direction and EN side by side, JOG below.  Landscape:
-     *  direction above EN on the left, JOG on the right. */
+    /** FWD / EN / JOG in one row across the top, all the same size, in
+     *  either orientation; the status line under them; the rest of the
+     *  screen is left free. */
     private void buildUi() {
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
-        int gap = dp(8);
+        int gap = dp(8), pad = dp(12);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setPadding(dp(12), dp(land ? 8 : 20), dp(12), dp(12));
+        root.setPadding(pad, dp(land ? 8 : 16), pad, pad);
+
+        // square buttons, but never taller than about 40 % of a landscape screen
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int cell = (dm.widthPixels - 2 * pad - 2 * gap) / 3;
+        int height = land ? Math.min(cell, (int) (dm.heightPixels * 0.4)) : cell;
+
+        dir = button("FWD");
+        en = button("EN");
+        jog = button("JOG");
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        TextView[] buttons = {dir, en, jog};
+        for (int i = 0; i < buttons.length; i++) {
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -1, 1f);
+            if (i < buttons.length - 1) p.setMarginEnd(gap);
+            row.addView(buttons[i], p);
+        }
+        root.addView(row, new LinearLayout.LayoutParams(-1, height));
 
         status = new TextView(this);
         status.setTypeface(font);
         status.setTextColor(STATUS);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        status.setPadding(dp(4), 0, dp(4), dp(land ? 6 : 12));
+        status.setPadding(dp(4), dp(10), dp(4), 0);
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
-
-        dir = button("FWD");
-        en = button("EN");
-        jog = button("JOG");
-        if (land) {
-            LinearLayout body = new LinearLayout(this);
-            body.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams top = new LinearLayout.LayoutParams(-1, 0, 1f);
-            top.bottomMargin = gap;
-            left.addView(dir, top);
-            left.addView(en, new LinearLayout.LayoutParams(-1, 0, 1f));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
-            lp.setMarginEnd(gap);
-            body.addView(left, lp);
-            body.addView(jog, new LinearLayout.LayoutParams(0, -1, 1.2f));
-            root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
-        } else {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -1, 1f);
-            half.setMarginEnd(gap);
-            row.addView(dir, half);
-            row.addView(en, new LinearLayout.LayoutParams(0, -1, 1f));
-            root.addView(row, new LinearLayout.LayoutParams(-1, 0, 1f));
-            LinearLayout.LayoutParams jp = new LinearLayout.LayoutParams(-1, 0, 1.4f);
-            jp.topMargin = gap;
-            root.addView(jog, jp);
-        }
         setContentView(root);
 
         dir.setOnClickListener(v -> press(v, new byte[]{'D', (byte) (has(F_REV) ? 'F' : 'R')}));
@@ -183,7 +172,7 @@ public class MainActivity extends Activity {
         TextView b = new TextView(this);
         b.setText(text);
         b.setGravity(Gravity.CENTER);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 40);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
         b.setTypeface(font);
         b.setTextColor(Color.WHITE);
         b.setClickable(true);
