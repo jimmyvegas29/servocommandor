@@ -2556,13 +2556,9 @@ class ServoCommanderApp(App):
         manual = int(sp.get('tap_tlim_manual') or 0)
         cap_fixed = False
         motor_nm = self.motor_rated_nm()
-        material = sp.get('tap_material') or 'Mild steel'
-        clutch_pct = need_pct = None
+        clutch_pct = None
         if thread is not None:
             clutch_pct = tapdata.pct_of_spindle(thread['clutch'], motor_nm, eff)
-            cut = tapdata.cutting_torque_in_lb(thread['pitch_mm'], thread['dia_mm'], material)
-            if cut is not None:
-                need_pct = (drag or 0) + tapdata.pct_of_spindle(cut, motor_nm, eff)
         if manual:
             tlim, auto = manual, False
         elif clutch_pct is not None:
@@ -2576,11 +2572,11 @@ class ServoCommanderApp(App):
                 'depth_mm': float(sp.get('tap_depth_mm', 0) or 0),
                 'confirm': max(1, int(sp.get('tap_confirm', 2))),
                 'rpm': rpm, 'drag': drag, 'drag_rpm': drag_rpm,
-                'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct, 'need_pct': need_pct,
+                'tlim': tlim, 'auto': auto, 'clutch_pct': clutch_pct,
                 'cap_fixed': cap_fixed,
                 # what the cap leaves for the tap itself, in-lb at the spindle
                 'cap_in_lb': max(0.0, (tlim - (drag or 0)) / 100.0 * motor_nm * eff * tapdata.IN_LB_PER_NM),
-                'material': material, 'bg': bg, 'bg_ratio': bg_ratio, 'eff_ratio': eff,
+                'bg': bg, 'bg_ratio': bg_ratio, 'eff_ratio': eff,
                 'lathe_capped': auto and thread is not None and tlim == self.TAP_CAP_MAX
                 and (drag or 0) + clutch_pct > self.TAP_CAP_MAX,
                 'margin': float(sp.get('tap_margin', 2.0)),

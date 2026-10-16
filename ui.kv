@@ -3528,7 +3528,7 @@
     BoxLayout:
         orientation: 'vertical'
         size_hint: (None, None)
-        size: (min(root.width - 20, 460), min(root.height - 20, 216))
+        size: (min(root.width - 20, 460), min(root.height - 20, 266))  # 3 rows of sizes
         pos_hint: {'center_x': 0.5, 'center_y': 0.5}
         padding: 10
         spacing: 6
@@ -3723,63 +3723,17 @@
                         width: 220
                         padding: [0, 3]
                         SegButton:
-                            text: 'A depth'
+                            text: 'Depth'
                             font_size: '11sp'
                             active: root.mode == 'depth'
                             corners: [(5, 5), (0, 0), (0, 0), (5, 5)]
                             on_press: root.set_mode('depth')
                         SegButton:
-                            text: 'The bottom'
+                            text: 'Bottom'
                             font_size: '11sp'
                             active: root.mode == 'bottom'
                             corners: [(0, 0), (5, 5), (5, 5), (0, 0)]
                             on_press: root.set_mode('bottom')
-                SLabel:
-                    text: 'Material'
-                    font_size: '12sp'
-                    color: (0.6, 0.6, 0.6, 1)
-                    size_hint_y: None
-                    height: 20
-                    text_size: self.size
-                    halign: 'left'
-                    valign: 'middle'
-                GridLayout:
-                    cols: 4
-                    spacing: 4
-                    size_hint_y: None
-                    height: 84
-                    PickButton:
-                        text: 'Mild steel'
-                        active: root.material == 'Mild steel'
-                        on_press: root.set_material('Mild steel')
-                    PickButton:
-                        text: 'Med carbon'
-                        active: root.material == 'Medium carbon'
-                        on_press: root.set_material('Medium carbon')
-                    PickButton:
-                        text: 'High carbon'
-                        active: root.material == 'High carbon'
-                        on_press: root.set_material('High carbon')
-                    PickButton:
-                        text: 'Stainless'
-                        active: root.material == 'Stainless'
-                        on_press: root.set_material('Stainless')
-                    PickButton:
-                        text: 'Cast iron'
-                        active: root.material == 'Cast iron'
-                        on_press: root.set_material('Cast iron')
-                    PickButton:
-                        text: 'Aluminum'
-                        active: root.material == 'Aluminum'
-                        on_press: root.set_material('Aluminum')
-                    PickButton:
-                        text: 'Brass'
-                        active: root.material == 'Brass'
-                        on_press: root.set_material('Brass')
-                    PickButton:
-                        text: 'Plastic'
-                        active: root.material == 'Plastic'
-                        on_press: root.set_material('Plastic')
                 PadRow:
                     key: 'tap_thread'
                     label: 'Thread'
@@ -3816,7 +3770,6 @@
                     label: 'Torque limit'
                     hint: root.tlim_hint
                     value: root.tlim_text
-                    value_color: root.tlim_color
                 PadRow:
                     key: 'tap_margin'
                     label: 'Back-out margin'

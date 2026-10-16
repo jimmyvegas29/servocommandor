@@ -1396,9 +1396,10 @@ def tap_flow(dt):
     th = app._threads
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
-    check('UNC sizes listed, nothing under 1/4', [b.text for b in th.ids.grid.children][::-1][:3],
-          ['1/4-20', '5/16-18', '3/8-16'])
-    check('metric starts at M6', [t['label'] for t in tapdata.family('M')][0], 'M6')
+    check('UNC sizes listed, smallest first', [b.text for b in th.ids.grid.children][::-1][:3],
+          ['#8-32', '1/4-20', '5/16-18'])
+    check('metric starts at M3', [t['label'] for t in tapdata.family('M')][:4], ['M3', 'M4', 'M5', 'M6'])
+    check('UNF starts at #10-32', [t['label'] for t in tapdata.family('UNF')][0], '#10-32')
     btn = {b.text: b for b in th.ids.grid.children}
     check('no greyed sizes, no note', (min(b.color[0] for b in btn.values()) > 0.5, th.note), (True, ''))
     th.pick('1/4-20')
@@ -1458,27 +1459,15 @@ def tap_flow(dt):
     app.save_speed_pad(tap_bg=False, tap_thread='1/2-13')
     app.settings['back_gear_ratio'] = 0
     o.refresh()
-    app.save_speed_pad(tap_material='Mild steel')
+    # the small sizes (how small a tap the lathe can drive): from the table
+    for key, label, clutch in (('#8-32', '#8-32', 25), ('#10-32', '#10-32', 25), ('M3x0.5', 'M3', 20),
+                               ('M4x0.7', 'M4', 20), ('M5x0.8', 'M5', 30)):
+        app.save_speed_pad(tap_thread=key)
+        c = app.tap_config()
+        check('small size %s: in the table, auto cap from its %d in-lb' % (key, clutch),
+              (c['thread']['label'], c['thread']['clutch'], c['auto'], c['tlim'] > 0), (label, clutch, True, True))
     o.refresh()
-    check('1/2-13 in mild steel: within the 300 % cap now, no warning', 'expect stalls' in o.live_text, False)
-    app.save_speed_pad(tap_thread='3/4-10')
-    o.refresh()
-    check('3/4-10 in mild steel: needs more than the cap, warned in amber',
-          ('expect stalls' in o.live_text, o.tlim_color[2] < 0.5), (True, True))
-    app.save_speed_pad(tap_thread='1/2-13')
-    app.save_speed_pad(tap_material='Aluminum')
-    o.refresh()
-    need = app.tap_config()['need_pct']
-    check('1/2-13 in aluminum: estimate from the formula, no warning',
-          (round(need), 'expect stalls' in o.live_text),
-          (round(tapdata.pct_of_spindle(tapdata.cutting_torque_in_lb(25.4 / 13, 12.7, 'Aluminum'), 6.0, app.ratio)),
-           False))
-    app.save_speed_pad(tap_material='Cast iron')
-    o.refresh()
-    check('no published value: says so', 'No torque estimate for cast iron' in o.live_text, True)
-    app.save_speed_pad(tap_material='Mild steel')
-    check('formula matches the hand check (9/16-12, mild steel ~261 in-lb)',
-          round(tapdata.cutting_torque_in_lb(25.4 / 12, 14.2875, 'Mild steel')), 261)
+    check('no material line any more', 'needs ~' in o.live_text or 'estimate' in o.live_text, False)
     app.save_speed_pad(tap_thread='M6x1')
     # spindle drag: a short jog, torque averaged after spin-up
     fake.torque = 9

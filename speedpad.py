@@ -414,12 +414,10 @@ class TapOverlay(ModalTouch, FloatLayout):
     drag_btn = StringProperty('MEASURE')
     tlim_text = StringProperty('-')
     tlim_hint = StringProperty('')
-    tlim_color = ListProperty([1, 1, 1, 1])
     margin = StringProperty('2')
     hand = StringProperty('rh')
     live_text = StringProperty('')
     ok = BooleanProperty(False)
-    material = StringProperty('Mild steel')
     bg = BooleanProperty(False)
 
     def populate(self):
@@ -462,8 +460,6 @@ class TapOverlay(ModalTouch, FloatLayout):
     def set_hand(self, hand):
         self._save(tap_hand=hand)
 
-    def set_material(self, name):
-        self._save(tap_material=name)
 
     def set_bg(self, on):
         self._save(tap_bg=bool(on))
@@ -481,7 +477,7 @@ class TapOverlay(ModalTouch, FloatLayout):
     def refresh(self):
         app = App.get_running_app()
         c = app.tap_config()
-        self.mode, self.hand, self.material = c['mode'], c['hand'], c['material']
+        self.mode, self.hand = c['mode'], c['hand']
         self.bg = c['bg']
         self.thread_text = app.tap_pitch_text(c)
         self.depth = app.css_len_text(c['depth_mm']) if c['depth_mm'] > 0 else '-'
@@ -498,7 +494,6 @@ class TapOverlay(ModalTouch, FloatLayout):
                 self.drag_text = '%d %%' % c['drag']
             else:
                 self.drag_text = '%d %% (at %d rpm)' % (c['drag'], c['drag_rpm'])
-        self.tlim_color = [1, 1, 1, 1]
         if c['auto'] and c['lathe_capped']:
             self.tlim_text = 'auto %d %%' % c['tlim']
             self.tlim_hint = "lathe max: can't break this tap"
@@ -526,17 +521,6 @@ class TapOverlay(ModalTouch, FloatLayout):
             text = '%s %s = %s turns at %d rpm%s, cap %d %%' % (
                 'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
                 c['rpm'], ' in BACK GEAR' if c['bg'] else '', c['tlim'])
-            need = c['need_pct']
-            if need is None:
-                text += '. No torque estimate for %s' % c['material'].lower()
-            else:
-                note = tapdata.KS_NOTE.get(c['material'])
-                text += '. %s needs ~%d %%%s' % (c['material'], round(need), ' (%s)' % note if note else '')
-                if need > c['tlim']:
-                    text += ': over the cap, expect stalls'
-                    self.tlim_color = [0.95, 0.75, 0.3, 1]
-                elif need > 0.8 * c['tlim']:
-                    text += ': close to the cap'
             self.live_text = text
 
     def primary(self):

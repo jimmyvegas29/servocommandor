@@ -7,16 +7,10 @@ setting Tapmatic recommends for its torque-limiting heads (the "normal"
 column).  The panel uses that clutch setting as the torque cap.
 https://www.tapmatic.com/tapping_questions_torque_setting_data_for_hss.ydev
 
-Sizes under 1/4 in are left out (not tapped on a lathe); M6 stays as the
-metric 1/4-20.  Tapmatic lists inch sizes only.  Metric sizes use the row of the next
-SMALLER inch size, so their cap errs low (they are marked derived).
-
-The torque a thread needs in a given material is estimated with the
-cutting-tap formula from tap makers' technical data (ECL):
-    Md [Nm] = 0.2 * P^2 * Ks * D / 1000
-P pitch mm, D major diameter mm, Ks specific cutting force N/mm2.
-https://precisiontoolstooling.au/pages/ecl-taps-technical-information-trouble-shooting
-Only materials with a published Ks get an estimate.
+The small sizes (#8-32, #10-32, M3, M4, M5) are there to find how small a
+tap the lathe can drive without breaking it.  Tapmatic lists inch sizes
+only.  Metric sizes use the row of the next SMALLER inch size, so their cap
+errs low (they are marked derived).
 """
 
 IN_LB_PER_NM = 8.8507
@@ -35,20 +29,6 @@ def cap_pct_direct(thread):
     if thread is None or thread.get('unit') != 'tpi':
         return None
     return CAP_PCT_DIRECT.get(thread['label'].split('-')[0])
-
-# specific cutting force, N/mm2 (middle of the published range), by the
-# material names the SFM tables use; None = no published value
-KS = {
-    'Mild steel': 2300,            # low carbon steel 2200-2400
-    'Medium carbon': 3000,         # not listed: uses the alloy steel value (errs high)
-    'High carbon': 3000,           # 4130 / 4140: alloy steel 2800-3200
-    'Stainless': 3650,             # austenitic stainless (304 / 316) 3500-3800
-    'Cast iron': None,
-    'Aluminum': 800,               # aluminium alloy 700-900
-    'Brass': None,
-    'Plastic': None,
-}
-KS_NOTE = {'Medium carbon': 'alloy steel value', 'Stainless': '304/316 value'}
 
 # major diameter, mm, of the numbered and fractional sizes
 _DIA = {'#0': 1.524, '#1': 1.854, '#2': 2.184, '#3': 2.515, '#4': 2.845, '#5': 3.175, '#6': 3.505,
@@ -85,6 +65,7 @@ _ROWS = {
 # (key, label, family, pitch value, pitch unit, table row, derived-from label or '')
 _SIZES = [
     # UNC
+    ('#8-32', '#8-32', 'UNC', 32, 'tpi', '8', ''),
     ('1/4-20', '1/4-20', 'UNC', 20, 'tpi', '1/4-20', ''),
     ('5/16-18', '5/16-18', 'UNC', 18, 'tpi', '5/16-18', ''),
     ('3/8-16', '3/8-16', 'UNC', 16, 'tpi', '3/8-16', ''),
@@ -94,6 +75,7 @@ _SIZES = [
     ('5/8-11', '5/8-11', 'UNC', 11, 'tpi', '5/8-11', ''),
     ('3/4-10', '3/4-10', 'UNC', 10, 'tpi', '3/4-10', ''),
     # UNF
+    ('#10-32', '#10-32', 'UNF', 32, 'tpi', '10-32', ''),
     ('1/4-28', '1/4-28', 'UNF', 28, 'tpi', '1/4-28', ''),
     ('5/16-24', '5/16-24', 'UNF', 24, 'tpi', '5/16-24', ''),
     ('3/8-24', '3/8-24', 'UNF', 24, 'tpi', '3/8-24', ''),
@@ -103,6 +85,9 @@ _SIZES = [
     ('5/8-18', '5/8-18', 'UNF', 18, 'tpi', '5/8-18', ''),
     ('3/4-16', '3/4-16', 'UNF', 16, 'tpi', '3/4-16', ''),
     # metric coarse (row of the next smaller inch size)
+    ('M3x0.5', 'M3', 'M', 0.5, 'mm', '3-4', '#4'),
+    ('M4x0.7', 'M4', 'M', 0.7, 'mm', '5-6', '#6'),
+    ('M5x0.8', 'M5', 'M', 0.8, 'mm', '10-24', '#10'),
     ('M6x1', 'M6', 'M', 1.0, 'mm', '12', '#12'),
     ('M8x1.25', 'M8', 'M', 1.25, 'mm', '5/16-18', '5/16'),
     ('M10x1.5', 'M10', 'M', 1.5, 'mm', '3/8-16', '3/8'),
@@ -154,12 +139,3 @@ def pct_of_spindle(in_lb, motor_rated_nm, ratio):
     through the belt ratio."""
     spindle_in_lb = motor_rated_nm * ratio * IN_LB_PER_NM
     return 100.0 * in_lb / spindle_in_lb if spindle_in_lb > 0 else 0.0
-
-
-def cutting_torque_in_lb(pitch_mm, dia_mm, material):
-    """Estimated torque to cut the thread, in-lb, or None when the material
-    has no published specific cutting force."""
-    ks = KS.get(material)
-    if ks is None or pitch_mm <= 0 or dia_mm <= 0:
-        return None
-    return 0.2 * pitch_mm ** 2 * ks * dia_mm / 1000.0 * IN_LB_PER_NM
