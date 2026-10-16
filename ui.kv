@@ -23,14 +23,15 @@
             radius: [(7, 7)] * 4
 
 <FlatButton>:
-    # portrait_ui.FlatButton: blue while pressed, grey if it is already blue
+    # portrait_ui.FlatButton: a pick (drill size, mode, copy target, board):
+    # it goes blue when picked and stays; no separate pressed colour
     background_color: (0, 0, 0, 0)
     background_normal: ''
     background_down: ''
     background_disabled_normal: ''
     canvas.before:
         Color:
-            rgba: ((ACCENT if tuple(self.fill) != ACCENT else BTN_GRAY) if self.state == 'down' else self.fill)
+            rgba: self.fill
         RoundedRectangle:
             size: self.size
             pos: self.pos
@@ -1898,7 +1899,7 @@
     color: (1, 1, 1, 1) if self.active else (0.7, 0.7, 0.7, 1)
     canvas.before:
         Color:
-            rgba: (0.12, 0.12, 0.12, 1) if self.disabled else (BTN_GRAY if self.state == 'down' else (ACCENT if self.active else PANEL))
+            rgba: (ACCENT if self.active else PANEL) if not self.disabled else (0.12, 0.12, 0.12, 1)
         RoundedRectangle:
             size: self.size
             pos: self.pos

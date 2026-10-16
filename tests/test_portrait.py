@@ -1776,7 +1776,10 @@ def press_feedback2(dt):
     dr.set_unit('inch')
     b = find_widget(dr, 'FlatButton', '1/4')
     tap_on(b)
-    check('feedback: a quick tap on a drill size stays lit (pressed)', b.state, 'down')
+    from kivy.lang import Builder
+    Builder.sync()
+    drawn = [tuple(round(v, 2) for v in i.rgba) for i in b.canvas.before.children if hasattr(i, 'rgba')]
+    check('feedback: a tapped drill size goes straight to blue (no grey press)', drawn, [(0, 0.5, 1, 1)])
     check('feedback: and the picked size stays blue', (dr.size_text, tuple(b.fill)), ('1/4 in', (0, 0.5, 1, 1)))
     app.close_drill()
     check('feedback: closing drops it from the app at once', app._drill, None)

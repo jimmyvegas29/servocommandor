@@ -1158,8 +1158,8 @@ class FixedDigits(Widget):
 
 class FlatButton(Button):
     """A button built in code (drill sizes, mode / copy lists, the board
-    picker).  `fill` is its resting colour (selected rows are blue); ui.kv
-    paints it blue while pressed, grey if it is already blue."""
+    picker).  `fill` is its colour: blue once picked, which is the
+    feedback, so it has no separate pressed colour."""
     fill = ListProperty([0.16, 0.16, 0.16, 1])
     corner = NumericProperty(5)
 
