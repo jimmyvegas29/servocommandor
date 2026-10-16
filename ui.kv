@@ -612,9 +612,7 @@
     radius: [(7, 7)] * 4
     font_name: app.font
     font_size: '18sp'
-    markup: True
-    halign: 'center'
-    text: ('FWD' if self.direction == 'fwd' else 'REV') + '\n[size=13sp]' + str(app.tap_jog_shown) + ' rpm[/size]'
+    text: 'FWD' if self.direction == 'fwd' else 'REV'
     color: (1, 1, 1, 1) if app.tap_jog_ok else (0.4, 0.4, 0.4, 1)
     background_color: (0, 0, 0, 0)
     background_normal: ''
