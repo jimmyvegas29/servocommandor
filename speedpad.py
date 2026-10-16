@@ -743,6 +743,33 @@ class JogButton(Button):
         return super(JogButton, self).on_touch_up(touch)
 
 
+class TapJogButton(Button):
+    """Tap mode FWD / REV: hold to turn the spindle at half the tapping
+    speed, stop on lift.  The same hold handling as JogButton, but its own
+    app calls (tap_jog_press / tap_jog_release), not the JOG button's."""
+    direction = StringProperty('fwd')
+    active = BooleanProperty(False)
+    radius = ListProperty([(7, 7)] * 4)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            touch.grab(self)
+            self.state = 'down'
+            self.active = App.get_running_app().tap_jog_press(self.direction)
+            return True
+        return super(TapJogButton, self).on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            self.state = 'normal'
+            if self.active:
+                App.get_running_app().tap_jog_release()
+            self.active = False
+            return True
+        return super(TapJogButton, self).on_touch_up(touch)
+
+
 class SpeedPadPage(BoxLayout):
     """Settings > Speed Pad: presets 1-6, jog speed, drill surface speeds."""
 

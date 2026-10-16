@@ -1612,6 +1612,36 @@ def tap_flow(dt):
     check('backed out, says from how deep', (app.tap_state, app.tap_big_label, app.tap_big_text),
           ('done', 'Backed out from', app.css_len_text(4.0)))
 
+    # tap FWD / REV: hold to run at half the tapping speed (100 -> 50)
+    c = app.tap_config()
+    want = min(app.NODE_JOG_MAX, int(round(c['rpm'] / 2.0 * c['eff_ratio'])))
+    app._tap_tick(0)
+    check('tap jog: shows half the tap speed', app.tap_jog_shown, int(round(want / c['eff_ratio'])))
+    check('tap jog: usable when done, lever OFF', app.tap_jog_ok, True)
+    check('tap jog FWD held: jogs forward at it', (app.tap_jog_press('fwd'), app.tap_jogging, fake.sent[-1]),
+          (True, 'fwd', b'J' + struct.pack('<h', want)))
+    check('tap jog: readout shows it', app.rpm_str, '%04d' % app.tap_jog_shown if app.mode == 'rpm' else app.rpm_str)
+    n = len(fake.sent)
+    app._tap_jog_tick(0)
+    check('tap jog: keep-alive repeats', fake.sent[n:], [b'J' + struct.pack('<h', want)])
+    check('tap jog: JOG button refused meanwhile', app.jog_press(), False)
+    check('tap jog: the other direction refused meanwhile', app.tap_jog_press('rev'), False)
+    n = len(fake.sent)
+    app.tap_startstop()
+    check('tap jog: START does nothing meanwhile', fake.sent[n:], [])
+    app.tap_jog_release()
+    check('tap jog released: stop sent', (app.tap_jogging, fake.sent[-1]), ('', b'j'))
+    check('tap jog REV held: jogs in reverse', (app.tap_jog_press('rev'), fake.sent[-1]),
+          (True, b'J' + struct.pack('<h', -want)))
+    app.tap_exit()
+    check('tap jog: EXIT stops it', (app.tap_jogging, fake.sent[-1], app.tap_mode), ('', b'j', False))
+    app.tap_activate()
+    fake.switch = 'fwd'
+    app._poll_ui(0)
+    check('tap jog: refused with the lever not OFF', app.tap_jog_press('fwd'), False)
+    fake.switch = 'neutral'
+    app._poll_ui(0)
+
     # the card's top line and the button: one line, nothing cut off, for
     # every thread in the table beside the widest badge
     from kivy.core.text import Label as CoreLabel

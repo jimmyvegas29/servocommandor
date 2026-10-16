@@ -49,7 +49,7 @@ import phone_remote
 import logcap
 import tapdata
 from speedpad import (DrillOverlay, ToolsOverlay, CssOverlay, SfmOverlay, rpm_for, TouchGate,
-                      TapOverlay, ThreadOverlay, fmt_num, surf_text, surf_unit, surf_value, sfm_from, JogButton, SpeedPadPage, SfmPage,  # noqa: F401
+                      TapOverlay, ThreadOverlay, fmt_num, surf_text, surf_unit, surf_value, sfm_from, JogButton, TapJogButton, SpeedPadPage, SfmPage,  # noqa: F401
                       DEFAULT_SFM, TOOL_NAMES, JOG_RPM_DEFAULT, JOG_RPM_MAX)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2521,6 +2521,9 @@ class ServoCommanderApp(App):
     tap_big_text = StringProperty('')
     tap_btn_text = StringProperty('START')
     tap_can_start = BooleanProperty(False)
+    tap_jogging = StringProperty('')        # tap FWD / REV held: '', 'fwd', 'rev'
+    tap_jog_ok = BooleanProperty(False)
+    tap_jog_shown = NumericProperty(0)      # the spindle rpm they run at
     TAP_COUNTS_PER_REV = 10000      # XP200 encoder counts per motor rev: verify at the first test
     TAP_STALL_MS = 150
     TAP_SAME_TURNS = 0.5            # stalls this close (spindle turns) are "the same depth"
@@ -2711,6 +2714,7 @@ class ServoCommanderApp(App):
     def tap_exit(self):
         if self.tap_state in ('in', 'out'):
             return
+        self.tap_jog_release()
         evt = getattr(self, '_tap_evt', None)
         if evt is not None:
             evt.cancel()
@@ -2770,6 +2774,8 @@ class ServoCommanderApp(App):
         return True
 
     def tap_startstop(self):
+        if self.tap_jogging:
+            return
         if self.tap_state in ('ready', 'done'):
             self.tap_start()
         elif self.tap_state in ('in', 'out'):
@@ -2855,7 +2861,10 @@ class ServoCommanderApp(App):
                 blocked = 'Lever to OFF'
             elif self.servo_state == 'enabled':
                 blocked = 'Drive enabled'
-        self.tap_can_start = st in ('ready', 'done') and not blocked
+        self.tap_can_start = st in ('ready', 'done') and not blocked and not self.tap_jogging
+        self.tap_jog_ok = (st in ('ready', 'done', 'stopped') and self.jog_ok and not self.jogging
+                           and not self.tap_drag_busy) or bool(self.tap_jogging)
+        self.tap_jog_shown = self._tap_jog_motor(c)[1]
         self.tap_fill = blue
         if st == 'ready':
             self.tap_badge, self.tap_badge_color = 'READY', [1, 1, 1, 1]
@@ -2881,6 +2890,55 @@ class ServoCommanderApp(App):
                 label, value = '', blocked
             self.tap_big_label, self.tap_big_text = label, value
 
+    # tap FWD / REV: hold to turn the spindle at half the tapping speed
+    # (lining the tap up, backing it out by hand).  The node's keep-alive
+    # jog, as JOG uses, but its own buttons and state.
+    def _tap_jog_motor(self, c=None):
+        """(motor rpm, spindle rpm shown) for half the tapping speed,
+        within the node's jog cap."""
+        c = c or self.tap_config()
+        motor = min(self.NODE_JOG_MAX, int(round(c['rpm'] / 2.0 * c['eff_ratio'])))
+        return motor, int(round(motor / c['eff_ratio'])) if c['eff_ratio'] else 0
+
+    def tap_jog_press(self, direction):
+        if (self.tap_jogging or self.jogging or self.tap_drag_busy or not self.tap_mode
+                or self.tap_state not in ('ready', 'done', 'stopped')):
+            return False
+        self._update_jog_ok()
+        if not self.jog_ok or not self._drive_ready():
+            return False
+        motor, shown = self._tap_jog_motor()
+        if motor <= 0:
+            return False
+        self._tap_jog_speed = motor if direction == 'fwd' else -motor
+        self._tap_jog_spindle = shown
+        self.tap_jogging = direction
+        self.tap_can_start = False
+        self._gui_cmd_until = time.monotonic() + 3600     # the poller must not fight it
+        self._tap_jog_evt = Clock.schedule_interval(self._tap_jog_tick, 0.2)
+        self._tap_jog_tick(0)
+        self.update_rpm_display()
+        log.info('TAP JOG %s start: %d rpm (motor %d)', direction, shown, self._tap_jog_speed)
+        return True
+
+    def _tap_jog_tick(self, dt):
+        if self.tap_jogging:
+            self.servo.jog(self._tap_jog_speed)
+
+    def tap_jog_release(self):
+        if not self.tap_jogging:
+            return
+        self.tap_jogging = ''
+        evt = getattr(self, '_tap_jog_evt', None)
+        if evt is not None:
+            evt.cancel()
+        self._tap_jog_evt = None
+        self.servo.jog_stop()
+        self._gui_cmd_until = time.monotonic() + 0.75
+        self.servo_state = 'disabled'
+        self.update_rpm_display()
+        log.info('TAP JOG stop')
+
     # spindle drag: a short jog at the tapping speed with nothing engaged;
     # the average torque is what the spindle needs just to turn
     tap_drag_busy = BooleanProperty(False)
@@ -2890,7 +2948,7 @@ class ServoCommanderApp(App):
 
     def tap_measure_drag(self):
         """Start a drag measurement; returns '' or why it cannot run."""
-        if self.tap_drag_busy:
+        if self.tap_drag_busy or self.tap_jogging:
             return ''
         c = self.tap_config()
         motor = int(round(c['rpm'] * c['eff_ratio']))
@@ -3208,7 +3266,7 @@ class ServoCommanderApp(App):
 
     def jog_press(self):
         self._update_jog_ok()
-        if not self.jog_ok or not self._drive_ready():
+        if not self.jog_ok or not self._drive_ready() or self.tap_jogging:
             return False
         motor = int(round(self.jog_rpm() * self.ratio))
         self._jog_speed = -motor if self.direction == 'rev' else motor
@@ -3301,6 +3359,8 @@ class ServoCommanderApp(App):
         if self.jogging:
             # JOG held: show the jog speed, lit; the setpoint comes back on release
             speed = self.jog_rpm() * self.ratio
+        elif self.tap_jogging:
+            speed = self._tap_jog_spindle * self.ratio
         else:
             speed = self.current_speed if self.servo_state == 'enabled' else self.command_speed
         if self.mode == 'rpm':
@@ -3309,7 +3369,7 @@ class ServoCommanderApp(App):
             shown = round(self.ss_convert(speed))
         shown = max(0, min(9999, int(shown)))
         s = str(shown).zfill(4)
-        lit = WHITE if (self.servo_state == 'enabled' or self.jogging) else DIM
+        lit = WHITE if (self.servo_state == 'enabled' or self.jogging or self.tap_jogging) else DIM
         cols = []
         for i, thresh in enumerate((1000, 100, 10, 1)):
             cols.append(GHOST if (shown < thresh and i < 3) else lit)
