@@ -173,14 +173,7 @@
     color: (0.65, 0.65, 0.65, 1)
     background_color: (0, 0, 0, 0)
     background_normal: ''
-    background_down: ''
     canvas.before:
-        Color:
-            rgba: ACCENT if self.state == 'down' else (0, 0, 0, 0)
-        RoundedRectangle:
-            size: self.size
-            pos: self.pos
-            radius: [(7, 7)] * 4
         PushMatrix
         Scale:
             x: app.icon_sx
@@ -282,7 +275,7 @@
             SButton:
                 text: app.mode_text
                 font_size: '15sp'
-                color: ACCENT
+                color: ACCENT if self.state == 'normal' else PANEL
                 on_press: app.open_mode_list()
                 canvas.before:
                     Color:
@@ -764,7 +757,7 @@
                 id: servo_button
                 text: 'EN'
                 font_size: '18sp'
-                color: (0.313, 0.313, 0.313, 1) if self.state == 'down' else (1, 1, 1, 1)
+                color: (1, 1, 1, 1)
                 canvas.before:
                     Color:
                         rgba: BTN_GRAY if self.state == 'down' else (ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1))
@@ -1206,7 +1199,7 @@
                 EnableButton:
                     id: servo_button
                     text: 'ENABLED' if app.servo_state == 'enabled' else 'DISABLED'
-                    color: (1, 1, 1, 1) if self.state == 'normal' else (0.313, 0.313, 0.313, 1)
+                    color: (1, 1, 1, 1)
                     font_size: '18sp'
                     canvas.before:
                         Color:
@@ -1359,7 +1352,7 @@
 
 <CalcOp@SetKey>:
     font_size: '42sp'
-    color: ACCENT
+    color: ACCENT if self.state == 'normal' else PANEL
 
 <CalcOverlay>:
     canvas.before:
@@ -1800,7 +1793,7 @@
             SetKey:
                 text: 'Dismiss'
                 font_size: '15sp'
-                color: ACCENT
+                color: ACCENT if self.state == 'normal' else PANEL
                 on_press: app.dismiss_offline()
 
 <AlarmOverlay>:
@@ -2090,7 +2083,7 @@
                     SetKey:
                         text: 'PAIRING...' if app.phone_pairing else 'PAIR'
                         font_size: '15sp'
-                        color: ACCENT if app.phone_remote_on else (0.35, 0.35, 0.35, 1)
+                        color: PANEL if self.state == 'down' else (ACCENT if app.phone_remote_on else (0.35, 0.35, 0.35, 1))
                         disabled: not app.phone_remote_on
                         on_press: app.pair_phone()
                     SetKey:
@@ -2374,7 +2367,7 @@
         SetKey:
             text: 'SAVE LOG'
             font_size: '14sp'
-            color: ACCENT
+            color: ACCENT if self.state == 'normal' else PANEL
             on_press: app.save_dro_capture()
         SetKey:
             text: 'SEND LOG'
@@ -2467,7 +2460,7 @@
         font_size: '13sp'
         size_hint_x: None
         width: 52
-        color: ACCENT if app.drive_edit_ok else (0.35, 0.35, 0.35, 1)
+        color: PANEL if self.state == 'down' else (ACCENT if app.drive_edit_ok else (0.35, 0.35, 0.35, 1))
         disabled: not app.drive_edit_ok
         on_press: app.open_param_edit(root.key)
 
@@ -2521,12 +2514,12 @@
                 SetKey:
                     text: 'CALIBRATE RATIO'
                     font_size: '14sp'
-                    color: ACCENT
+                    color: ACCENT if self.state == 'normal' else PANEL
                     on_press: app.open_ratio_cal()
                 SetKey:
                     text: 'CALIBRATE BACK GEAR'
                     font_size: '14sp'
-                    color: ACCENT
+                    color: ACCENT if self.state == 'normal' else PANEL
                     on_press: app.open_ratio_cal('back')
             PadRow:
                 key: 'motor_nm'
@@ -2824,7 +2817,7 @@
         font_size: '13sp'
         size_hint_x: None
         width: root.btn_w
-        color: root.btn_color
+        color: PANEL if (self.state == 'down' and tuple(root.btn_color) == ACCENT) else root.btn_color
         on_press: app.open_pad_edit(root.key)
         canvas.before:
             Color:
