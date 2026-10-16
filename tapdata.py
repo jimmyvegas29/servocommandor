@@ -7,7 +7,7 @@ setting Tapmatic recommends for its torque-limiting heads (the "normal"
 column).  The panel uses that clutch setting as the torque cap.
 https://www.tapmatic.com/tapping_questions_torque_setting_data_for_hss.ydev
 
-The small sizes (#8-32, #10-32, M3, M4, M5) are there to find how small a
+The small sizes (#8 and #10, M3, M4, M5) are there to find how small a
 tap the lathe can drive without breaking it.  Tapmatic lists inch sizes
 only.  Metric sizes use the row of the next SMALLER inch size, so their cap
 errs low (they are marked derived).
@@ -66,6 +66,7 @@ _ROWS = {
 _SIZES = [
     # UNC
     ('#8-32', '#8-32', 'UNC', 32, 'tpi', '8', ''),
+    ('#10-24', '#10-24', 'UNC', 24, 'tpi', '10-24', ''),
     ('1/4-20', '1/4-20', 'UNC', 20, 'tpi', '1/4-20', ''),
     ('5/16-18', '5/16-18', 'UNC', 18, 'tpi', '5/16-18', ''),
     ('3/8-16', '3/8-16', 'UNC', 16, 'tpi', '3/8-16', ''),
@@ -75,6 +76,7 @@ _SIZES = [
     ('5/8-11', '5/8-11', 'UNC', 11, 'tpi', '5/8-11', ''),
     ('3/4-10', '3/4-10', 'UNC', 10, 'tpi', '3/4-10', ''),
     # UNF
+    ('#8-36', '#8-36', 'UNF', 36, 'tpi', '8', ''),
     ('#10-32', '#10-32', 'UNF', 32, 'tpi', '10-32', ''),
     ('1/4-28', '1/4-28', 'UNF', 28, 'tpi', '1/4-28', ''),
     ('5/16-24', '5/16-24', 'UNF', 24, 'tpi', '5/16-24', ''),

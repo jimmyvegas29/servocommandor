@@ -1397,9 +1397,9 @@ def tap_flow(dt):
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
     check('UNC sizes listed, smallest first', [b.text for b in th.ids.grid.children][::-1][:3],
-          ['#8-32', '1/4-20', '5/16-18'])
+          ['#8-32', '#10-24', '1/4-20'])
     check('metric starts at M3', [t['label'] for t in tapdata.family('M')][:4], ['M3', 'M4', 'M5', 'M6'])
-    check('UNF starts at #10-32', [t['label'] for t in tapdata.family('UNF')][0], '#10-32')
+    check('UNF starts at #8-36, #10-32', [t['label'] for t in tapdata.family('UNF')][:2], ['#8-36', '#10-32'])
     btn = {b.text: b for b in th.ids.grid.children}
     check('no greyed sizes, no note', (min(b.color[0] for b in btn.values()) > 0.5, th.note), (True, ''))
     th.pick('1/4-20')
@@ -1460,7 +1460,8 @@ def tap_flow(dt):
     app.settings['back_gear_ratio'] = 0
     o.refresh()
     # the small sizes (how small a tap the lathe can drive): from the table
-    for key, label, clutch in (('#8-32', '#8-32', 25), ('#10-32', '#10-32', 25), ('M3x0.5', 'M3', 20),
+    for key, label, clutch in (('#8-32', '#8-32', 25), ('#10-24', '#10-24', 30), ('#8-36', '#8-36', 25),
+                               ('#10-32', '#10-32', 25), ('M3x0.5', 'M3', 20),
                                ('M4x0.7', 'M4', 20), ('M5x0.8', 'M5', 30)):
         app.save_speed_pad(tap_thread=key)
         c = app.tap_config()
