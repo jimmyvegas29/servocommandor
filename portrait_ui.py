@@ -9,12 +9,14 @@ CalcOverlay - four-function calculator with history and SET X / SET Z
 import os
 
 from kivy.app import App
+from kivy.factory import Factory
 from kivy.core.text import Label as CoreLabel
 from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
+from kivy.uix.button import Button
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Line, Rectangle, Ellipse
 from kivy.properties import NumericProperty, StringProperty, ListProperty
@@ -1154,6 +1156,14 @@ class FixedDigits(Widget):
                           pos=(x + (w - tex.width) / 2.0, cy - tex.height / 2.0))
 
 
+class FlatButton(Button):
+    """A button built in code (drill sizes, mode / copy lists, the board
+    picker).  `fill` is its resting colour (selected rows are blue); ui.kv
+    paints it blue while pressed, grey if it is already blue."""
+    fill = ListProperty([0.16, 0.16, 0.16, 1])
+    corner = NumericProperty(5)
+
+
 class ModalTouch:
     """Mixin for full-screen overlays: any touch the overlay's children
     don't handle is swallowed here, so nothing underneath (the gear, the
@@ -1177,21 +1187,14 @@ class ModalTouch:
 
 class ModeOverlay(ModalTouch, FloatLayout):
     def populate(self, modes, current):
-        from kivy.uix.button import Button
         grid = self.ids.mode_grid
         grid.clear_widgets()
         app = App.get_running_app()
         for i, name in enumerate(modes):
-            btn = Button(text=name, font_name=FONT, font_size=17,
-                         size_hint_y=None, height=52,
-                         background_color=(0, 0, 0, 0), background_normal='',
-                         color=(1, 1, 1, 1) if i == current else (0.75, 0.75, 0.75, 1))
-            with btn.canvas.before:
-                from kivy.graphics import Color as _C, RoundedRectangle as _R
-                col = _C(0, 0.5, 1, 1) if i == current else _C(0.16, 0.16, 0.16, 1)
-                rect = _R(size=btn.size, pos=btn.pos, radius=[(5, 5)] * 4)
-            btn.bind(pos=lambda b, v, r=rect: setattr(r, 'pos', v),
-                     size=lambda b, v, r=rect: setattr(r, 'size', v))
+            btn = Factory.FlatButton(text=name, font_name=FONT, font_size=17,
+                                     size_hint_y=None, height=52,
+                                     fill=(0, 0.5, 1, 1) if i == current else (0.16, 0.16, 0.16, 1),
+                                     color=(1, 1, 1, 1) if i == current else (0.75, 0.75, 0.75, 1))
             btn.bind(on_press=lambda b, idx=i: app.select_mode(idx))
             grid.add_widget(btn)
 

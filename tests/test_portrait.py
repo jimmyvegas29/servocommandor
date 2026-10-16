@@ -29,6 +29,7 @@ for _p in (SETTINGS, DATUMS):
 import main as m                      # noqa: E402
 from kivy.clock import Clock          # noqa: E402
 
+m.PRESS_SHOW_S = 0          # popups open / close at once here; press_feedback() tests the delay
 app = m.ServoCommanderApp()
 fails = []
 
@@ -1758,6 +1759,43 @@ def picker_taps3(dt):
     check('picker: one real tap on the close button closes it', app._threads, None)
     app.close_tap()
     app.servo, app.dro = app._picker_saved
+    press_feedback()
+
+
+def press_feedback():
+    # a popup opens / closes a moment after the tap, so the pressed button is seen
+    m.PRESS_SHOW_S = 0.15
+    app.open_drill()
+    check('feedback: the popup is not drawn in the same instant', app._drill.parent, None)
+    Clock.schedule_once(press_feedback2, 0.4)
+
+
+def press_feedback2(dt):
+    dr = app._drill
+    check('feedback: then it is', dr.parent is app.stage, True)
+    dr.set_unit('inch')
+    b = find_widget(dr, 'FlatButton', '1/4')
+    tap_on(b)
+    check('feedback: a quick tap on a drill size stays lit (pressed)', b.state, 'down')
+    check('feedback: and the picked size stays blue', (dr.size_text, tuple(b.fill)), ('1/4 in', (0, 0.5, 1, 1)))
+    app.close_drill()
+    check('feedback: closing drops it from the app at once', app._drill, None)
+    check('feedback: but it stays on screen a moment', dr.parent is app.stage, True)
+    Clock.schedule_once(lambda dt: press_feedback3(dr, b), 0.4)
+
+
+def press_feedback3(dr, b):
+    check('feedback: then it is gone', dr.parent, None)
+    check('feedback: and the size button is back to normal', b.state, 'normal')
+    app.open_tools()
+    app.close_tools()
+    Clock.schedule_once(lambda dt: press_feedback4(), 0.4)
+
+
+def press_feedback4():
+    check('feedback: a popup closed before it showed is never left up',
+          [type(w).__name__ for w in app.stage.children if type(w).__name__ == 'ToolsOverlay'], [])
+    m.PRESS_SHOW_S = 0
     print('RESULT:', 'ALL PASS' if not fails else fails)
     app.stop()
 

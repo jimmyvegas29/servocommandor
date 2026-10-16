@@ -22,6 +22,20 @@
             pos: self.pos
             radius: [(7, 7)] * 4
 
+<FlatButton>:
+    # portrait_ui.FlatButton: blue while pressed, grey if it is already blue
+    background_color: (0, 0, 0, 0)
+    background_normal: ''
+    background_down: ''
+    background_disabled_normal: ''
+    canvas.before:
+        Color:
+            rgba: ((ACCENT if tuple(self.fill) != ACCENT else BTN_GRAY) if self.state == 'down' else self.fill)
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(self.corner, self.corner)] * 4
+
 <SButtonL@SButton>:
     canvas.before:
         Color:
@@ -73,7 +87,7 @@
         on_press: app.axis_tap(root.axis)
         canvas.before:
             Color:
-                rgba: ACCENT if app.half_armed else (0, 0, 0, 0)
+                rgba: (BTN_GRAY if self.state == 'down' else ACCENT) if app.half_armed else (0, 0, 0, 0)
             RoundedRectangle:
                 size: (self.width - 4, self.height - 12)
                 pos: (self.x + 2, self.y + 6)
@@ -159,7 +173,14 @@
     color: (0.65, 0.65, 0.65, 1)
     background_color: (0, 0, 0, 0)
     background_normal: ''
+    background_down: ''
     canvas.before:
+        Color:
+            rgba: ACCENT if self.state == 'down' else (0, 0, 0, 0)
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [(7, 7)] * 4
         PushMatrix
         Scale:
             x: app.icon_sx
@@ -329,6 +350,13 @@
             opacity: 1 if graph.view_offset else 0
             disabled: graph.view_offset == 0
             on_press: graph.go_live()
+            canvas.before:
+                Color:
+                    rgba: PANEL if self.state == 'down' else (0, 0, 0, 0)
+                RoundedRectangle:
+                    size: self.size
+                    pos: self.pos
+                    radius: [(5, 5)] * 4
     BoxLayout:
         padding: [8, 6, 8, 6]
         canvas.before:
@@ -739,7 +767,7 @@
                 color: (0.313, 0.313, 0.313, 1) if self.state == 'down' else (1, 1, 1, 1)
                 canvas.before:
                     Color:
-                        rgba: ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1)
+                        rgba: BTN_GRAY if self.state == 'down' else (ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1))
                     RoundedRectangle:
                         size: self.size
                         pos: self.pos
@@ -1182,7 +1210,7 @@
                     font_size: '18sp'
                     canvas.before:
                         Color:
-                            rgba: ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1)
+                            rgba: BTN_GRAY if self.state == 'down' else (ACCENT if app.servo_state == 'enabled' else (0.105, 0.105, 0.105, 1))
                         RoundedRectangle:
                             size: self.size
                             pos: self.pos
@@ -1372,6 +1400,13 @@
                 size_hint_x: None
                 width: 52
                 on_press: root.toggle_history()
+                canvas.before:
+                    Color:
+                        rgba: ACCENT if self.state == 'down' else (0, 0, 0, 0)
+                    RoundedRectangle:
+                        size: self.size
+                        pos: self.pos
+                        radius: [(7, 7)] * 4
         BoxLayout:
             orientation: 'vertical'
             size_hint_y: None
@@ -1870,7 +1905,7 @@
     color: (1, 1, 1, 1) if self.active else (0.7, 0.7, 0.7, 1)
     canvas.before:
         Color:
-            rgba: (ACCENT if self.active else PANEL) if not self.disabled else (0.12, 0.12, 0.12, 1)
+            rgba: (0.12, 0.12, 0.12, 1) if self.disabled else (BTN_GRAY if self.state == 'down' else (ACCENT if self.active else PANEL))
         RoundedRectangle:
             size: self.size
             pos: self.pos

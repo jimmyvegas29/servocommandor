@@ -8,6 +8,7 @@ DRILL, 8 is SFM and 9 is JOG.  The values live in settings.json under
 import math
 
 from kivy.app import App
+from kivy.factory import Factory
 from kivy.properties import (StringProperty, NumericProperty, BooleanProperty,
                              ListProperty)
 from kivy.uix.boxlayout import BoxLayout
@@ -119,29 +120,18 @@ class DrillOverlay(ModalTouch, FloatLayout):
         else:
             items = [('%d' % mm, mm / 25.4) for mm in MM_SIZES]
         for label, dia in items:
-            b = Button(text=label, font_name=app.font, font_size='18sp',
-                       background_color=(0, 0, 0, 0), background_normal='',
-                       size_hint_y=None, height=48)
+            b = Factory.FlatButton(text=label, font_name=app.font, font_size='18sp',
+                                   corner=6, size_hint_y=None, height=48)
             b.dia_in = dia
             b.bind(on_press=lambda btn: self.choose(btn.text, btn.dia_in))
             grid.add_widget(b)
         self._restyle()
 
     def _restyle(self):
+        unit = ' in' if self.unit == 'inch' else ' mm'
         for b in self.ids.sizes.children:
-            b.selected = (b.text == self.size_text)
-            b.canvas.before.clear()
-            from kivy.graphics import Color, RoundedRectangle
-            with b.canvas.before:
-                Color(0, 0.5, 1, 1) if b.selected else Color(0.16, 0.16, 0.16, 1)
-                b._rr = RoundedRectangle(pos=b.pos, size=b.size, radius=[(6, 6)] * 4)
-            b.bind(pos=self._sync_rr, size=self._sync_rr)
-
-    @staticmethod
-    def _sync_rr(btn, *a):
-        rr = getattr(btn, '_rr', None)
-        if rr is not None:
-            rr.pos, rr.size = btn.pos, btn.size
+            b.selected = (b.text + unit == self.size_text)
+            b.fill = (0, 0.5, 1, 1) if b.selected else (0.16, 0.16, 0.16, 1)
 
     def set_unit(self, unit):
         if unit != self.unit:
@@ -597,7 +587,7 @@ class ThreadOverlay(ModalTouch, FloatLayout):
             b.bind(on_press=lambda _b, key=t['key']: self.pick(key))
             grid.add_widget(b)
 
-    PICK_SHOW_S = 0.25          # the picked size stays lit this long before the picker closes
+    PICK_SHOW_S = 0.1           # the picked size stays lit this long (plus the close delay) before the picker closes
 
     def pick(self, key):
         """Take the size at once, light its button, then close: closing in

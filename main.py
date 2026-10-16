@@ -21,6 +21,10 @@ os.environ['KIVY_METRICS_DENSITY'] = '1'
 
 from kivy.config import Config
 Config.set('input', 'mouse', 'mouse,disable_multitouch')
+# a tapped button keeps its pressed colour at least this long (Kivy's
+# default 0.035 s is gone before a quick tap can be seen)
+PRESS_SHOW_S = 0.15
+Config.set('graphics', 'min_state_time', str(PRESS_SHOW_S))
 
 import applog
 from applog import log
@@ -569,25 +573,15 @@ class CopyOverlay(ModalTouch, FloatLayout):
     TARGETS = ['INC'] + ['SDM %d' % i for i in range(1, 21)]
 
     def populate(self, current_mode):
-        from kivy.uix.button import Button
-        from kivy.graphics import Color as _C, RoundedRectangle as _R
         grid = self.ids.grid
         grid.clear_widgets()
         self._buttons = {}
         self._selected = set()
         self._current = current_mode
         for name in self.TARGETS:
-            btn = Button(text=name, font_name=FONT, font_size=16,
-                         background_color=(0, 0, 0, 0), background_normal='',
-                         background_disabled_normal='',
-                         disabled=(name == current_mode),
-                         color=(0.4, 0.4, 0.4, 1) if name == current_mode else (0.8, 0.8, 0.8, 1))
-            with btn.canvas.before:
-                col = _C(0.16, 0.16, 0.16, 1)
-                rect = _R(size=btn.size, pos=btn.pos, radius=[(5, 5)] * 4)
-            btn._col = col
-            btn.bind(pos=lambda b, v, r=rect: setattr(r, 'pos', v),
-                     size=lambda b, v, r=rect: setattr(r, 'size', v))
+            btn = Factory.FlatButton(text=name, font_name=FONT, font_size=16,
+                                     disabled=(name == current_mode),
+                                     color=(0.4, 0.4, 0.4, 1) if name == current_mode else (0.8, 0.8, 0.8, 1))
             btn.bind(on_press=lambda b, n=name: self.toggle(n))
             grid.add_widget(btn)
             self._buttons[name] = btn
@@ -595,7 +589,7 @@ class CopyOverlay(ModalTouch, FloatLayout):
     def _paint(self, name):
         btn = self._buttons[name]
         on = name in self._selected
-        btn._col.rgba = (0, 0.5, 1, 1) if on else (0.16, 0.16, 0.16, 1)
+        btn.fill = (0, 0.5, 1, 1) if on else (0.16, 0.16, 0.16, 1)
         btn.color = (1, 1, 1, 1) if on else (0.8, 0.8, 0.8, 1)
 
     def toggle(self, name):
@@ -628,9 +622,7 @@ class BlePickerOverlay(ModalTouch, FloatLayout):
     """List of tap boards found by a scan; tap one to use it."""
 
     def populate(self, found, current):
-        from kivy.uix.button import Button
         from kivy.uix.label import Label
-        from kivy.graphics import Color as _C, RoundedRectangle as _R
         grid = self.ids.grid
         grid.clear_widgets()
         app = App.get_running_app()
@@ -641,16 +633,11 @@ class BlePickerOverlay(ModalTouch, FloatLayout):
             return
         for address, name, rssi in found:
             sel = (address == current)
-            btn = Button(text='%s\n%s   %s dBm' % (name or 'unnamed', address, rssi),
-                         font_name=FONT, font_size=15, halign='center',
-                         size_hint_y=None, height=64,
-                         background_color=(0, 0, 0, 0), background_normal='',
-                         color=(1, 1, 1, 1) if sel else (0.85, 0.85, 0.85, 1))
-            with btn.canvas.before:
-                _C(0, 0.5, 1, 1) if sel else _C(0.16, 0.16, 0.16, 1)
-                rect = _R(size=btn.size, pos=btn.pos, radius=[(5, 5)] * 4)
-            btn.bind(pos=lambda b, v, r=rect: setattr(r, 'pos', v),
-                     size=lambda b, v, r=rect: setattr(r, 'size', v))
+            btn = Factory.FlatButton(text='%s\n%s   %s dBm' % (name or 'unnamed', address, rssi),
+                                     font_name=FONT, font_size=15, halign='center',
+                                     size_hint_y=None, height=64,
+                                     fill=(0, 0.5, 1, 1) if sel else (0.16, 0.16, 0.16, 1),
+                                     color=(1, 1, 1, 1) if sel else (0.85, 0.85, 0.85, 1))
             btn.bind(on_press=lambda b, a=address, n=name: app.select_ble_board(a, n))
             grid.add_widget(btn)
 
@@ -2051,17 +2038,38 @@ class ServoCommanderApp(App):
             self._apply_mm(axis, 0.0)
 
     # ---- overlays --------------------------------------------------------
+    # popups open and close PRESS_SHOW_S after the tap, so the button that
+    # did it shows pressed first instead of being covered (or taken away)
+    # in the same instant.  The attribute changes at once: the app's state
+    # is never behind, only the picture.
     def _show(self, attr, widget):
         self._hide(attr)
         setattr(self, attr, widget)
-        self.stage.add_widget(widget)
+        if PRESS_SHOW_S > 0:
+            Clock.schedule_once(lambda dt: self._attach(attr, widget), PRESS_SHOW_S)
+        else:
+            self._attach(attr, widget)
         return widget
+
+    def _attach(self, attr, widget):
+        if widget.parent is None:
+            self.stage.add_widget(widget)
+        if getattr(self, attr, None) is not widget:     # closed before it showed
+            self._detach(widget)
 
     def _hide(self, attr):
         w = getattr(self, attr, None)
         if w is not None:
-            self.stage.remove_widget(w)
             setattr(self, attr, None)
+            if PRESS_SHOW_S > 0:
+                Clock.schedule_once(lambda dt: self._detach(w), PRESS_SHOW_S)
+            else:
+                self._detach(w)
+
+    @staticmethod
+    def _detach(widget):
+        if widget.parent is not None:
+            widget.parent.remove_widget(widget)
 
     def open_set(self, axis):
         self._show('_set_overlay', SetOverlay(axis=axis))
