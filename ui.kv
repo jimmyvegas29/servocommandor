@@ -3717,11 +3717,21 @@
                 size_hint_y: None
                 height: self.minimum_height
                 TapSeg:
+                    # a card like the rows under it (PadRow look)
                     label: 'Tap to'
+                    height: 46
+                    padding: [8, 3]
+                    canvas.before:
+                        Color:
+                            rgba: (1, 1, 1, 0.04)
+                        RoundedRectangle:
+                            size: self.size
+                            pos: self.pos
+                            radius: [(4, 4)] * 4
                     BoxLayout:
                         size_hint_x: None
-                        width: 220
-                        padding: [0, 3]
+                        width: 160
+                        padding: [0, 4]
                         SegButton:
                             text: 'Depth'
                             font_size: '11sp'
