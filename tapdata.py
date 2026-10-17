@@ -65,6 +65,9 @@ _ROWS = {
 # (key, label, family, pitch value, pitch unit, table row, derived-from label or '')
 _SIZES = [
     # UNC
+    # TEMPORARY (2026-10-16): 2-56 for the smallest-tap test.  Take it out
+    # when the test is done.
+    ('#2-56', '#2-56', 'UNC', 56, 'tpi', '0-2', ''),
     ('#8-32', '#8-32', 'UNC', 32, 'tpi', '8', ''),
     ('#10-24', '#10-24', 'UNC', 24, 'tpi', '10-24', ''),
     ('1/4-20', '1/4-20', 'UNC', 20, 'tpi', '1/4-20', ''),

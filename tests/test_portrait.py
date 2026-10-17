@@ -1397,7 +1397,7 @@ def tap_flow(dt):
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
     check('UNC sizes listed, smallest first', [b.text for b in th.ids.grid.children][::-1][:3],
-          ['#8-32', '#10-24', '1/4-20'])
+          ['#2-56', '#8-32', '#10-24'])        # #2-56 is temporary (tapdata.py)
     check('metric starts at M3', [t['label'] for t in tapdata.family('M')][:4], ['M3', 'M4', 'M5', 'M6'])
     check('UNF starts at #8-36, #10-32', [t['label'] for t in tapdata.family('UNF')][:2], ['#8-36', '#10-32'])
     btn = {b.text: b for b in th.ids.grid.children}
