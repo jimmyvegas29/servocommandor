@@ -347,4 +347,49 @@ cyc.start(165, 30, 20 * turn, 2 * turn, 150, False)
 run(cyc, sim)
 check('no peck: first stall backs right out', (cyc.reason, cyc.stalls, len(sim.turns_in)), (TapCycle.R_STALL, 1, 1))
 
+# 20. after a STOP the position keeps being followed: a jog in or out moves
+#     the depth, and REVERSE backs out from where the tap really is
+sim = SimDrive()
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False)
+while cyc.counts < 5 * turn:
+    cyc.step()
+cyc.abort(TapCycle.R_PANEL)
+check('stopped: following the position', cyc.tracking(), True)
+sim.enabled, sim.speed = True, 80                    # jog in (the node's J, not the cycle)
+for _ in range(60):
+    cyc.track()
+sim.enabled, sim.speed = False, 0
+deeper = cyc.counts
+check('jog in: the depth went up with it', (deeper > 5 * turn + turn // 2, round(sim.depth() / 100), round(deeper / 100)),
+      (True, round(sim.depth() / 100), round(sim.depth() / 100)))
+sim.enabled, sim.speed = True, -80                   # jog back out a little
+for _ in range(20):
+    cyc.track()
+sim.enabled, sim.speed = False, 0
+check('jog out: the depth went down', (cyc.counts < deeper, round(cyc.counts / 100)), (True, round(sim.depth() / 100)))
+cyc.reverse_out()
+run(cyc, sim)
+check('reverse after jogging: 2 turns out from the real depth', (cyc.state, round(sim.depth() / turn)),
+      (TapCycle.DONE, -2))
+check('done: still following', cyc.tracking(), True)
+sim.enabled, sim.speed = True, 40
+for _ in range(10):
+    cyc.track()
+check('done, jog in again: depth follows', round(cyc.counts / 100), round(sim.depth() / 100))
+sim.enabled, sim.speed = False, 0
+# a normal run loses it: no following, REVERSE refused (no end point)
+sim = SimDrive()
+cyc = TapCycle(sim)
+cyc.start(165, 30, 20 * turn, 2 * turn, 150, False)
+while cyc.counts < 3 * turn:
+    cyc.step()
+cyc.abort(TapCycle.R_PANEL)
+cyc.forget()
+check('forgotten: not followed, reverse refused', (cyc.tracking(), cyc.reverse_out(), cyc.state),
+      (False, False, TapCycle.HALTED))
+cyc.start(165, 30, 3 * turn, 2 * turn, 150, False)
+run(cyc, sim)
+check('a new START still works after that', (cyc.state, cyc.reason), (TapCycle.DONE, TapCycle.R_DEPTH))
+
 print('RESULT:', 'ALL PASS' if not fails else fails)

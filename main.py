@@ -2528,6 +2528,7 @@ class ServoCommanderApp(App):
     TAP_STALL_MS = 150
     TAP_SAME_TURNS = 0.5            # stalls this close (spindle turns) are "the same depth"
     TAP_NODE = (3, 17)
+    TAP_TRACK_NODE = (3, 19)        # follows the tap's depth through a jog after a pass
     TAP_MAX_MOTOR_RPM = 1000        # the node's cap
     # node TapCycle states and reasons
     T_IDLE, T_IN, T_OUT, T_DONE, T_HALTED, T_PECK = range(6)
@@ -2665,6 +2666,9 @@ class ServoCommanderApp(App):
         c = c or self.tap_config()
         return int(min(self.max_rpm / c['eff_ratio'], self.TAP_MAX_MOTOR_RPM / c['eff_ratio']))
 
+    def _tap_tracks(self):
+        return isinstance(self.dro, DroBle) and self.dro._node_at_least(*self.TAP_TRACK_NODE)
+
     def _tap_node_ok(self):
         return (isinstance(self.servo, NodeServo) and isinstance(self.dro, DroBle)
                 and self.dro._node_at_least(*self.TAP_NODE))
@@ -2698,6 +2702,7 @@ class ServoCommanderApp(App):
             self.tap_mode = True
             self.tap_state = 'ready'
             self._tap_result = ('', '')
+            self._tap_jogged = False
             self._tap_ref = None
             self._tap_pecks = 0
             self._tap_pecking = False
@@ -2740,6 +2745,7 @@ class ServoCommanderApp(App):
         self._tap_pecking = False
         self._tap_deepest = 0
         self._tap_result = ('', '')
+        self._tap_jogged = False
         c = self.tap_config()
         cpt = self.tap_counts_per_turn(c)
         motor = int(round(c['rpm'] * c['eff_ratio']))
@@ -2766,7 +2772,16 @@ class ServoCommanderApp(App):
     def tap_reverse(self):
         if self.tap_state != 'stopped' or not self._tap_lever_off():
             return False
+        if getattr(self, '_tap_jogged', False) and not self._tap_tracks():
+            # an older node did not follow the jog: its depth is stale and
+            # REVERSE would stop short with the tap still in the hole
+            self._tap_result = ('Jogged: back out with REV',
+                                'node %d.%d follows jogs' % self.TAP_TRACK_NODE)
+            log.info('TAP reverse refused: jogged on a node that does not follow it')
+            self._tap_tick(0)
+            return False
         self.servo.tap_reverse()
+        self._tap_jogged = False                 # backing out: the result shows again
         self._tap_seen_active = False
         self._tap_sent_at = time.monotonic()
         self.tap_state = 'out'
@@ -2879,6 +2894,15 @@ class ServoCommanderApp(App):
             self.tap_badge_color = [1, 1, 1, 1]
             self.tap_big_label = 'Depth' + ('  stall %d' % pecks if pecks else '')
             self.tap_big_text = self.css_len_text(now_mm)
+        elif st in ('stopped', 'done') and getattr(self, '_tap_jogged', False) and self._tap_tracks():
+            # jogged after the pass: the node follows the tap, so show where
+            # it is now (deeper with FWD, less with REV) and move the bar
+            stopped = st == 'stopped'
+            self.tap_badge, self.tap_badge_color = ('STOPPED', amber) if stopped else ('DONE', green)
+            self.tap_fill = amber if stopped else green
+            self.tap_frac = min(1.0, now_mm / target) if target > 0 else 0.0
+            self.tap_big_label = 'Depth  jogged'
+            self.tap_big_text = self.css_len_text(max(0.0, self.tap_counts_to_mm(node['counts'], c)))
         elif st == 'stopped':
             self.tap_badge, self.tap_badge_color = 'STOPPED', amber
             self.tap_fill = amber
@@ -2915,6 +2939,8 @@ class ServoCommanderApp(App):
             return False
         self._tap_jog_speed = motor if direction == 'fwd' else -motor
         self._tap_jog_spindle = shown
+        if self.tap_state in ('stopped', 'done'):
+            self._tap_jogged = True              # the card shows the live depth from now on
         self.tap_jogging = direction
         self.tap_can_start = False
         self._gui_cmd_until = time.monotonic() + 3600     # the poller must not fight it

@@ -101,7 +101,7 @@ from machine import Pin, UART, WDT, RTC, unique_id, reset, reset_cause
 import rp2
 
 # ---------------------------------------------------------------- config
-VERSION = 'node 3.18'         # shown on the panel; bump on every change
+VERSION = 'node 3.19'         # shown on the panel; bump on every change
 CONTROL_ALLOWED = True       # control path signed off with Jimmy at the lathe 2026-09-11
 LOCK_FILE = 'panel.lock'
 TRIAL_FLAG = 'trial.flag'    # set by the launcher on the first boot of a new image
@@ -645,9 +645,30 @@ class TapCycle:
         self._rate_c = self.counts
         self.io.set_speed(speed)
 
+    # After a pass (stopped in the hole, or done) the position keeps being
+    # followed, so a jog or a hand turn of the chuck moves the tap's depth
+    # too and REVERSE still knows how far in it is.  Only while the spindle
+    # is slow (jog, hand): at cutting speed 100 ms polls are too far apart
+    # to unwrap, so a normal run forgets the position instead.
+    def tracking(self):
+        return self.state in (self.HALTED, self.DONE) and self._sign != 0 and self._last is not None
+
+    def track(self):
+        self._read_position()
+
+    def forget(self):
+        self._last = None
+        self._sign = 0
+        self.io.log('TAP position no longer followed (drive ran)')
+
     def reverse_out(self):
         """From HALTED: back the tap out to margin past the origin."""
         if self.state != self.HALTED or self._limits is None:
+            return False
+        if self._sign == 0 or self._last is None:
+            # the position was lost (the drive ran since): the way out has
+            # no end point
+            self.io.log('TAP reverse refused: position not followed')
             return False
         # the halt put the normal limit back: cap it again for the way out
         if not (self.io.write(65, self.tlim) and self.io.write(66, -self.tlim)):
@@ -1154,6 +1175,11 @@ async def drive_poller():
         if state['online'] != last_online:
             print('DRIVE', 'online' if state['online'] else 'offline')
             last_online = state['online']
+        if state['online'] and tap.tracking():
+            if state['enabled'] and not state['jogging']:
+                tap.forget()                     # a normal run: too fast to follow
+            else:
+                tap.track()                      # jog or hand: the tap's depth moves too
         await asyncio.sleep_ms(POLL_MS)
 
 

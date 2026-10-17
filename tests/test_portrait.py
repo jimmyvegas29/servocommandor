@@ -1650,6 +1650,51 @@ def tap_flow(dt):
     fake.switch = 'neutral'
     app._poll_ui(0)
 
+    # jogging after a STOP: a node that follows the tap (3.19) moves the
+    # depth and the bar with it; an older one can't, so REVERSE is refused
+    def node_t(state, reason=0, turns=0.0, peak=0.0):
+        fake.tap = {'state': state, 'reason': reason, 'counts': int(turns * cpt), 'peak': int(peak * cpt)}
+        app._tap_tick(0)
+    app.tap_startstop()                          # START
+    node_t(1, 0, 3.0)
+    app.tap_startstop()                          # STOP
+    node_t(4, 3, 3.0)
+    check('jog after stop: stopped at 3 turns', (app.tap_state, app.tap_big_label), ('stopped', 'Stopped'))
+    fake.node_version = 'node 3.19'
+    app.tap_jog_press('fwd')
+    node_t(4, 3, 4.0)
+    check('jog FWD (node 3.19): depth goes up live', (app.tap_big_label, app.tap_big_text),
+          ('Depth  jogged', app.css_len_text(app.tap_counts_to_mm(int(4.0 * cpt), app.tap_config()))))
+    app.tap_jog_release()
+    app.tap_jog_press('rev')
+    node_t(4, 3, 2.5)
+    app.tap_jog_release()
+    check('jog REV: depth goes down, still shown after release', app.tap_big_text,
+          app.css_len_text(app.tap_counts_to_mm(int(2.5 * cpt), app.tap_config())))
+    n = len(fake.sent)
+    check('REVERSE allowed after the jog (node follows)', (app.tap_reverse(), fake.sent[n:]), (True, [b'U']))
+    node_t(2, 9, 1.0)
+    node_t(3, 9, -2.0, 2.5)
+    check('backed out: the jog display ends', app.tap_big_label, 'Backed out from')
+    # the same on an older node
+    fake.node_version = 'node 3.18'
+    app.tap_startstop()
+    node_t(1, 0, 3.0)
+    app.tap_startstop()
+    node_t(4, 3, 3.0)
+    app.tap_jog_press('fwd')
+    node_t(4, 3, 3.0)                            # 3.18 does not follow: counts stay
+    app.tap_jog_release()
+    n = len(fake.sent)
+    check('older node: REVERSE after a jog refused, says why', (app.tap_reverse(), fake.sent[n:], app.tap_big_label),
+          (False, [], 'Jogged: back out with REV'))
+    app.tap_jog_press('rev')
+    app.tap_jog_release()
+    app.tap_exit()
+    app.tap_activate()
+    fake.node_version = 'node 3.17'
+    fake.tap = {'state': 0, 'reason': 0, 'counts': 0, 'peak': 0}
+
     # the card's top line and the button: one line, nothing cut off, for
     # every thread in the table beside the widest badge
     from kivy.core.text import Label as CoreLabel
