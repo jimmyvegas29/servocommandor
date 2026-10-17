@@ -517,10 +517,14 @@ class TapOverlay(ModalTouch, FloatLayout):
         elif problem:
             self.live_text = problem
         else:
-            turns = c['depth_mm'] / c['pitch_mm']
-            text = '%s %s = %s turns at %d rpm%s, cap %d %%' % (
-                'Max depth' if c['mode'] == 'bottom' else 'Depth', self.depth, fmt_num(turns, 1),
-                c['rpm'], ' in BACK GEAR' if c['bg'] else '', c['tlim'])
+            gear = ' in BACK GEAR' if c['bg'] else ''
+            if c['mode'] == 'bottom':
+                text = 'To the bottom at %d rpm%s, cap %d %%: %d stalls at the same depth end it' % (
+                    c['rpm'], gear, c['tlim'], c['confirm'])
+            else:
+                turns = c['depth_mm'] / c['pitch_mm']
+                text = 'Depth %s = %s turns at %d rpm%s, cap %d %%' % (
+                    self.depth, fmt_num(turns, 1), c['rpm'], gear, c['tlim'])
             self.live_text = text
 
     def primary(self):

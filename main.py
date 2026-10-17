@@ -2584,6 +2584,7 @@ class ServoCommanderApp(App):
                 'hand': 'lh' if sp.get('tap_hand') == 'lh' else 'rh'}
 
     TAP_CAP_MAX = 300               # the node's hard cap for a tap pass (the drive's maximum)
+    TAP_NO_DEPTH = 0x7FFFFFFF       # 'to the bottom': a depth target no pass can reach
 
     def tap_auto_cap(self, thread, drag=None, ratio=None, direct=True):
         """Torque cap (drive %) for a thread from the table: drag + the
@@ -2675,8 +2676,8 @@ class ServoCommanderApp(App):
             return 'Needs the machine node on firmware %d.%d or newer (UPDATE NODE)' % self.TAP_NODE
         if c['bg'] and c['bg_ratio'] <= 0:
             return 'Back gear is not calibrated: CALIBRATE BACK GEAR on the Drive page first'
-        if c['depth_mm'] <= 0:
-            return 'Enter the %s' % ('max depth' if c['mode'] == 'bottom' else 'depth')
+        if c['mode'] == 'depth' and c['depth_mm'] <= 0:
+            return 'Enter the depth'
         if c['tlim'] <= 0:
             return 'Custom thread: set the torque limit by hand'
         if not 5 <= c['rpm'] <= self.tap_max_rpm(c):
@@ -2743,7 +2744,9 @@ class ServoCommanderApp(App):
         cpt = self.tap_counts_per_turn(c)
         motor = int(round(c['rpm'] * c['eff_ratio']))
         speed = motor if c['hand'] == 'rh' else -motor
-        target = self.tap_mm_to_counts(c['depth_mm'], c)
+        # to the bottom has no depth: a target it can never reach, so only
+        # the stalls (the load) end the pass
+        target = self.TAP_NO_DEPTH if c['mode'] == 'bottom' else self.tap_mm_to_counts(c['depth_mm'], c)
         margin = int(round(c['margin'] * cpt))
         peck = int(round(c['peck'] * cpt))
         self.servo.tap_start(speed, c['tlim'], target, margin, self.TAP_STALL_MS, False,
@@ -2791,6 +2794,8 @@ class ServoCommanderApp(App):
             # the node stalled at the same depth tap_confirm times in a row
             # (a chip break between each) and has backed right out
             self._tap_ref = deepest
+            if c['mode'] == 'bottom':
+                self._tap_bottom_mm = self.tap_counts_to_mm(deepest, c)
             self._tap_finish('Bottom' if c['mode'] == 'bottom' else 'Short of depth', deepest, c)
         elif reason == self.R_GIVEUP:
             self._tap_ref = deepest
@@ -2839,7 +2844,9 @@ class ServoCommanderApp(App):
         st = self.tap_state
         green, amber, blue = [0.4, 0.85, 0.5, 1], [0.95, 0.75, 0.3, 1], [0, 0.5, 1, 1]
         self.tap_setup_text = self.tap_card_text(c)
-        target = c['depth_mm']
+        # the bar's full scale: the depth, or to the bottom the last hole's bottom
+        bottom = c['mode'] == 'bottom'
+        target = getattr(self, '_tap_bottom_mm', 0.0) if bottom else c['depth_mm']
         now_mm = max(0.0, self.tap_counts_to_mm(node['counts'], c)) if st != 'ready' else 0.0
         marks = [(i / 10.0, 'minor') for i in range(1, 10)]
         ref = getattr(self, '_tap_ref', None)
@@ -2848,8 +2855,8 @@ class ServoCommanderApp(App):
         self.tap_marks = marks
         self.tap_frac = min(1.0, now_mm / target) if target > 0 else 0.0
         self.tap_left_text = '0'
-        self.tap_right_text = (('max ' if c['mode'] == 'bottom' else '') + self.css_len_text(target)
-                               if target > 0 else '-')
+        self.tap_right_text = (('last ' if bottom else '') + self.css_len_text(target)
+                               if target > 0 else ('bottom' if bottom else '-'))
         self.tap_btn_text = {'in': 'STOP', 'out': 'STOP', 'stopped': 'REVERSE'}.get(st, 'START')
         blocked = self.tap_problem(c)
         if not blocked and st in ('ready', 'done'):
@@ -3153,14 +3160,9 @@ class ServoCommanderApp(App):
                                  o.set_pitch, 'SET', allow_dot=True)
         elif key == 'tap_depth':
             o = self._tap
-            c = self.tap_config()
             unit = 'in' if self.units == 'in' else 'mm'
-            if c['mode'] == 'bottom':
-                ov.setup_generic('Max depth', 'Safety stop if it never bottoms', unit, 0.01,
-                                 99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
-            else:
-                ov.setup_generic('Depth', 'Thread depth from where the tap starts', unit, 0.01,
-                                 99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
+            ov.setup_generic('Depth', 'Thread depth from where the tap starts', unit, 0.01,
+                             99 if unit == 'in' else 2500, o.depth, o.set_depth, 'SET', allow_dot=True)
         elif key == 'tap_confirm':
             o = self._tap
             ov.setup_generic('Stalls for bottom', 'Stalls in a row at the same depth that mean the bottom', '',

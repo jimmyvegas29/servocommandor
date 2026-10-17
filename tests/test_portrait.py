@@ -1384,8 +1384,24 @@ def tap_flow(dt):
     o.refresh()
     check('tap setup: thread and auto cap', (o.thread_text, o.tlim_text, o.tlim_hint),
           ('M6 x 1', 'auto %d %%' % auto_cap, '30 in-lb clutch setting (as #12) + drag'))
-    check('tap setup: ready to activate', (o.ok, o.live_text.split('. ')[0]),
-          (True, 'Max depth %s = 10 turns at 100 rpm, cap %d %%' % (app.css_len_text(10.0), auto_cap)))
+    check('tap setup: to the bottom needs no depth', (o.ok, o.live_text),
+          (True, 'To the bottom at 100 rpm, cap %d %%: 2 stalls at the same depth end it' % auto_cap))
+    app.save_speed_pad(tap_depth_mm=0)
+    o.refresh()
+    check('... not even an empty one', o.ok, True)
+    check('to the bottom: the Depth row is greyed out', o.ids.depth_row.off, True)
+    key = [w for w in o.ids.depth_row.walk() if type(w).__name__ == 'SetKey'][0]
+    check('... its EDIT key is disabled', key.disabled, True)
+    app.save_speed_pad(tap_mode='depth')
+    o.refresh()
+    check('to a depth: the Depth row is live', o.ids.depth_row.off, False)
+    check('... its EDIT key works again', key.disabled, False)
+    check('to a depth: the depth is required', (o.ok, o.live_text), (False, 'Enter the depth'))
+    app.save_speed_pad(tap_depth_mm=10.0)
+    o.refresh()
+    check('to a depth: ready', (o.ok, o.live_text.split('. ')[0]),
+          (True, 'Depth %s = 10 turns at 100 rpm, cap %d %%' % (app.css_len_text(10.0), auto_cap)))
+    app.save_speed_pad(tap_mode='bottom')
     check('motor torque and ratio feed the cap', tapdata.pct_of_spindle(50, 6.0, 1.65) > 56, True)
     app.settings['motor_rated_nm'] = 3.0
     check('smaller motor -> bigger percent for the same tap', app.tap_config()['tlim'],
@@ -1397,7 +1413,7 @@ def tap_flow(dt):
     check('thread picker opens on the thread family', (th is not None, th.family), (True, 'M'))
     th.set_family('UNC')
     check('UNC sizes listed, smallest first', [b.text for b in th.ids.grid.children][::-1][:3],
-          ['#2-56', '#8-32', '#10-24'])        # #2-56 is temporary (tapdata.py)
+          ['#8-32', '#10-24', '1/4-20'])
     check('metric starts at M3', [t['label'] for t in tapdata.family('M')][:4], ['M3', 'M4', 'M5', 'M6'])
     check('UNF starts at #8-36, #10-32', [t['label'] for t in tapdata.family('UNF')][:2], ['#8-36', '#10-32'])
     btn = {b.text: b for b in th.ids.grid.children}
@@ -1515,18 +1531,18 @@ def tap_flow(dt):
     app.tap_startstop()
     speed, tlim, target, margin, stall_ms, keep = last_T()
     check('START sends the hole', (speed, tlim, target, margin, stall_ms, keep),
-          (round(100 * app.ratio), auto_cap_now, round(10 * cpt), round(2 * cpt), 150, 0))
+          (round(100 * app.ratio), auto_cap_now, app.TAP_NO_DEPTH, round(2 * cpt), 150, 0))
     cmd = [c_ for c_ in fake.sent if c_[:1] == b'T'][-1]
     pk, confirm, same = struct.unpack('<HBB', cmd[16:20])
     check('... with the chip break: 2 turns back, 2 stalls, half a turn is "same"',
           (len(cmd), round(pk * 64 / cpt, 1), confirm, round(same * 256 / cpt, 1)), (20, 2.0, 2, 0.5))
     node(1, 0, 3.0)
     check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
-          ('in', 'TAPPING', app.css_len_text(3.0), 0.3))
+          ('in', 'TAPPING', app.css_len_text(3.0), 0.0))        # no bottom known yet: no scale
     node(5, 0, 6.0, 6.3)
     check('stall: shown while it backs off', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_btn_text),
           ('in', 'STALL', 'Depth  stall 1', 'STOP'))
-    check('stall point marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
+    check('no stall mark without a scale', [k for _f, k in app.tap_marks].count('major'), 0)
     node(5, 0, 4.5, 6.3)
     check('still the same stall while it backs off', app._tap_pecks, 1)
     node(1, 0, 5.5, 6.3)
@@ -1539,6 +1555,8 @@ def tap_flow(dt):
     check('bottom found: done', (app.tap_state, app.tap_badge, app.tap_big_label, app.tap_big_text),
           ('done', 'DONE', 'Bottom', app.css_len_text(6.3)))
     check('bottom marked on the bar', [k for _f, k in app.tap_marks].count('major'), 1)
+    check('the next hole is scaled to this bottom', (app.tap_right_text, round(app.tap_frac, 2)),
+          ('last ' + app.css_len_text(6.3), 1.0))
     sent = len([c_ for c_ in fake.sent if c_[:1] == b'T'])
     app._tap_tick(0)
     app._tap_tick(0)
