@@ -1367,8 +1367,9 @@ def tap_flow(dt):
                        tap_rpm=100, tap_tlim_manual=0, tap_margin=2.0, tap_hand='rh', tap_drag={})
     app.settings['motor_rated_nm'] = 6.0
     app.settings.setdefault('drive_params', {})['70'] = 300
-    # M6x1 uses the #12 row (next smaller inch size): 30 in-lb clutch setting
-    auto_cap = int(round(tapdata.pct_of_spindle(30, 6.0, app.ratio)))
+    # M6x1 uses the #12 row (next smaller inch size): breaks at 70 in-lb,
+    # the cap is 90 % of that
+    auto_cap = int(round(tapdata.pct_of_spindle(63, 6.0, app.ratio)))
 
     def node(state, reason=0, turns=0.0, peak=0.0):
         fake.tap = {'state': state, 'reason': reason, 'counts': int(turns * cpt), 'peak': int(peak * cpt)}
@@ -1383,7 +1384,7 @@ def tap_flow(dt):
     o = app._tap
     o.refresh()
     check('tap setup: thread and auto cap', (o.thread_text, o.tlim_text, o.tlim_hint),
-          ('M6 x 1', 'auto %d %%' % auto_cap, '30 in-lb clutch setting (as #12) + drag'))
+          ('M6 x 1', 'auto %d %%' % auto_cap, '63 in-lb at the tap: 90 % of 70 breaking (as #12) + drag'))
     check('tap setup: to the bottom needs no depth', (o.ok, o.live_text),
           (True, 'To the bottom at 100 rpm, cap %d %%: 2 stalls at the same depth end it' % auto_cap))
     app.save_speed_pad(tap_depth_mm=0)
@@ -1405,7 +1406,7 @@ def tap_flow(dt):
     check('motor torque and ratio feed the cap', tapdata.pct_of_spindle(50, 6.0, 1.65) > 56, True)
     app.settings['motor_rated_nm'] = 3.0
     check('smaller motor -> bigger percent for the same tap', app.tap_config()['tlim'],
-          int(round(tapdata.pct_of_spindle(30, 3.0, app.ratio))))
+          int(round(tapdata.pct_of_spindle(63, 3.0, app.ratio))))
     app.settings['motor_rated_nm'] = 6.0
     # thread picker
     app.open_pad_edit('tap_thread')
@@ -1423,9 +1424,9 @@ def tap_flow(dt):
           (app._threads is th, [b.text for b in th.ids.grid.children if b.active]), (True, ['1/4-20']))
     th._picked()                                   # the quarter second is up
     c = app.tap_config()
-    check('picked 1/4-20: 20 TPI, 50 in-lb clutch', (app._threads, round(c['pitch_mm'], 3), c['thread']['clutch'],
-                                                     c['tlim']),
-          (None, 1.27, 50, int(round(tapdata.pct_of_spindle(50, 6.0, app.ratio)))))
+    check('picked 1/4-20: 20 TPI, breaks at 100 in-lb, cap 90', (app._threads, round(c['pitch_mm'], 3),
+                                                               c['thread']['break'], c['tlim']),
+          (None, 1.27, 100, int(round(tapdata.pct_of_spindle(90, 6.0, app.ratio)))))
     # custom pitch has no torque data: the cap must be set by hand
     app.open_threads()
     th = app._threads
@@ -1450,39 +1451,39 @@ def tap_flow(dt):
     o.refresh()
     check('1/2-13: capped by the lathe, still allowed', (o.ok, o.tlim_text, o.tlim_hint),
           (True, 'auto 300 %', "lathe max: can't break this tap"))
-    # sizes with a hand-set direct-drive cap use it instead of the clutch setting
+    # every size: 90 % of its breaking torque, never under the most it
+    # takes to cut, at most the lathe's 300 %
     app.save_speed_pad(tap_thread='5/16-18')
     o.refresh()
-    check('5/16-18: 180 %, and what that is at the tap', (o.tlim_text, o.tlim_hint),
-          ('auto 180 %', 'set for this size: about %d in-lb at the tap' % round(
-              (180 - (app.tap_config()['drag'] or 0)) / 100.0 * app.motor_rated_nm() * app.ratio * 8.8507)))
-    app.save_speed_pad(tap_thread='5/16-24')
-    check('5/16-24: same size, same cap', app.tap_config()['tlim'], 180)
+    p516 = int(round(tapdata.pct_of_spindle(135, 6.0, app.ratio)))
+    check('5/16-18: 90 % of 150 in-lb', (o.tlim_text, o.tlim_hint),
+          ('auto %d %%' % p516, '135 in-lb at the tap: 90 % of 150 breaking + drag'))
     app.save_speed_pad(tap_thread='3/8-16')
     o.refresh()
-    check('3/8-16: 300 %', (app.tap_config()['tlim'], o.tlim_text), (300, 'auto 300 %'))
-    app.save_speed_pad(tap_thread='1/4-20')
-    check('1/4-20: still the clutch setting', (app.tap_config()['cap_fixed'], app.tap_config()['tlim'] < 100),
-          (False, True))
+    check('3/8-16: 90 % of 260 in-lb, under the lathe max',
+          (app.tap_config()['tlim'], app.tap_config()['lathe_capped']),
+          (int(round(tapdata.pct_of_spindle(234, 6.0, app.ratio))), False))
+    for t in tapdata.THREADS:
+        check('%s: cap is above the most it takes to cut' % t['label'], t['cap_in_lb'] >= t['max'], True)
     o.set_tlim(140)
     app.save_speed_pad(tap_thread='5/16-18')
     check('a hand-typed limit still wins', (app.tap_config()['tlim'], app.tap_config()['auto']), (140, False))
     o.set_tlim(0)
     app.settings['back_gear_ratio'] = 11.8
     app.save_speed_pad(tap_bg=True)
-    check('back gear: the direct-drive cap is NOT used', (app.tap_config()['cap_fixed'], app.tap_config()['tlim'] < 60),
-          (False, True))
+    check('back gear: the same 135 in-lb through the back gear',
+          app.tap_config()['tlim'], int(round(tapdata.pct_of_spindle(135, 6.0, 11.8))))
     app.save_speed_pad(tap_bg=False, tap_thread='1/2-13')
     app.settings['back_gear_ratio'] = 0
     o.refresh()
     # the small sizes (how small a tap the lathe can drive): from the table
-    for key, label, clutch in (('#8-32', '#8-32', 25), ('#10-24', '#10-24', 30), ('#8-36', '#8-36', 25),
-                               ('#10-32', '#10-32', 25), ('M3x0.5', 'M3', 20),
-                               ('M4x0.7', 'M4', 20), ('M5x0.8', 'M5', 30)):
+    for key, label, brk in (('#8-32', '#8-32', 60), ('#10-24', '#10-24', 60), ('#8-36', '#8-36', 60),
+                            ('#10-32', '#10-32', 60), ('M3x0.5', 'M3', 50),
+                            ('M4x0.7', 'M4', 50), ('M5x0.8', 'M5', 60)):
         app.save_speed_pad(tap_thread=key)
         c = app.tap_config()
-        check('small size %s: in the table, auto cap from its %d in-lb' % (key, clutch),
-              (c['thread']['label'], c['thread']['clutch'], c['auto'], c['tlim'] > 0), (label, clutch, True, True))
+        check('small size %s: in the table, breaks at %d in-lb' % (key, brk),
+              (c['thread']['label'], c['thread']['break'], c['auto'], c['tlim'] > 0), (label, brk, True, True))
     o.refresh()
     check('no material line any more', 'needs ~' in o.live_text or 'estimate' in o.live_text, False)
     app.save_speed_pad(tap_thread='M6x1')
@@ -1767,8 +1768,8 @@ def tap_flow(dt):
     eff = round(app.ratio * 7.0, 3)
     check('back gear: effective ratio', round(c['eff_ratio'], 4), round(eff, 4))
     check('back gear: no bg drag measured -> none used', c['drag'], None)
-    check('back gear: cap from the clutch setting through the back gear',
-          c['tlim'], int(round(tapdata.pct_of_spindle(300, 6.0, eff))))
+    check('back gear: 90 % of the breaking torque through the back gear',
+          c['tlim'], int(round(tapdata.pct_of_spindle(540, 6.0, eff))))
     check('back gear: counts per spindle turn', app.tap_counts_per_turn(c), 10000 * eff)
     check('back gear: max tapping rpm', app.tap_max_rpm(c), int(min(app.max_rpm, 1000) / eff))
     app.tap_activate()

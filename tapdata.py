@@ -1,10 +1,10 @@
 """Tap sizes and tapping torque for the Tap tool.
 
-Torque rows (inch-pounds, at the tap) are Tapmatic's published "Torque
-Setting Data For HSS Straight Flute Plug Taps": minimum and maximum tapping
-torque, breaking torque of a low- and a high-strength tap, and the clutch
-setting Tapmatic recommends for its torque-limiting heads (the "normal"
-column).  The panel uses that clutch setting as the torque cap.
+Torque rows (inch-pounds, at the tap) are from Tapmatic's published "Torque
+Setting Data For HSS Straight Flute Plug Taps": the tapping torque (least
+and most it takes to cut the thread) and the breaking torque of an HSS tap.
+The auto torque cap is BREAK_SHARE of the breaking torque (plus spindle
+drag): always above the most it takes to cut, never at the break.
 https://www.tapmatic.com/tapping_questions_torque_setting_data_for_hss.ydev
 
 The small sizes (#8 and #10, M3, M4, M5) are there to find how small a
@@ -15,51 +15,40 @@ errs low (they are marked derived).
 
 IN_LB_PER_NM = 8.8507
 
-# Torque caps set by hand for a nominal size, as the drive's torque limit in
-# % (drag included), DIRECT DRIVE only.  They replace the clutch setting,
-# which stalled these taps in ordinary cutting.  Jimmy's test values,
-# 2026-10-01: 180 % is about 142 in-lb at a 5/16 tap (an HSS one breaks at
-# 150); 300 % is the drive's maximum, more than the motor gives (a 3/8 HSS
-# tap breaks at 260 in-lb, the motor reaches about 195).
-CAP_PCT_DIRECT = {'5/16': 180, '3/8': 300}
-
-
-def cap_pct_direct(thread):
-    """The hand-set direct-drive cap for this thread's size, or None."""
-    if thread is None or thread.get('unit') != 'tpi':
-        return None
-    return CAP_PCT_DIRECT.get(thread['label'].split('-')[0])
+# Jimmy, 2026-10-16: every size gets 90 % of its breaking torque (the
+# old clutch-setting caps sat below what a 1/4-20 needs to cut).
+BREAK_SHARE = 0.90
 
 # major diameter, mm, of the numbered and fractional sizes
 _DIA = {'#0': 1.524, '#1': 1.854, '#2': 2.184, '#3': 2.515, '#4': 2.845, '#5': 3.175, '#6': 3.505,
         '#8': 4.166, '#10': 4.826, '#12': 5.486, '1/4': 6.35, '5/16': 7.9375, '3/8': 9.525,
         '7/16': 11.1125, '1/2': 12.7, '9/16': 14.2875, '5/8': 15.875, '3/4': 19.05}
 
-# row: (min tapping, max tapping, break low, break high, clutch setting), in-lb
+# row: (min tapping, max tapping, breaking), in-lb
 _ROWS = {
-    '0-2': (10, 18, 25, 50, 20),
-    '3-4': (10, 20, 30, 50, 20),
-    '5-6': (10, 20, 30, 50, 20),
-    '8': (20, 30, 40, 60, 25),
-    '10-32': (20, 30, 40, 60, 25),
-    '10-24': (25, 50, 40, 60, 30),
-    '12': (25, 50, 40, 70, 30),
-    '1/4-28': (30, 60, 50, 100, 40),
-    '1/4-20': (40, 80, 50, 100, 50),
-    '5/16-24': (40, 80, 75, 150, 60),
-    '5/16-18': (60, 120, 75, 150, 90),
-    '3/8-24': (60, 120, 180, 260, 90),
-    '3/8-16': (100, 200, 180, 260, 130),
-    '7/16-20': (80, 160, 180, 300, 130),
-    '7/16-14': (100, 200, 180, 300, 200),
-    '1/2-20': (100, 250, 300, 600, 300),
-    '1/2-13': (150, 300, 300, 600, 300),
-    '9/16-18': (150, 350, 500, 800, 350),
-    '9/16-12': (200, 500, 500, 800, 350),
-    '5/8-18': (200, 600, 800, 1200, 450),
-    '5/8-11': (300, 800, 800, 1200, 450),
-    '3/4-16': (300, 800, 1000, 1500, 650),
-    '3/4-10': (500, 1000, 1000, 1500, 650),
+    '0-2': (10, 18, 50),
+    '3-4': (10, 20, 50),
+    '5-6': (10, 20, 50),
+    '8': (20, 30, 60),
+    '10-32': (20, 30, 60),
+    '10-24': (25, 50, 60),
+    '12': (25, 50, 70),
+    '1/4-28': (30, 60, 100),
+    '1/4-20': (40, 80, 100),
+    '5/16-24': (40, 80, 150),
+    '5/16-18': (60, 120, 150),
+    '3/8-24': (60, 120, 260),
+    '3/8-16': (100, 200, 260),
+    '7/16-20': (80, 160, 300),
+    '7/16-14': (100, 200, 300),
+    '1/2-20': (100, 250, 600),
+    '1/2-13': (150, 300, 600),
+    '9/16-18': (150, 350, 800),
+    '9/16-12': (200, 500, 800),
+    '5/8-18': (200, 600, 1200),
+    '5/8-11': (300, 800, 1200),
+    '3/4-16': (300, 800, 1500),
+    '3/4-10': (500, 1000, 1500),
 }
 
 # (key, label, family, pitch value, pitch unit, table row, derived-from label or '')
@@ -111,14 +100,14 @@ FAMILIES = [('UNC', 'UNC'), ('UNF', 'UNF'), ('M', 'Metric'), ('MF', 'M fine')]
 
 def _entry(t):
     key, label, fam, pitch, unit, row, derived = t
-    mn, mx, blo, bhi, clutch = _ROWS[row]
+    mn, mx, brk = _ROWS[row]
     if unit == 'tpi':
         dia = _DIA[label.split('-')[0]]
     else:
         dia = float(key[1:].split('x')[0])
     return {'key': key, 'label': label, 'family': fam, 'pitch': pitch, 'unit': unit, 'dia_mm': dia,
             'pitch_mm': 25.4 / pitch if unit == 'tpi' else float(pitch),
-            'min': mn, 'max': mx, 'break_lo': blo, 'break_hi': bhi, 'clutch': clutch,
+            'min': mn, 'max': mx, 'break': brk, 'cap_in_lb': BREAK_SHARE * brk,
             'derived': derived}
 
 
