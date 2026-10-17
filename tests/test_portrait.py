@@ -1535,8 +1535,8 @@ def tap_flow(dt):
           (round(100 * app.ratio), auto_cap_now, app.TAP_NO_DEPTH, round(2 * cpt), 150, 0))
     cmd = [c_ for c_ in fake.sent if c_[:1] == b'T'][-1]
     pk, confirm, same = struct.unpack('<HBB', cmd[16:20])
-    check('... with the chip break: 2 turns back, 2 stalls, half a turn is "same"',
-          (len(cmd), round(pk * 64 / cpt, 1), confirm, round(same * 256 / cpt, 1)), (20, 2.0, 2, 0.5))
+    check('... with the chip break: 2 turns back, 2 stalls, a quarter turn is "same"',
+          (len(cmd), round(pk * 64 / cpt, 1), confirm, round(same * 256 / cpt, 2)), (20, 2.0, 2, 0.25))
     node(1, 0, 3.0)
     check('tapping: depth shows', (app.tap_state, app.tap_badge, app.tap_big_text, round(app.tap_frac, 2)),
           ('in', 'TAPPING', app.css_len_text(3.0), 0.0))        # no bottom known yet: no scale

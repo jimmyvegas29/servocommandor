@@ -2526,7 +2526,10 @@ class ServoCommanderApp(App):
     tap_jog_shown = NumericProperty(0)      # the spindle rpm they run at
     TAP_COUNTS_PER_REV = 10000      # XP200 encoder counts per motor rev: verify at the first test
     TAP_STALL_MS = 150
-    TAP_SAME_TURNS = 0.5            # stalls this close (spindle turns) are "the same depth"
+    # stalls this close (spindle turns) are "the same depth".  Jimmy,
+    # 2026-10-17: half a turn called a 1/4-20 still gaining 0.4 turn a pass
+    # the bottom; a quarter turn lets it keep progressing
+    TAP_SAME_TURNS = 0.25
     TAP_NODE = (3, 17)
     TAP_TRACK_NODE = (3, 19)        # follows the tap's depth through a jog after a pass
     TAP_MAX_MOTOR_RPM = 1000        # the node's cap
